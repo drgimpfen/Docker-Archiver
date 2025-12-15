@@ -19,7 +19,7 @@ app.secret_key = os.urandom(24)
 # --- Configuration ---
 DATABASE_URL = os.environ.get('DATABASE_URL')
 LOCAL_STACKS_PATH = '/local'
-CONTAINER_BACKUP_DIR = '/var/backups/docker'  # Hardcoded internal backup path
+CONTAINER_BACKUP_DIR = '/archives'  # Internal backup path inside the container
 
 # WebAuthn Configuration
 RP_ID = 'localhost'  # Relying Party ID - should be your domain in production

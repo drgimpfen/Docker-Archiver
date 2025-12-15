@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  webapp:
+  app:
     build: .
     ports:
       - "5000:5000"
@@ -9,11 +9,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt/stacks:/local/stacks
       - /opt/dockge:/local/dockge
-      - /var/backups/docker:/var/backups/docker
+      - /var/backups/docker:/archives
       - ./webapp_data:/data
     environment:
       - DATABASE_URL=postgresql://user:password@db:5432/docker_archiver
-    user: root
     depends_on:
       - db
 
