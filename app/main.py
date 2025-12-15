@@ -115,10 +115,15 @@ def init_db():
     conn.close()
 
 def initialize_app():
-    """Initialize application resources (run at import time for WSGI servers)."""
-    init_db()
+    """Initialize application resources (run in background to avoid blocking worker start)."""
+    try:
+        # Run DB init in a background thread so WSGI workers don't block if Postgres is slow to start
+        threading.Thread(target=init_db, daemon=True).start()
+    except Exception:
+        # Fallback: attempt init synchronously
+        init_db()
 
-# Ensure DB is initialized when the module is imported (e.g., under Gunicorn)
+# Start initialization in background at import time
 initialize_app()
 
 def get_setting(key):
