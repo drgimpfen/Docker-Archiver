@@ -114,10 +114,12 @@ def init_db():
         conn.commit()
     conn.close()
 
-@app.before_first_request
 def initialize_app():
-    """Run before the first request."""
+    """Initialize application resources (run at import time for WSGI servers)."""
     init_db()
+
+# Ensure DB is initialized when the module is imported (e.g., under Gunicorn)
+initialize_app()
 
 def get_setting(key):
     """Gets a value from the settings table."""
