@@ -8,8 +8,15 @@ import subprocess
 import base64
 
 from werkzeug.security import generate_password_hash, check_password_hash
-from webauthn import generate_registration_options, verify_registration_response, generate_authentication_options, verify_authentication_response
-from webauthn.helpers.structs import RegistrationCredential, AuthenticationCredential
+try:
+    from webauthn import generate_registration_options, verify_registration_response, generate_authentication_options, verify_authentication_response
+    from webauthn.helpers.structs import RegistrationCredential, AuthenticationCredential
+except Exception as e:
+    raise ImportError(
+        "Failed to import required WebAuthn functions.\n"
+        "Please ensure the correct WebAuthn library is installed (e.g. `webauthn` from PyPI).\n"
+        "Current import error: " + str(e)
+    )
 
 import backup
 
