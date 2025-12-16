@@ -3,3 +3,7 @@ psycopg2-binary
 gunicorn
 webauthn
 werkzeug
+APScheduler
+apprise
+PyYAML
+Pillow

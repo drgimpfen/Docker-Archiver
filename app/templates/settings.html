@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="card mx-auto" style="max-width:800px">
+  <div class="card-body">
+    <h2 class="card-title">Settings</h2>
+    <form method="post">
+      <div class="mb-3">
+        <label for="apprise_enabled" class="form-label">Notifications enabled</label>
+        <select class="form-select" id="apprise_enabled" name="apprise_enabled">
+          <option value="true" {% if apprise_enabled %}selected{% endif %}>Enabled</option>
+          <option value="false" {% if not apprise_enabled %}selected{% endif %}>Disabled</option>
+        </select>
+        <div class="form-text">Enable or disable sending notifications via Apprise.</div>
+      </div>
+
+      <div class="mb-3">
+        <label for="apprise_urls" class="form-label">Apprise URL(s)</label>
+        <textarea class="form-control" id="apprise_urls" name="apprise_urls" rows="6" placeholder="e.g. mailto://user:pass@example.com\nhttps://api.pushover.net/1/messages.json?token=...">{{ apprise_urls or '' }}</textarea>
+        <div class="form-text">Enter one Apprise URL per line. See Apprise docs for service URLs.</div>
+        <div class="form-text mt-1">Apprise documentation: <a href="https://apprise.readthedocs.io/en/latest/" target="_blank" rel="noreferrer">https://apprise.readthedocs.io</a></div>
+      </div>
+
+      <button type="submit" class="btn btn-primary">Save Settings</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

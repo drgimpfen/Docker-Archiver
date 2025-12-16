@@ -117,6 +117,18 @@ def init_db():
         """)
         # Add theme column to users for storing user theme preference (dark/light)
         cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR(20) DEFAULT 'dark';")
+            # Schedules table for automated backups
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS schedules (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    time VARCHAR(10) NOT NULL, -- HH:MM in 24h
+                    stack_paths TEXT NOT NULL, -- newline-separated list of paths
+                    retention_days INTEGER DEFAULT 28,
+                    enabled BOOLEAN DEFAULT TRUE,
+                    last_run TIMESTAMP
+                );
+            """)
         # Set default retention if not present
         cur.execute("INSERT INTO settings (key, value) VALUES ('retention_days', '28') ON CONFLICT (key) DO NOTHING;")
         conn.commit()
@@ -154,6 +166,104 @@ def initialize_app():
 
 # Start initialization in background at import time
 initialize_app()
+
+
+# --- Scheduler (APScheduler) ---
+from apscheduler.schedulers.background import BackgroundScheduler
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+
+def _job_runner(schedule_id):
+    """Wrapper that loads schedule by id, updates last_run and triggers backup."""
+    try:
+        conn = get_db_connection()
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            cur.execute("SELECT * FROM schedules WHERE id = %s;", (schedule_id,))
+            s = cur.fetchone()
+        conn.close()
+
+        if not s or not s.get('enabled'):
+            return
+
+        stack_paths = [p for p in (s['stack_paths'] or '').split('\n') if p.strip()]
+        retention = s.get('retention_days') or 28
+
+        # update last_run
+        now = datetime.now()
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute("UPDATE schedules SET last_run = %s WHERE id = %s;", (now, schedule_id))
+            conn.commit()
+        conn.close()
+
+        threading.Thread(target=backup.run_archive_job, args=(stack_paths, retention, CONTAINER_BACKUP_DIR), daemon=True).start()
+    except Exception as e:
+        print(f"[scheduler] job_runner error for schedule {schedule_id}: {e}")
+
+
+def _schedule_db_job(scheduler, s):
+    """Register a schedule `s` (dict) with APScheduler."""
+    try:
+        time_val = (s.get('time') or '00:00').strip()
+        hh, mm = (int(x) for x in time_val.split(':'))
+    except Exception:
+        return
+
+    job_id = f"schedule_{s['id']}"
+    try:
+        scheduler.add_job(
+            func=_job_runner,
+            trigger='cron',
+            hour=hh,
+            minute=mm,
+            args=(s['id'],),
+            id=job_id,
+            replace_existing=True,
+        )
+    except Exception as e:
+        print(f"[scheduler] failed to add job {job_id}: {e}")
+
+
+def _load_and_schedule_all(scheduler):
+    try:
+        conn = get_db_connection()
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            cur.execute("SELECT * FROM schedules WHERE enabled = true;")
+            rows = cur.fetchall()
+        conn.close()
+        for s in rows:
+            _schedule_db_job(scheduler, s)
+    except Exception as e:
+        print(f"[scheduler] load failed: {e}")
+
+
+def _start_scheduler():
+    tz_name = os.environ.get('TZ', 'UTC')
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        try:
+            tz = ZoneInfo('UTC')
+        except Exception:
+            tz = None
+
+    scheduler = BackgroundScheduler(timezone=tz)
+    try:
+        scheduler.start()
+    except Exception as e:
+        print(f"[scheduler] could not start: {e}")
+        return None
+
+    # Load schedules from DB and schedule enabled ones
+    _load_and_schedule_all(scheduler)
+    return scheduler
+
+
+# start APScheduler in background
+try:
+    _SCHEDULER = _start_scheduler()
+except Exception:
+    _SCHEDULER = None
 
 def get_setting(key):
     """Gets a value from the settings table."""
@@ -204,25 +314,124 @@ def update_setting(key, value):
     conn.close()
 
 def discover_stacks():
-    """Discovers Docker Compose stacks in the /local directory."""
+    """Discovers Docker Compose stacks in the /local directory.
+
+    This uses PyYAML to parse compose files and will exclude the application itself
+    by checking for build.context or service definitions that point into the app directory.
+    """
     stacks = []
     if not os.path.isdir(LOCAL_STACKS_PATH):
         return stacks
+
+    try:
+        import yaml
+    except Exception:
+        yaml = None
+
+    app_dir = os.path.abspath(os.getcwd())
+
+    def _labels_indicate_exclude(labels):
+        if not labels:
+            return False
+        # dict form
+        if isinstance(labels, dict):
+            for k, v in labels.items():
+                key = str(k).lower()
+                if key in ('docker-archiver.exclude', 'archiver.exclude', 'docker_archiver.exclude'):
+                    if str(v).lower() in ('1', 'true', 'yes', 'on'):
+                        return True
+            return False
+        # list form like ["archiver.exclude=true"]
+        if isinstance(labels, (list, tuple)):
+            for item in labels:
+                try:
+                    if not isinstance(item, str):
+                        continue
+                    if '=' in item:
+                        k, v = item.split('=', 1)
+                        if k.strip().lower() in ('docker-archiver.exclude', 'archiver.exclude', 'docker_archiver.exclude') and v.strip().lower() in ('1', 'true', 'yes', 'on'):
+                            return True
+                except Exception:
+                    continue
+        return False
 
     for volume_dir in os.listdir(LOCAL_STACKS_PATH):
         base_path = os.path.join(LOCAL_STACKS_PATH, volume_dir)
         if not os.path.isdir(base_path):
             continue
-        
+
         for stack_dir in os.listdir(base_path):
             stack_path = os.path.join(base_path, stack_dir)
-            if os.path.isdir(stack_path):
-                # Check for a compose file to identify a stack
-                if os.path.exists(os.path.join(stack_path, 'docker-compose.yml')) or \
-                   os.path.exists(os.path.join(stack_path, 'compose.yaml')):
-                    stacks.append({'name': stack_dir, 'path': stack_path})
-    
-    # Return sorted by stack name
+            if not os.path.isdir(stack_path):
+                continue
+
+            # Check for a compose file to identify a stack
+            compose_path = None
+            for fname in ('docker-compose.yml', 'compose.yaml'):
+                candidate = os.path.join(stack_path, fname)
+                if os.path.exists(candidate):
+                    compose_path = candidate
+                    break
+
+            if not compose_path:
+                continue
+
+            # By default do not include stacks that are the same directory as the app
+            try:
+                if os.path.abspath(stack_path) == app_dir:
+                    continue
+            except Exception:
+                pass
+
+            is_self = False
+            # If PyYAML is available, parse the compose file and look for build contexts
+            if yaml is not None:
+                try:
+                    with open(compose_path, 'r', encoding='utf-8') as cf:
+                        doc = yaml.safe_load(cf)
+                        services = doc.get('services') if isinstance(doc, dict) else None
+                        if isinstance(services, dict):
+                            for svc_name, svc_def in services.items():
+                                # check for explicit exclude label on the service
+                                try:
+                                    svc_labels = svc_def.get('labels') if isinstance(svc_def, dict) else None
+                                except Exception:
+                                    svc_labels = None
+                                if _labels_indicate_exclude(svc_labels):
+                                    is_self = True
+                                    break
+
+                                # check for a build context pointing into the app dir
+                                build = svc_def.get('build') if isinstance(svc_def, dict) else None
+                                if isinstance(build, dict):
+                                    ctx = build.get('context')
+                                    if ctx:
+                                        abs_ctx = os.path.abspath(os.path.join(stack_path, ctx)) if not os.path.isabs(ctx) else os.path.abspath(ctx)
+                                        if abs_ctx.startswith(app_dir):
+                                            is_self = True
+                                            break
+                                elif isinstance(build, str):
+                                    abs_ctx = os.path.abspath(os.path.join(stack_path, build)) if not os.path.isabs(build) else os.path.abspath(build)
+                                    if abs_ctx.startswith(app_dir):
+                                        is_self = True
+                                        break
+                                # weaker signals (container_name/image) are intentionally ignored for exclusion
+                        # also check top-level labels for exclusion
+                        top_labels = doc.get('labels') if isinstance(doc, dict) else None
+                        if _labels_indicate_exclude(top_labels):
+                            is_self = True
+                # end services loop
+                        # end services loop
+                except Exception:
+                    # parsing error — fall back to safer checks below
+                    pass
+
+            if is_self:
+                continue
+
+            # fallback: avoid naive name-only exclusion; include stack
+            stacks.append({'name': stack_dir, 'path': stack_path})
+
     return sorted(stacks, key=lambda s: s['name'])
 
 
@@ -420,6 +629,31 @@ def profile_edit_route():
         return redirect(url_for('profile_route'))
         
     return render_template('profile_edit.html', user=user_data)
+
+
+@app.route('/settings', methods=['GET', 'POST'])
+def settings_route():
+    """Global settings page for system-level configuration (notifications etc.)."""
+    user_id = session.get('user_id')
+    if not user_id:
+        return redirect(url_for('login_route'))
+
+    # Load current settings
+    apprise_urls = get_setting('apprise_urls') or ''
+    apprise_enabled = get_setting('apprise_enabled')
+    apprise_enabled_bool = (str(apprise_enabled).lower() == 'true') if apprise_enabled is not None else False
+
+    if request.method == 'POST':
+        apprise_enabled_form = request.form.get('apprise_enabled', 'false')
+        apprise_urls_form = request.form.get('apprise_urls', '').strip()
+
+        update_setting('apprise_enabled', 'true' if apprise_enabled_form == 'true' else 'false')
+        update_setting('apprise_urls', apprise_urls_form)
+
+        flash('Settings saved.', 'success')
+        return redirect(url_for('settings_route'))
+
+    return render_template('settings.html', apprise_urls=apprise_urls, apprise_enabled=apprise_enabled_bool)
 
 @app.route('/profile/change_password', methods=['GET', 'POST'])
 def profile_change_password_route():
@@ -722,6 +956,152 @@ def archives_list():
     """Shows a list of available archives, grouped by stack."""
     all_archives = scan_archives()
     return render_template('archives.html', archives=all_archives)
+
+
+@app.route('/schedules', methods=['GET', 'POST'])
+def schedules_route():
+    """View and create schedules."""
+    user_id = session.get('user_id')
+    if not user_id:
+        return redirect(url_for('login_route'))
+
+    # Listing only; creation/editing handled by separate endpoints
+
+    stacks = discover_stacks()
+    conn = get_db_connection()
+    with conn.cursor(cursor_factory=DictCursor) as cur:
+        cur.execute("SELECT * FROM schedules ORDER BY id DESC;")
+        schedules = cur.fetchall()
+    conn.close()
+
+    return render_template('schedules.html', stacks=stacks, schedules=schedules)
+
+
+@app.route('/schedules/create', methods=['POST'])
+def create_schedule_route():
+    user_id = session.get('user_id')
+    if not user_id:
+        return redirect(url_for('login_route'))
+
+    name = request.form.get('name')
+    time_val = request.form.get('time')
+    stacks = request.form.getlist('stacks')
+    retention_days = int(request.form.get('retention_days') or 28)
+    stack_text = '\n'.join(stacks)
+    conn = get_db_connection()
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO schedules (name, time, stack_paths, retention_days, enabled) VALUES (%s, %s, %s, %s, %s);",
+            (name, time_val, stack_text, retention_days, True)
+        )
+        conn.commit()
+    conn.close()
+    flash('Schedule created.', 'success')
+    # reload scheduler if running
+    try:
+        if _SCHEDULER is not None:
+            _schedule_db_job(_SCHEDULER, {'id': get_last_insert_id(), 'time': time_val})
+    except Exception:
+        pass
+    return redirect(url_for('schedules_route'))
+
+
+def get_last_insert_id():
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT currval(pg_get_serial_sequence('schedules','id'));")
+            r = cur.fetchone()
+            return r[0] if r else None
+    finally:
+        conn.close()
+
+
+@app.route('/schedules/edit/<int:schedule_id>', methods=['GET', 'POST'])
+def edit_schedule_route(schedule_id):
+    user_id = session.get('user_id')
+    if not user_id:
+        return redirect(url_for('login_route'))
+
+    conn = get_db_connection()
+    with conn.cursor(cursor_factory=DictCursor) as cur:
+        cur.execute("SELECT * FROM schedules WHERE id = %s;", (schedule_id,))
+        sch = cur.fetchone()
+    conn.close()
+    if not sch:
+        flash('Schedule not found.', 'danger')
+        return redirect(url_for('schedules_route'))
+
+    if request.method == 'POST':
+        name = request.form.get('name')
+        time_val = request.form.get('time')
+        stacks = request.form.getlist('stacks')
+        retention_days = int(request.form.get('retention_days') or 28)
+        enabled = True if request.form.get('enabled') == 'true' else False
+
+        stack_text = '\n'.join(stacks)
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute("UPDATE schedules SET name=%s, time=%s, stack_paths=%s, retention_days=%s, enabled=%s WHERE id=%s;",
+                        (name, time_val, stack_text, retention_days, enabled, schedule_id))
+            conn.commit()
+        conn.close()
+        # update scheduler
+        try:
+            if _SCHEDULER is not None:
+                _schedule_db_job(_SCHEDULER, {'id': schedule_id, 'time': time_val})
+        except Exception:
+            pass
+        flash('Schedule updated.', 'success')
+        return redirect(url_for('schedules_route'))
+
+    stacks = discover_stacks()
+    return render_template('schedules_edit.html', sch=sch, stacks=stacks)
+
+
+@app.route('/schedules/toggle/<int:schedule_id>', methods=['POST'])
+def toggle_schedule_route(schedule_id):
+    user_id = session.get('user_id')
+    if not user_id:
+        return redirect(url_for('login_route'))
+    conn = get_db_connection()
+    with conn.cursor() as cur:
+        cur.execute("UPDATE schedules SET enabled = NOT enabled WHERE id = %s RETURNING enabled;", (schedule_id,))
+        r = cur.fetchone()
+        conn.commit()
+    conn.close()
+    # reload scheduler entry
+    try:
+        if _SCHEDULER is not None:
+            with get_db_connection().cursor(cursor_factory=DictCursor) as cur:
+                cur.execute("SELECT * FROM schedules WHERE id = %s;", (schedule_id,))
+                s = cur.fetchone()
+            if s and s.get('enabled'):
+                _schedule_db_job(_SCHEDULER, s)
+            else:
+                try:
+                    _SCHEDULER.remove_job(f"schedule_{schedule_id}")
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    flash('Schedule toggled.', 'success')
+    return redirect(url_for('schedules_route'))
+
+
+@app.route('/schedules/delete/<int:schedule_id>', methods=['POST'])
+def delete_schedule_route(schedule_id):
+    user_id = session.get('user_id')
+    if not user_id:
+        return redirect(url_for('login_route'))
+
+    conn = get_db_connection()
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM schedules WHERE id = %s;", (schedule_id,))
+        conn.commit()
+    conn.close()
+    flash('Schedule deleted.', 'info')
+    return redirect(url_for('schedules_route'))
 
 
 @app.route('/download_archive/<path:stack_name>/<path:archive_filename>')

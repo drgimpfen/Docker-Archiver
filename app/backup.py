@@ -5,6 +5,10 @@ import shutil
 from datetime import datetime
 import psycopg2
 from psycopg2.extras import DictCursor
+try:
+    import apprise
+except Exception:
+    apprise = None
 
 # --- HELPER FUNCTIONS ---
 
@@ -39,6 +43,52 @@ def log_to_db(job_id, message):
         )
         conn.commit()
     conn.close()
+
+
+def _get_setting(key):
+    """Retrieve a single value from the settings table."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            cur.execute("SELECT value FROM settings WHERE key = %s;", (key,))
+            row = cur.fetchone()
+            return row['value'] if row else None
+    finally:
+        conn.close()
+
+
+def send_apprise_notification(title, body, job_id=None):
+    """Send a notification via Apprise if configured. Safe to call when Apprise is not installed."""
+    if apprise is None:
+        if job_id:
+            log_to_db(job_id, "Apprise library not available; skipping notification.")
+        return
+
+    enabled = _get_setting('apprise_enabled')
+    if not enabled or str(enabled).lower() != 'true':
+        return
+
+    urls = _get_setting('apprise_urls') or ''
+    url_list = [u.strip() for u in urls.splitlines() if u.strip()]
+    if not url_list:
+        if job_id:
+            log_to_db(job_id, "No Apprise URLs configured; skipping notification.")
+        return
+
+    try:
+        a = apprise.Apprise()
+        for u in url_list:
+            try:
+                a.add(u)
+            except Exception as e:
+                if job_id:
+                    log_to_db(job_id, f"Apprise: failed to add URL {u}: {e}")
+        a.notify(title=title, body=body)
+        if job_id:
+            log_to_db(job_id, f"Notification sent: {title}")
+    except Exception as e:
+        if job_id:
+            log_to_db(job_id, f"Apprise notification error: {e}")
 
 def run_command(command, job_id, description):
     """Executes a shell command and logs the result to the DB."""
@@ -211,6 +261,15 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir):
                 )
                 conn.commit()
             conn.close()
+            # send success notification for this stack
+            try:
+                send_apprise_notification(
+                    title=f"Backup success: {stack_name}",
+                    body=f"Archive created: {archive_path}\nSize: {format_bytes(archive_size)}",
+                    job_id=job_id
+                )
+            except Exception:
+                pass
 
         except Exception as e:
             # Mark job as failed on any error
@@ -232,6 +291,15 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir):
                 compose_action(stack_path, job_id, action="up")
             except Exception as restart_e:
                 log_to_db(job_id, f"Could not restart stack after failure: {restart_e}")
+            # send failure notification for this stack
+            try:
+                send_apprise_notification(
+                    title=f"Backup FAILED: {stack_name}",
+                    body=f"Error: {e}",
+                    job_id=job_id
+                )
+            except Exception:
+                pass
 
     # After all stacks are processed, run cleanup
     try:
@@ -248,3 +316,12 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir):
         cur.execute("UPDATE archive_jobs SET status = %s, end_time = %s WHERE id = %s;", (status, datetime.now(), master_job_id))
         conn.commit()
     conn.close()
+    # send master notification
+    try:
+        send_apprise_notification(
+            title=f"Backup run {status}",
+            body=f"Master job {master_job_id} completed with status: {status}",
+            job_id=master_job_id
+        )
+    except Exception:
+        pass
