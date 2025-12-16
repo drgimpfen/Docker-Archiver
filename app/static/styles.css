@@ -42,6 +42,14 @@
     --accent: #5db6ff; /* lighter accent */
 }
 
+/* Wider container for dashboard to make main cards larger on desktop */
+.wide-container{
+    max-width: 1400px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 0 16px;
+}
+
 /* Dark mode overrides applied when body has .dark-mode */
 .dark-mode {
     /* Dark-mode higher contrast palette */
