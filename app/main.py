@@ -343,6 +343,10 @@ def _serialize_webauthn_obj(obj):
         for k, v in vars(obj).items():
             if k.startswith('_'):
                 continue
+            # Some WebAuthn objects expose internal hint structures that browsers
+            # don't accept; skip 'hints' and any None values to be safe.
+            if k == 'hints' or v is None:
+                continue
             try:
                 data[k] = _serialize_webauthn_obj(v)
             except Exception:
