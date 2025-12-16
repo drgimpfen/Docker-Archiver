@@ -20,22 +20,16 @@
             </h2>
             <div id="schedCollapse-{{ loop.index }}" class="accordion-collapse collapse{% if _is_open %} show{% endif %}" aria-labelledby="schedHeading-{{ loop.index }}" data-bs-parent="#schedulesAccordion">
                 <div class="accordion-body">
-                    {% for stack_name, stack_info in sched.stacks.items() %}
-                    <div class="card mb-2">
-                        <div class="card-header">
-                            <strong>{{ stack_name }}</strong>
-                            <span class="badge bg-primary ms-2">{{ stack_info.count }} archives</span>
-                            <span class="badge bg-info ms-2">{{ stack_info.total_size_human }}</span>
-                            <span class="badge bg-success ms-2">Last: {{ stack_info.last_backup.strftime('%Y-%m-%d %H:%M') if stack_info.last_backup else 'N/A' }}</span>
-                        </div>
-                        <div class="card-body p-2">
-                            <table class="table table-sm mb-0">
-                                <thead>
-                                    <tr><th>Filename</th><th>Size</th><th>Date</th><th class="text-end">Actions</th></tr>
-                                </thead>
-                                <tbody>
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead>
+                                <tr><th>Stack</th><th>Filename</th><th>Size</th><th>Date</th><th class="text-end">Actions</th></tr>
+                            </thead>
+                            <tbody>
+                                {% for stack_name, stack_info in sched.stacks.items() %}
                                     {% for archive in stack_info.files %}
                                     <tr>
+                                        <td>{{ stack_name }}</td>
                                         <td>{{ archive.name }}</td>
                                         <td>{{ (archive.size / 1024 / 1024) | round(2) }} MB</td>
                                         <td>{{ archive.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
@@ -47,11 +41,10 @@
                                         </td>
                                     </tr>
                                     {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
+                                {% endfor %}
+                            </tbody>
+                        </table>
                     </div>
-                    {% endfor %}
                 </div>
             </div>
         </div>
@@ -73,22 +66,16 @@
             </h2>
             <div id="manualCollapse-{{ loop.index }}" class="accordion-collapse collapse{% if _is_open %} show{% endif %}" aria-labelledby="manualHeading-{{ loop.index }}" data-bs-parent="#manualAccordion">
                 <div class="accordion-body">
-                    {% for stack_name, stack_info in sched.stacks.items() %}
-                    <div class="card mb-2">
-                        <div class="card-header">
-                            <strong>{{ stack_name }}</strong>
-                            <span class="badge bg-primary ms-2">{{ stack_info.count }} archives</span>
-                            <span class="badge bg-info ms-2">{{ stack_info.total_size_human }}</span>
-                            <span class="badge bg-success ms-2">Last: {{ stack_info.last_backup.strftime('%Y-%m-%d %H:%M') if stack_info.last_backup else 'N/A' }}</span>
-                        </div>
-                        <div class="card-body p-2">
-                            <table class="table table-sm mb-0">
-                                <thead>
-                                    <tr><th>Filename</th><th>Size</th><th>Date</th><th class="text-end">Actions</th></tr>
-                                </thead>
-                                <tbody>
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead>
+                                <tr><th>Stack</th><th>Filename</th><th>Size</th><th>Date</th><th class="text-end">Actions</th></tr>
+                            </thead>
+                            <tbody>
+                                {% for stack_name, stack_info in sched.stacks.items() %}
                                     {% for archive in stack_info.files %}
                                     <tr>
+                                        <td>{{ stack_name }}</td>
                                         <td>{{ archive.name }}</td>
                                         <td>{{ (archive.size / 1024 / 1024) | round(2) }} MB</td>
                                         <td>{{ archive.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
@@ -100,11 +87,10 @@
                                         </td>
                                     </tr>
                                     {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
+                                {% endfor %}
+                            </tbody>
+                        </table>
                     </div>
-                    {% endfor %}
                 </div>
             </div>
         </div>
