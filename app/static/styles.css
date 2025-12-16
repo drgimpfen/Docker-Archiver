@@ -266,6 +266,9 @@ select { color: var(--md-on-surface) !important; }
 /* Header social icons */
 .header-social-icon { height: 20px; width: auto; margin-left: 8px; opacity: 0.95; }
 
+/* Recent activity card centering */
+.recent-card { max-width: 1200px; margin: 0 auto; }
+
 
 
 /* Buttons: prefer bootstrap defaults, but tweak dark-mode accents */
