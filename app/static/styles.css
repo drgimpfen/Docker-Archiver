@@ -214,6 +214,37 @@ body {
 /* Make table cells slightly more compact and readable */
 .table td, .table th { padding: 0.55rem 0.75rem !important; }
 
+/* Ensure tables inside our list/archive cards don't get a white background from bootstrap */
+.list-card .table,
+.archive-card .table,
+.card .table,
+.accordion .table {
+    background-color: transparent !important;
+    color: var(--text) !important;
+}
+
+.list-card .table td,
+.list-card .table th,
+.archive-card .table td,
+.archive-card .table th,
+.card .table td,
+.card .table th,
+.accordion .table td,
+.accordion .table th {
+    background-color: transparent !important;
+    color: var(--text) !important;
+    border-top: 1px solid rgba(255,255,255,0.02) !important;
+}
+
+/* Slightly tint odd rows for readability but avoid full white */
+.list-card .table tbody tr:nth-child(odd),
+.archive-card .table tbody tr:nth-child(odd) {
+    background-color: rgba(255,255,255,0.01) !important;
+}
+
+/* Ensure action buttons align and have consistent sizing */
+.table td .btn { min-width: 68px; }
+
 /* Make section headings brighter and slightly larger */
 h2 { color: var(--text); font-weight:700; margin-bottom: 0.75rem; }
 
