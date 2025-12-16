@@ -10,7 +10,7 @@
     <h4>Scheduled Runs</h4>
     <div class="accordion mb-4" id="schedulesAccordion">
         {% for sched in archives.scheduled %}
-        <div class="accordion-item">
+        <div class="accordion-item list-card">
             {% set _is_open = _default and _default.kind == 'scheduled' and loop.index0 == _default.index %}
             <h2 class="accordion-header" id="schedHeading-{{ loop.index }}">
                 <button class="accordion-button{% if not _is_open %} collapsed{% endif %}" type="button" data-bs-toggle="collapse" data-bs-target="#schedCollapse-{{ loop.index }}" aria-expanded="{{ 'true' if _is_open else 'false' }}" aria-controls="schedCollapse-{{ loop.index }}">
@@ -93,7 +93,7 @@
     <h4>Manual Runs</h4>
     <div class="accordion" id="manualAccordion">
         {% for sched in archives.manual %}
-        <div class="accordion-item">
+        <div class="accordion-item list-card">
             {% set _is_open = _default and _default.kind == 'manual' and loop.index0 == _default.index %}
             <h2 class="accordion-header" id="manualHeading-{{ loop.index }}">
                 <button class="accordion-button{% if not _is_open %} collapsed{% endif %}" type="button" data-bs-toggle="collapse" data-bs-target="#manualCollapse-{{ loop.index }}" aria-expanded="{{ 'true' if _is_open else 'false' }}" aria-controls="manualCollapse-{{ loop.index }}">

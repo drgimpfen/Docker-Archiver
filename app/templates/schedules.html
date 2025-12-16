@@ -3,7 +3,7 @@
 {% block content %}
 <div class="row">
     <div class="col-12">
-        <div class="card">
+        <div class="card list-card">
             <div class="card-body">
                 <h3>Existing Schedules</h3>
                 {% if schedules %}
@@ -60,7 +60,7 @@
 
 <div class="row mt-4">
     <div class="col-md-8">
-        <div class="card">
+        <div class="card list-card">
             <div class="card-body">
                 <h3>New Schedule</h3>
                 <form method="post" action="{{ url_for('create_schedule_route') }}">
