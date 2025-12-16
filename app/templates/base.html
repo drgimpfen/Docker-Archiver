@@ -63,8 +63,20 @@
         // Theme toggle: store preference in localStorage
         (function(){
             const toggle = document.getElementById('theme-toggle');
+            const serverTheme = {{ user_theme|tojson | safe }};
             const preferred = localStorage.getItem('theme');
-            const isDark = preferred === 'dark' || (!preferred && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+            // Determine initial theme: server preference -> localStorage -> OS preference -> default dark
+            let isDark = false;
+            if(serverTheme) {
+                isDark = serverTheme === 'dark';
+            } else if(preferred) {
+                isDark = preferred === 'dark';
+            } else if(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches){
+                isDark = true;
+            } else {
+                isDark = true; // default to dark
+            }
+
             if(isDark) document.body.classList.add('dark-mode');
             if(toggle){
                 toggle.textContent = document.body.classList.contains('dark-mode') ? '☀️' : '🌙';

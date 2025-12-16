@@ -40,12 +40,12 @@
 }
 
 .dark-mode {
-    --bg: #0b0d0f;
-    --text: #e9ecef;
-    --muted: #adb5bd;
-    --card-bg: #121417;
-    --border: #1f2326;
-    --log-bg: #0f1113;
+    --bg: #0b1220;
+    --text: #e6eef6;
+    --muted: #94a3b8;
+    --card-bg: #0f1419;
+    --border: #1f2830;
+    --log-bg: #0b0f13;
     --table-hover: rgba(255,255,255,0.03);
     background-color: var(--bg);
     color: var(--text);
@@ -54,11 +54,14 @@
 body {
     background-color: var(--bg);
     color: var(--text);
+    transition: background-color 200ms ease, color 200ms ease;
 }
 
-.card, .navbar, .table, .stack-list {
+.card, .navbar, .table, .stack-list, .modal-content {
     background-color: var(--card-bg) !important;
     border-color: var(--border) !important;
+    transition: background-color 200ms ease, border-color 200ms ease;
+    box-shadow: 0 2px 8px rgba(2,6,12,0.6);
 }
 
 .log-content {
@@ -70,3 +73,53 @@ body {
 }
 
 .text-muted { color: var(--muted) !important; }
+
+/* Navbar tweaks to blend with theme */
+.dark-mode .navbar {
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0)) !important;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+
+.dark-mode .navbar-brand, .dark-mode .nav-link {
+    color: var(--text) !important;
+    opacity: 0.95;
+}
+
+/* Buttons */
+.dark-mode .btn-primary {
+    background-color: #246bff !important;
+    border-color: #1b5ed0 !important;
+    color: #fff !important;
+}
+
+.dark-mode .btn-outline-light {
+    color: var(--text) !important;
+    border-color: rgba(255,255,255,0.08) !important;
+    background-color: transparent !important;
+}
+
+/* Forms */
+.dark-mode .form-control, .dark-mode input.form-control, .dark-mode textarea.form-control {
+    background-color: #0b1114 !important;
+    color: var(--text) !important;
+    border: 1px solid #22272b !important;
+}
+
+/* Tables */
+.dark-mode .table thead th {
+    background-color: rgba(255,255,255,0.03) !important;
+    color: var(--text) !important;
+    border-bottom: 1px solid var(--border) !important;
+}
+
+.dark-mode .badge-success { background-color: #198754 !important; }
+.dark-mode .badge-danger { background-color: #dc3545 !important; }
+
+/* Improve checkbox contrast */
+.dark-mode .form-check-input {
+    background-color: #0b1114 !important;
+    border: 1px solid #2a3236 !important;
+}
+
+/* Slightly soften link hover */
+.dark-mode a.nav-link:hover { opacity: 0.9 !important; }

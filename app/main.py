@@ -115,6 +115,8 @@ def init_db():
                 transports VARCHAR(255)
             );
         """)
+        # Add theme column to users for storing user theme preference (dark/light)
+        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR(20) DEFAULT 'dark';")
         # Set default retention if not present
         cur.execute("INSERT INTO settings (key, value) VALUES ('retention_days', '28') ON CONFLICT (key) DO NOTHING;")
         conn.commit()
@@ -161,6 +163,37 @@ def get_setting(key):
         result = cur.fetchone()
     conn.close()
     return result['value'] if result else None
+
+
+def _serialize_webauthn_obj(obj):
+    """Recursively serialize a WebAuthn options object to JSON-serializable primitives."""
+    if obj is None:
+        return None
+    # bytes -> base64
+    if isinstance(obj, (bytes, bytearray, memoryview)):
+        return base64.b64encode(bytes(obj)).decode('utf-8')
+    # primitives
+    if isinstance(obj, (str, int, float, bool)):
+        return obj
+    # dict
+    if isinstance(obj, dict):
+        return {k: _serialize_webauthn_obj(v) for k, v in obj.items()}
+    # list/tuple
+    if isinstance(obj, (list, tuple)):
+        return [_serialize_webauthn_obj(v) for v in obj]
+    # objects with __dict__
+    if hasattr(obj, '__dict__'):
+        data = {}
+        for k, v in vars(obj).items():
+            if k.startswith('_'):
+                continue
+            try:
+                data[k] = _serialize_webauthn_obj(v)
+            except Exception:
+                data[k] = str(v)
+        return data
+    # fallback
+    return str(obj)
 
 def update_setting(key, value):
     """Updates a value in the settings table."""
@@ -331,6 +364,25 @@ def profile_route():
 
     return render_template('profile.html', user=user_data, passkeys=display_passkeys)
 
+
+@app.context_processor
+def inject_user_theme():
+    """Injects the user's theme preference into templates as `user_theme`."""
+    theme = None
+    user_id = session.get('user_id')
+    if user_id:
+        try:
+            conn = get_db_connection()
+            with conn.cursor(cursor_factory=DictCursor) as cur:
+                cur.execute("SELECT theme FROM users WHERE id = %s;", (user_id,))
+                row = cur.fetchone()
+            conn.close()
+            if row and row.get('theme'):
+                theme = row.get('theme')
+        except Exception:
+            theme = None
+    return dict(user_theme=theme)
+
 @app.route('/profile/edit', methods=['GET', 'POST'])
 def profile_edit_route():
     """Allows the user to edit their email and display name."""
@@ -344,6 +396,7 @@ def profile_edit_route():
     if request.method == 'POST':
         new_email = request.form['email']
         new_display_name = request.form['display_name']
+        new_theme = request.form.get('theme')
 
         if user_data['email'] != new_email:
             update_user_email(user_id, new_email)
@@ -352,6 +405,14 @@ def profile_edit_route():
         if user_data['display_name'] != new_display_name:
             update_user_display_name(user_id, new_display_name)
             flash('Display name updated successfully!', 'success')
+
+        if new_theme and (user_data.get('theme') != new_theme):
+            conn = get_db_connection()
+            with conn.cursor() as cur:
+                cur.execute("UPDATE users SET theme = %s WHERE id = %s;", (new_theme, user_id))
+                conn.commit()
+            conn.close()
+            flash('Theme preference updated!', 'success')
         
         if user_data['email'] == new_email and user_data['display_name'] == new_display_name:
             flash('No changes detected.', 'info')
@@ -409,7 +470,7 @@ def generate_registration_options_route():
     )
 
     session['webauthn_registration_challenge'] = base64.b64encode(options.challenge).decode('utf-8')
-    return jsonify(options.dict())
+    return jsonify(_serialize_webauthn_obj(options))
 
 @app.route('/webauthn/verify-registration', methods=['POST'])
 def verify_registration_route():
@@ -461,7 +522,7 @@ def generate_authentication_options_route():
         # Discoverable credentials don't require a username upfront
         options = generate_authentication_options(rp_id=RP_ID)
         session['webauthn_authentication_challenge'] = base64.b64encode(options.challenge).decode('utf-8')
-        return jsonify(options.dict())
+        return jsonify(_serialize_webauthn_obj(options))
 
     user = get_user(username)
     if not user:
@@ -479,7 +540,7 @@ def generate_authentication_options_route():
     )
 
     session['webauthn_authentication_challenge'] = base64.b64encode(options.challenge).decode('utf-8')
-    return jsonify(options.dict())
+    return jsonify(_serialize_webauthn_obj(options))
 
 @app.route('/webauthn/verify-authentication', methods=['POST'])
 def verify_authentication_route():
