@@ -137,13 +137,17 @@ body {
 .footer { border-top: 1px solid var(--border); }
 .footer .footer-link { color: var(--muted); text-decoration: none; }
 .footer .footer-link:hover { color: var(--text); }
-.footer .footer-icon { width: 16px; height: 16px; vertical-align: text-bottom; margin-right: 6px; }
+.footer .footer-icon { height: 16px; width: auto; vertical-align: text-bottom; margin-right: 6px; display: inline-block; }
 
 /* Footer icons: show light/dark variants depending on theme */
-.footer-link img.footer-icon { width: 16px; height: 16px; vertical-align: text-bottom; margin-right: 6px; }
+.footer-link img.footer-icon { height: 16px; width: auto; max-width: 24px; vertical-align: text-bottom; margin-right: 6px; display: inline-block; object-fit: contain; }
 .footer-link img.icon-dark { display: none; }
 .dark-mode .footer-link img.icon-dark { display: inline-block; }
 .dark-mode .footer-link img.icon-light { display: none; }
+
+/* subtle hover effect */
+.footer-link img.footer-icon { transition: transform 120ms ease, opacity 120ms ease; }
+.footer-link:hover img.footer-icon { transform: scale(1.12); opacity: 0.95; }
 
 /* Schedules page tweaks */
 .schedule-stack-path { max-width: 420px; white-space: normal; word-break: break-word; }

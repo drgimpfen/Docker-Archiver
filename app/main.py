@@ -5,6 +5,7 @@ import threading
 import time
 from flask import Flask, render_template, request, redirect, url_for, flash, send_from_directory, session, jsonify
 from datetime import datetime
+from urllib.parse import urlparse
 import subprocess
 import base64
 
@@ -90,6 +91,8 @@ def init_db():
                 log TEXT
             );
         """)
+        # Mark master jobs explicitly so UI can show only masters when desired
+        cur.execute("ALTER TABLE archive_jobs ADD COLUMN IF NOT EXISTS is_master BOOLEAN DEFAULT FALSE;")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 key VARCHAR(100) PRIMARY KEY,
@@ -691,20 +694,48 @@ def settings_route():
     apprise_enabled_bool = (str(apprise_enabled).lower() == 'true') if apprise_enabled is not None else False
     apprise_html = get_setting('apprise_html')
     apprise_html_bool = (str(apprise_html).lower() == 'true') if apprise_html is not None else True
+    app_base_url = get_setting('app_base_url') or ''
 
     if request.method == 'POST':
         apprise_enabled_form = request.form.get('apprise_enabled', 'false')
         apprise_urls_form = request.form.get('apprise_urls', '').strip()
         apprise_html_form = request.form.get('apprise_html', 'true')
+        app_base_url_form = request.form.get('app_base_url', '').strip()
+
+        # canonicalize app_base_url: ensure scheme present and strip trailing slash
+        canonical_base = ''
+        if app_base_url_form:
+            try:
+                p = urlparse(app_base_url_form)
+                if not p.scheme:
+                    # default to http when scheme missing
+                    app_base_url_form = 'http://' + app_base_url_form
+                    p = urlparse(app_base_url_form)
+                # rebuild minimal canonical form
+                canonical_base = f"{p.scheme}://{p.netloc.rstrip('/')}{p.path.rstrip('/')}"
+            except Exception:
+                canonical_base = app_base_url_form.rstrip('/')
 
         update_setting('apprise_enabled', 'true' if apprise_enabled_form == 'true' else 'false')
         update_setting('apprise_urls', apprise_urls_form)
         update_setting('apprise_html', 'true' if apprise_html_form == 'true' else 'false')
+        update_setting('app_base_url', canonical_base)
 
         flash('Settings saved.', 'success')
         return redirect(url_for('settings_route'))
 
-    return render_template('settings.html', apprise_urls=apprise_urls, apprise_enabled=apprise_enabled_bool, apprise_html=apprise_html_bool)
+    return render_template('settings.html', apprise_urls=apprise_urls, apprise_enabled=apprise_enabled_bool, apprise_html=apprise_html_bool, app_base_url=app_base_url)
+
+
+@app.context_processor
+def inject_app_base_url():
+    """Inject the configured App Base URL into templates as `app_base_url` (prefers DB setting)."""
+    try:
+        base = get_setting('app_base_url') or os.environ.get('APP_BASE_URL', '')
+        base = (base or '').rstrip('/')
+    except Exception:
+        base = ''
+    return dict(app_base_url=base)
 
 @app.route('/profile/change_password', methods=['GET', 'POST'])
 def profile_change_password_route():
@@ -903,8 +934,8 @@ def index():
     
     conn = get_db_connection()
     with conn.cursor(cursor_factory=DictCursor) as cur:
-        # Get last 10 jobs, including the SYSTEM_JOB entries
-        cur.execute("SELECT * FROM archive_jobs ORDER BY start_time DESC LIMIT 10;")
+        # Get last 10 master jobs only
+        cur.execute("SELECT * FROM archive_jobs WHERE is_master = true ORDER BY start_time DESC LIMIT 10;")
         recent_jobs = cur.fetchall()
     conn.close()
 
@@ -996,7 +1027,8 @@ def history():
     """Shows the full backup history."""
     conn = get_db_connection()
     with conn.cursor(cursor_factory=DictCursor) as cur:
-        cur.execute("SELECT * FROM archive_jobs ORDER BY start_time DESC;")
+        # Only show master jobs in history (per-stack details are internal)
+        cur.execute("SELECT * FROM archive_jobs WHERE is_master = true ORDER BY start_time DESC;")
         all_jobs = cur.fetchall()
     conn.close()
     return render_template('history.html', jobs=all_jobs)

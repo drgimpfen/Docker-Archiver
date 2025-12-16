@@ -45,6 +45,12 @@ Custom Webhook: json://hostname/path/to/endpoint</pre>
         </div>
       </div>
 
+      <div class="mb-3">
+        <label for="app_base_url" class="form-label">App Base URL</label>
+        <input type="text" class="form-control" id="app_base_url" name="app_base_url" value="{{ app_base_url or '' }}" placeholder="https://example.com" />
+        <div class="form-text">Optional. Used to generate absolute links in notifications (e.g., https://example.com). Configure here instead of environment variable.</div>
+      </div>
+
       <button type="submit" class="btn btn-primary">Save Settings</button>
     </form>
   </div>

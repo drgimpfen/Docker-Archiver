@@ -109,7 +109,9 @@ def send_apprise_notification(title, body, job_id=None):
 
         # Build a nicer HTML body (header, preformatted body, footer links) when possible
         try:
-            base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
+            # Prefer DB-configured base URL (stored in settings), fall back to env var
+            base_url = _get_setting('app_base_url') or os.environ.get('APP_BASE_URL', '')
+            base_url = (base_url or '').rstrip('/')
         except Exception:
             base_url = ''
 
@@ -313,8 +315,8 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir, master_na
     conn = get_db_connection()
     with conn.cursor(cursor_factory=DictCursor) as cur:
         cur.execute(
-            "INSERT INTO archive_jobs (stack_name, start_time, status, log) VALUES (%s, %s, %s, %s) RETURNING id;",
-            (master_label, datetime.now(), 'Running', 'Starting archiving process...\n')
+            "INSERT INTO archive_jobs (stack_name, start_time, status, log, is_master) VALUES (%s, %s, %s, %s, %s) RETURNING id;",
+            (master_label, datetime.now(), 'Running', 'Starting archiving process...\n', True)
         )
         master_job_id = cur.fetchone()['id']
         conn.commit()
@@ -405,15 +407,7 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir, master_na
                             log_to_db(job_id, f"Warning: could not create latest pointer for {snapshot_dir}")
                 except Exception as e:
                     log_to_db(job_id, f"Warning: failed to create unpacked snapshot for {stack_name}: {e}")
-            # send success notification for this stack
-            try:
-                send_apprise_notification(
-                    title=f"Backup success: {stack_name} (Job {job_id})",
-                    body=f"Job: {stack_name} (ID: {job_id})\nArchive created: {archive_path}\nSize: {format_bytes(archive_size)}\n\nLog:\n" + (get_job_log(job_id) or ''),
-                    job_id=job_id
-                )
-            except Exception:
-                pass
+            # per-stack notifications suppressed; master notification will summarize all stacks
 
         except Exception as e:
             # Mark job as failed on any error
@@ -436,15 +430,7 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir, master_na
                 compose_action(stack_path, job_id, action="up")
             except Exception as restart_e:
                 log_to_db(job_id, f"Could not restart stack after failure: {restart_e}")
-            # send failure notification for this stack
-            try:
-                send_apprise_notification(
-                    title=f"Backup FAILED: {stack_name}",
-                    body=f"Error: {e}",
-                    job_id=job_id
-                )
-            except Exception:
-                pass
+            # per-stack failure notifications suppressed; master notification will report failures
 
     # After all stacks are processed, finish master job (cleanup is handled by dedicated cleanup job)
     try:
@@ -626,8 +612,8 @@ def run_cleanup_job(archive_dir, master_name=None, master_description=None, sche
             conn = get_db_connection()
             with conn.cursor(cursor_factory=DictCursor) as cur:
                 cur.execute(
-                    "INSERT INTO archive_jobs (stack_name, start_time, status, log) VALUES (%s, %s, %s, %s) RETURNING id;",
-                    (master_label + ' (refused)', datetime.now(), 'Failed', 'Cleanup already in progress; refused to start.\n')
+                    "INSERT INTO archive_jobs (stack_name, start_time, status, log, is_master) VALUES (%s, %s, %s, %s, %s) RETURNING id;",
+                    (master_label + ' (refused)', datetime.now(), 'Failed', 'Cleanup already in progress; refused to start.\n', True)
                 )
                 conn.commit()
             conn.close()
@@ -640,8 +626,8 @@ def run_cleanup_job(archive_dir, master_name=None, master_description=None, sche
     conn = get_db_connection()
     with conn.cursor(cursor_factory=DictCursor) as cur:
         cur.execute(
-            "INSERT INTO archive_jobs (stack_name, start_time, status, log) VALUES (%s, %s, %s, %s) RETURNING id;",
-            (master_label, datetime.now(), 'Running', 'Starting cleanup across configured schedules...\n')
+            "INSERT INTO archive_jobs (stack_name, start_time, status, log, is_master) VALUES (%s, %s, %s, %s, %s) RETURNING id;",
+            (master_label, datetime.now(), 'Running', 'Starting cleanup across configured schedules...\n', True)
         )
         master_job_id = cur.fetchone()['id']
         conn.commit()

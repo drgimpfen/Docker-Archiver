@@ -82,6 +82,11 @@
                     <img src="{{ url_for('static', filename='assets/Discord-Symbol-White.png') }}" alt="Discord" class="footer-icon icon-dark"/>
                     <span class="visually-hidden">Discord</span>
                 </a>
+                {% if app_base_url and session.user_id %}
+                <div class="d-inline-block ms-3 text-truncate" style="max-width:240px;vertical-align:middle;">
+                    <small class="text-muted">Base URL: <a href="{{ app_base_url }}" class="link-secondary">{{ app_base_url }}</a></small>
+                </div>
+                {% endif %}
             </small>
         </div>
     </footer>
