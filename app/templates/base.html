@@ -117,6 +117,14 @@
         })();
     </script>
     <script>
+        // Add class when sidebar exists so we only shift main content when sidebar is present
+        (function(){
+            if (document.getElementById('app-sidebar')) {
+                document.body.classList.add('has-sidebar');
+            }
+        })();
+    </script>
+    <script>
         // Sidebar toggle for small screens
         (function(){
             const btn = document.getElementById('sidebar-toggle');

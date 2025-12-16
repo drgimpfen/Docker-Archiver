@@ -12,7 +12,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://user:password@db:5432/docker_archiver
       - TZ=Europe/Berlin
-      # APP_BASE_URL moved to application Settings (stored in DB); remove from env to avoid conflicts
+      - SECRET_KEY=change_this_secret_key
     depends_on:
       - db
 
