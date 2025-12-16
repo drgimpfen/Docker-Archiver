@@ -195,26 +195,30 @@ def cleanup_local_archives(archive_dir, retention_days_str, master_job_id):
                         freed_space += size
                     except OSError as e:
                         log_to_db(master_job_id, f"Error deleting file {file_path}: {e}")
-
     log_to_db(master_job_id, f"Cleanup finished. Deleted {deleted_count} files, freeing {format_bytes(freed_space)}.")
+    # Return summary values for notifications
+    return deleted_count, freed_space
 
 # --- MAIN ORCHESTRATOR ---
 
-def run_archive_job(selected_stack_paths, retention_days, archive_dir):
+def run_archive_job(selected_stack_paths, retention_days, archive_dir, master_name=None, master_description=None):
     """
     The main function to be run in a background thread.
     It orchestrates the entire archiving process for a list of stack paths.
     """
     # Create a "master" job entry for the overall process (mainly for cleanup logs)
+    master_label = master_name or 'Master Run'
     conn = get_db_connection()
     with conn.cursor(cursor_factory=DictCursor) as cur:
         cur.execute(
             "INSERT INTO archive_jobs (stack_name, start_time, status, log) VALUES (%s, %s, %s, %s) RETURNING id;",
-            ('SYSTEM_JOB', datetime.now(), 'Running', 'Starting archiving process...\n')
+            (master_label, datetime.now(), 'Running', 'Starting archiving process...\n')
         )
         master_job_id = cur.fetchone()['id']
         conn.commit()
     conn.close()
+
+    created_archives = []
 
     for stack_path in selected_stack_paths:
         stack_name = os.path.basename(stack_path)
@@ -242,6 +246,7 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir):
             
             # 2. Archive Stack
             archive_path, archive_size = create_archive(stack_name, stack_path, archive_dir, job_id)
+            created_archives.append((archive_path, archive_size))
             
             # 3. Start Stack
             compose_action(stack_path, job_id, action="up")
@@ -264,8 +269,8 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir):
             # send success notification for this stack
             try:
                 send_apprise_notification(
-                    title=f"Backup success: {stack_name}",
-                    body=f"Archive created: {archive_path}\nSize: {format_bytes(archive_size)}",
+                    title=f"Backup success: {stack_name} (Job {job_id})",
+                    body=f"Job: {stack_name} (ID: {job_id})\nArchive created: {archive_path}\nSize: {format_bytes(archive_size)}\n\nLog:\n" + (get_job_log(job_id) or ''),
                     job_id=job_id
                 )
             except Exception:
@@ -303,7 +308,7 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir):
 
     # After all stacks are processed, run cleanup
     try:
-        cleanup_local_archives(archive_dir, retention_days, master_job_id)
+        deleted_count, freed_space = cleanup_local_archives(archive_dir, retention_days, master_job_id)
         log_to_db(master_job_id, 'Archiving process finished.')
         status = 'Success'
     except Exception as e:
@@ -318,10 +323,107 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir):
     conn.close()
     # send master notification
     try:
+        # Build summary block
+        summary_lines = []
+        summary_lines.append('SUMMARY OF CREATED ARCHIVES (Alphabetical by filename):')
+        summary_lines.append('----------------------------------------------------------------')
+        total_new = 0
+        # sort by filename
+        for path, size in sorted(created_archives, key=lambda x: os.path.basename(x[0]).lower()):
+            summary_lines.append(f"{format_bytes(size):>10}    {path}")
+            total_new += size
+        summary_lines.append('----------------------------------------------------------------')
+        summary_lines.append(f"{format_bytes(total_new):>10}    TOTAL SIZE OF NEW ARCHIVES")
+        summary_lines.append('----------------------------------------------------------------')
+        summary_lines.append('\n')
+        # Disk usage
+        try:
+            usage = shutil.disk_usage('/')
+            disk_line = f"Disk: / | Total: {usage.total//(1024**3)}G | Used: {usage.used//(1024**3)}G | Usage: {usage.used*100//usage.total}%"
+        except Exception:
+            disk_line = 'Disk usage: unavailable'
+        summary_lines.append('DISK USAGE CHECK (on /):')
+        summary_lines.append('----------------------------------------------------------------')
+        summary_lines.append(disk_line)
+        # backup dir size
+        try:
+            backup_size = get_dir_size(archive_dir)
+            summary_lines.append(f"Backup Content Size ({archive_dir}): {format_bytes(backup_size)}")
+        except Exception:
+            summary_lines.append(f"Backup Content Size ({archive_dir}): unavailable")
+        summary_lines.append('----------------------------------------------------------------')
+        summary_lines.append('\n')
+        # retention cleanup
+        try:
+            cleanup_msg = f"RETENTION CLEANUP (Older than {retention_days} days):\n----------------------------------------------------------------"
+            if deleted_count == 0:
+                cleanup_msg += '\nNo files older than {0} days were deleted.'.format(retention_days)
+            else:
+                cleanup_msg += f"\nDeleted {deleted_count} files, freeing {format_bytes(freed_space)}."
+            cleanup_msg += '\n----------------------------------------------------------------'
+        except Exception:
+            cleanup_msg = 'Retention cleanup: unavailable'
+
+        summary = '\n'.join(summary_lines) + '\n\n' + cleanup_msg
+
+        # fetch master log
+        master_log = get_job_log(master_job_id) or ''
+
+        # Include master description at top if provided
+        desc_block = ''
+        if master_description:
+            desc_block = f"DESCRIPTION: {master_description}\n\n"
+
+        body = desc_block + summary + '\n\nLOG:\n' + master_log
+
+        job_name = get_job_name(master_job_id) or f"Job {master_job_id}"
         send_apprise_notification(
-            title=f"Backup run {status}",
-            body=f"Master job {master_job_id} completed with status: {status}",
+            title=f"Backup run {status} — {job_name}",
+            body=f"Master job {job_name} (ID: {master_job_id}) completed with status: {status}\n\n" + body,
             job_id=master_job_id
         )
     except Exception:
         pass
+
+
+def get_job_log(job_id):
+    try:
+        conn = get_db_connection()
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            cur.execute("SELECT log FROM archive_jobs WHERE id = %s;", (job_id,))
+            row = cur.fetchone()
+            return row['log'] if row and 'log' in row else ''
+    except Exception:
+        return ''
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def get_dir_size(path):
+    total = 0
+    for root, dirs, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except Exception:
+                pass
+    return total
+
+
+def get_job_name(job_id):
+    try:
+        conn = get_db_connection()
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            cur.execute("SELECT stack_name FROM archive_jobs WHERE id = %s;", (job_id,))
+            row = cur.fetchone()
+            return row['stack_name'] if row and 'stack_name' in row else None
+    except Exception:
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass

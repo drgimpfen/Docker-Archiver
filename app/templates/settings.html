@@ -19,6 +19,21 @@
         <textarea class="form-control" id="apprise_urls" name="apprise_urls" rows="6" placeholder="e.g. mailto://user:pass@example.com\nhttps://api.pushover.net/1/messages.json?token=...">{{ apprise_urls or '' }}</textarea>
         <div class="form-text">Enter one Apprise URL per line. See Apprise docs for service URLs.</div>
         <div class="form-text mt-1">Apprise documentation: <a href="https://apprise.readthedocs.io/en/latest/" target="_blank" rel="noreferrer">https://apprise.readthedocs.io</a></div>
+        <div class="form-text mt-2">
+          <a class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" href="#appriseExamples" role="button" aria-expanded="false" aria-controls="appriseExamples">Show Apprise Examples</a>
+        </div>
+        <div class="collapse mt-2" id="appriseExamples">
+          <div class="card card-body">
+            <pre class="apprise-examples mb-0">Email (Gmail): mailto://user:app_password@gmail.com?smtp=smtp.gmail.com&mode=starttls
+Slack: slack://TokenA/TokenB/TokenC/
+Discord: discord://webhook_id/webhook_token
+Telegram: tgram://bot_token/chat_id
+Microsoft Teams: msteams://TokenA/TokenB/TokenC/
+Pushover: pover://user@token
+ntfy: ntfy://topic/
+Custom Webhook: json://hostname/path/to/endpoint</pre>
+          </div>
+        </div>
       </div>
 
       <button type="submit" class="btn btn-primary">Save Settings</button>

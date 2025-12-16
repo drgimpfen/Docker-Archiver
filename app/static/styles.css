@@ -41,18 +41,20 @@
     --table-hover: rgba(0,0,0,0.04);
 }
 
-.dark-mode {
+}
     --bg: #0b1220;
     --text: #e6eef6;
-    --muted: #9aa8bb;
-    --card-bg: #0f1720;
-    --panel-bg: #0c1319;
-    --surface: #0b1015;
-    --border: #1e2933;
-    --log-bg: #071014;
-    --table-hover: rgba(255,255,255,0.03);
-    background-color: var(--bg);
-    color: var(--text);
+    /* Dark mode palette following the provided guidelines */
+    --bg: #121214; /* off-black, avoid pure black */
+    --text: #E0E0E0; /* slightly brightened white for AA contrast */
+    --muted: #A0A0A0; /* secondary text */
+    --card-bg: #1F1F1F; /* raised surface (navbar, cards) */
+    --panel-bg: #161616; /* panels / inputs */
+    --surface: #181818; /* deepest surface */
+    --border: #232323; /* subtle borders */
+    --log-bg: #0f1416; /* code / pre blocks */
+    --table-hover: rgba(255,255,255,0.025);
+    --accent: #2a7ac7; /* slightly desaturated primary */
 }
 
 body {
@@ -64,8 +66,8 @@ body {
 .card, .navbar, .table, .stack-list, .modal-content {
     background-color: var(--card-bg) !important;
     border-color: var(--border) !important;
-    transition: background-color 200ms ease, border-color 200ms ease;
-    box-shadow: 0 2px 8px rgba(2,6,12,0.6);
+    transition: background-color 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35); /* subtle depth */
 }
 
 .log-content {
@@ -133,3 +135,15 @@ body {
 .footer .footer-link { color: var(--muted); text-decoration: none; }
 .footer .footer-link:hover { color: var(--text); }
 .footer .footer-icon { width: 16px; height: 16px; vertical-align: text-bottom; margin-right: 6px; }
+
+/* Schedules page tweaks */
+.schedule-stack-path { max-width: 420px; white-space: normal; word-break: break-word; }
+.card .table { background-color: transparent !important; }
+.card .table th, .card .table td { background-color: transparent !important; border-color: var(--border) !important; color: var(--text) !important; }
+.card .table thead th { background-color: rgba(0,0,0,0.04) !important; }
+.card { box-shadow: none; }
+.card .card-body { padding: 1.25rem; }
+
+/* Apprise examples block styling */
+pre.apprise-examples { background-color: var(--log-bg); border: 1px solid var(--border); padding: 10px; border-radius: 6px; color: var(--text); overflow:auto; }
+.dark-mode pre.apprise-examples { background-color: #071014; }

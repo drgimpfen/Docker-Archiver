@@ -129,6 +129,8 @@ def init_db():
                 last_run TIMESTAMP
             );
         """)
+        # Add optional description column to schedules
+        cur.execute("ALTER TABLE schedules ADD COLUMN IF NOT EXISTS description TEXT;")
         # Set default retention if not present
         cur.execute("INSERT INTO settings (key, value) VALUES ('retention_days', '28') ON CONFLICT (key) DO NOTHING;")
         conn.commit()
@@ -196,7 +198,10 @@ def _job_runner(schedule_id):
             conn.commit()
         conn.close()
 
-        threading.Thread(target=backup.run_archive_job, args=(stack_paths, retention, CONTAINER_BACKUP_DIR), daemon=True).start()
+        # pass schedule name and description to backup as master_name/master_description
+        master_name = s.get('name')
+        master_description = s.get('description') if s.get('description') else None
+        threading.Thread(target=backup.run_archive_job, args=(stack_paths, retention, CONTAINER_BACKUP_DIR, master_name, master_description), daemon=True).start()
     except Exception as e:
         print(f"[scheduler] job_runner error for schedule {schedule_id}: {e}")
 
@@ -874,9 +879,10 @@ def start_archive_route():
     stack_names_for_flash = [os.path.basename(path) for path in selected_stack_paths]
 
     # Run the archiving process in a background thread
+    master_name = f"Manual Run: {', '.join(stack_names_for_flash)}"
     thread = threading.Thread(
         target=backup.run_archive_job,
-        args=(selected_stack_paths, retention_days, CONTAINER_BACKUP_DIR)
+        args=(selected_stack_paths, retention_days, CONTAINER_BACKUP_DIR, master_name, None)
     )
     thread.start()
 
@@ -985,14 +991,15 @@ def create_schedule_route():
 
     name = request.form.get('name')
     time_val = request.form.get('time')
+    description = request.form.get('description')
     stacks = request.form.getlist('stacks')
     retention_days = int(request.form.get('retention_days') or 28)
     stack_text = '\n'.join(stacks)
     conn = get_db_connection()
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO schedules (name, time, stack_paths, retention_days, enabled) VALUES (%s, %s, %s, %s, %s);",
-            (name, time_val, stack_text, retention_days, True)
+            "INSERT INTO schedules (name, time, stack_paths, retention_days, enabled, description) VALUES (%s, %s, %s, %s, %s, %s);",
+            (name, time_val, stack_text, retention_days, True, description)
         )
         conn.commit()
     conn.close()
@@ -1000,7 +1007,13 @@ def create_schedule_route():
     # reload scheduler if running
     try:
         if _SCHEDULER is not None:
-            _schedule_db_job(_SCHEDULER, {'id': get_last_insert_id(), 'time': time_val})
+            # fetch full schedule row and register it
+            new_id = get_last_insert_id()
+            with get_db_connection().cursor(cursor_factory=DictCursor) as cur:
+                cur.execute("SELECT * FROM schedules WHERE id = %s;", (new_id,))
+                new_s = cur.fetchone()
+            if new_s:
+                _schedule_db_job(_SCHEDULER, new_s)
     except Exception:
         pass
     return redirect(url_for('schedules_route'))
@@ -1035,6 +1048,7 @@ def edit_schedule_route(schedule_id):
     if request.method == 'POST':
         name = request.form.get('name')
         time_val = request.form.get('time')
+        description = request.form.get('description')
         stacks = request.form.getlist('stacks')
         retention_days = int(request.form.get('retention_days') or 28)
         enabled = True if request.form.get('enabled') == 'true' else False
@@ -1042,8 +1056,8 @@ def edit_schedule_route(schedule_id):
         stack_text = '\n'.join(stacks)
         conn = get_db_connection()
         with conn.cursor() as cur:
-            cur.execute("UPDATE schedules SET name=%s, time=%s, stack_paths=%s, retention_days=%s, enabled=%s WHERE id=%s;",
-                        (name, time_val, stack_text, retention_days, enabled, schedule_id))
+            cur.execute("UPDATE schedules SET name=%s, time=%s, stack_paths=%s, retention_days=%s, enabled=%s, description=%s WHERE id=%s;",
+                        (name, time_val, stack_text, retention_days, enabled, description, schedule_id))
             conn.commit()
         conn.close()
         # update scheduler
