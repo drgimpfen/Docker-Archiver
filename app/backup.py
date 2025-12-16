@@ -334,8 +334,8 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir, master_na
         conn = get_db_connection()
         with conn.cursor(cursor_factory=DictCursor) as cur:
             cur.execute(
-                "INSERT INTO archive_jobs (stack_name, start_time, status, log) VALUES (%s, %s, %s, %s) RETURNING id;",
-                (stack_name, start_time, 'Running', f"Starting archive for stack: {stack_name}\n")
+                "INSERT INTO archive_jobs (stack_name, start_time, status, log, master_id) VALUES (%s, %s, %s, %s, %s) RETURNING id;",
+                (stack_name, start_time, 'Running', f"Starting archive for stack: {stack_name}\n", master_job_id)
             )
             job_id = cur.fetchone()['id']
             conn.commit()
@@ -360,7 +360,12 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir, master_na
             # 4. Update DB with Success
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
-            job_log.append(f"Archived {stack_name} -> {archive_path}")
+            job_log.append(f"Archived {stack_name} -> {archive_path} ({format_bytes(archive_size)})")
+            # add an entry to the master job log so the UI shows per-stack details
+            try:
+                log_to_db(master_job_id, f"Archived {stack_name} -> {archive_path} ({format_bytes(archive_size)})")
+            except Exception:
+                pass
             conn = get_db_connection()
             with conn.cursor() as cur:
                 cur.execute(
@@ -369,7 +374,7 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir, master_na
                     SET status = 'Success', end_time = %s, duration_seconds = %s, archive_path = %s, archive_size_bytes = %s, log = log || %s
                     WHERE id = %s;
                     """,
-                    (end_time, int(duration), archive_path, archive_size, 'Archive completed successfully.', job_id)
+                    (end_time, int(duration), archive_path, archive_size, f"Archive completed: {archive_path} ({format_bytes(archive_size)})", job_id)
                 )
                 conn.commit()
             conn.close()
@@ -415,6 +420,10 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir, master_na
             duration = (end_time - start_time).total_seconds()
             error_log = f"FATAL: Archive failed for {stack_name}. Reason: {e}\n"
             log_to_db(job_id, error_log)
+            try:
+                log_to_db(master_job_id, f"FAILED: {stack_name} -> {e}")
+            except Exception:
+                pass
             conn = get_db_connection()
                 # Log the successful archiving
             with conn.cursor() as cur:

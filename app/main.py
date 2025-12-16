@@ -93,6 +93,8 @@ def init_db():
         """)
         # Mark master jobs explicitly so UI can show only masters when desired
         cur.execute("ALTER TABLE archive_jobs ADD COLUMN IF NOT EXISTS is_master BOOLEAN DEFAULT FALSE;")
+        # Add master_id to link per-stack jobs to their master run
+        cur.execute("ALTER TABLE archive_jobs ADD COLUMN IF NOT EXISTS master_id INTEGER;")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 key VARCHAR(100) PRIMARY KEY,
@@ -1034,6 +1036,36 @@ def history():
     return render_template('history.html', jobs=all_jobs)
 
 
+@app.route('/history/master_children/<int:master_id>')
+def master_children(master_id):
+    """Returns JSON array of per-stack jobs belonging to a master job."""
+    try:
+        conn = get_db_connection()
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            cur.execute(
+                "SELECT id, stack_name, start_time, end_time, duration_seconds, status, archive_size_bytes, archive_path, log FROM archive_jobs WHERE master_id = %s ORDER BY start_time ASC;",
+                (master_id,)
+            )
+            rows = cur.fetchall()
+        conn.close()
+        results = []
+        for r in rows:
+            results.append({
+                'id': r.get('id'),
+                'stack_name': r.get('stack_name'),
+                'start_time': r.get('start_time').strftime('%Y-%m-%d %H:%M:%S') if r.get('start_time') else None,
+                'end_time': r.get('end_time').strftime('%Y-%m-%d %H:%M:%S') if r.get('end_time') else None,
+                'duration_seconds': r.get('duration_seconds'),
+                'status': r.get('status'),
+                'archive_size_bytes': r.get('archive_size_bytes'),
+                'archive_path': r.get('archive_path'),
+                'log': r.get('log')
+            })
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 def format_bytes(size):
     """Formats a size in bytes to a human-readable string."""
     # This helper function can be placed anywhere, e.g., in a separate utility file or here.
@@ -1135,6 +1167,16 @@ def scan_archives():
                 result['manual'].append(group)
         except Exception:
             result['manual'].append(group)
+
+    # Sort groups so the newest group (by internal latest timestamp) appears first
+    try:
+        result['scheduled'].sort(key=lambda g: g.get('__last_ts', 0), reverse=True)
+    except Exception:
+        pass
+    try:
+        result['manual'].sort(key=lambda g: g.get('__last_ts', 0), reverse=True)
+    except Exception:
+        pass
 
     # Determine which group (scheduled/manual) to open by default: choose the group with the newest timestamp
     try:

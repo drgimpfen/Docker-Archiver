@@ -45,6 +45,7 @@
                                     <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#logModal-{{ job.id }}">
                                         View Log
                                     </button>
+                                    <button class="btn btn-sm btn-outline-primary ms-2 btn-show-stacks" data-master-id="{{ job.id }}">Show Stacks</button>
                                     <!-- Modal -->
                                     <div class="modal fade" id="logModal-{{ job.id }}" tabindex="-1" aria-labelledby="logModalLabel-{{ job.id }}" aria-hidden="true">
                                         <div class="modal-dialog modal-lg">
@@ -64,6 +65,14 @@
                                 {% endif %}
                             </td>
                         </tr>
+                        <tr class="children-row" id="children-row-{{ job.id }}" style="display:none;">
+                            <td colspan="7">
+                                <div class="children-container" id="children-container-{{ job.id }}">
+                                    <!-- per-stack entries will be injected here -->
+                                    <div class="text-center text-muted">Loading...</div>
+                                </div>
+                            </td>
+                        </tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -72,4 +81,56 @@
         {% endif %}
     </div>
 </div>
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+    document.querySelectorAll('.btn-show-stacks').forEach(function(btn){
+        btn.addEventListener('click', function(e){
+            var masterId = this.getAttribute('data-master-id');
+            var containerRow = document.getElementById('children-row-' + masterId);
+            var container = document.getElementById('children-container-' + masterId);
+            if (!containerRow) return;
+            // toggle visibility
+            if (containerRow.style.display === 'none' || containerRow.style.display === ''){
+                // if not loaded yet, fetch
+                if (!container.dataset.loaded){
+                    fetch('/history/master_children/' + masterId)
+                        .then(function(resp){ return resp.json(); })
+                        .then(function(data){
+                            if (data.error){
+                                container.innerHTML = '<div class="text-danger">Error: '+data.error+'</div>';
+                                return;
+                            }
+                            if (!data.length){
+                                container.innerHTML = '<div class="text-muted">No per-stack entries found.</div>';
+                            } else {
+                                var html = '<div class="table-responsive"><table class="table table-sm table-striped mb-0"><thead><tr><th>Stack</th><th>Start</th><th>End</th><th>Duration</th><th>Status</th><th>Size</th><th>Path</th></tr></thead><tbody>';
+                                data.forEach(function(r){
+                                    var size = r.archive_size_bytes ? (Math.round((r.archive_size_bytes/1024/1024)*100)/100 + ' MB') : 'N/A';
+                                    var dur = r.duration_seconds != null ? (r.duration_seconds + 's') : 'N/A';
+                                    html += '<tr>'+
+                                        '<td>'+ (r.stack_name || '') +'</td>'+
+                                        '<td>'+ (r.start_time || '') +'</td>'+
+                                        '<td>'+ (r.end_time || '') +'</td>'+
+                                        '<td>'+ dur +'</td>'+
+                                        '<td>'+ (r.status || '') +'</td>'+
+                                        '<td>'+ size +'</td>'+
+                                        '<td style="max-width:400px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+ (r.archive_path || '') +'</td>'+
+                                    '</tr>';
+                                });
+                                html += '</tbody></table></div>';
+                                container.innerHTML = html;
+                            }
+                            container.dataset.loaded = '1';
+                        }).catch(function(err){
+                            container.innerHTML = '<div class="text-danger">Fetch error</div>';
+                        });
+                }
+                containerRow.style.display = '';
+            } else {
+                containerRow.style.display = 'none';
+            }
+        });
+    });
+});
+</script>
 {% endblock %}
