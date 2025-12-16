@@ -308,6 +308,19 @@ def get_setting(key):
     return result['value'] if result else None
 
 
+def format_duration(seconds):
+    """Format seconds into H:MM:SS or M:SS."""
+    try:
+        s = int(seconds)
+        hrs, rem = divmod(s, 3600)
+        mins, secs = divmod(rem, 60)
+        if hrs:
+            return f"{hrs}:{mins:02d}:{secs:02d}"
+        return f"{mins}:{secs:02d}"
+    except Exception:
+        return None
+
+
 def _serialize_webauthn_obj(obj):
     """Recursively serialize a WebAuthn options object to JSON-serializable primitives."""
     if obj is None:
@@ -1066,6 +1079,22 @@ def master_children(master_id):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/job_log/<int:job_id>')
+def job_log(job_id):
+    """Return the raw log text for a specific job id as JSON."""
+    try:
+        conn = get_db_connection()
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            cur.execute("SELECT log FROM archive_jobs WHERE id = %s;", (job_id,))
+            row = cur.fetchone()
+        conn.close()
+        if not row:
+            return jsonify({'error': 'Job not found'}), 404
+        return jsonify({'log': row.get('log') or ''})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 def format_bytes(size):
     """Formats a size in bytes to a human-readable string."""
     # This helper function can be placed anywhere, e.g., in a separate utility file or here.
@@ -1125,11 +1154,36 @@ def scan_archives():
                     file_path = os.path.join(stack_dir, filename)
                     try:
                         stat_info = os.stat(file_path)
-                        archive_files.append({
+                        # Base archive info from filesystem
+                        entry = {
                             'name': filename,
                             'size': stat_info.st_size,
-                            'created_at': datetime.fromtimestamp(stat_info.st_mtime)
-                        })
+                            'created_at': datetime.fromtimestamp(stat_info.st_mtime),
+                            'duration_seconds': None,
+                            'archive_size_bytes_db': None,
+                            'archive_path_db': None
+                        }
+                        # Try to enrich from DB: find a matching archive_jobs row by archive_path ending with this file
+                        try:
+                            conn = get_db_connection()
+                            with conn.cursor(cursor_factory=DictCursor) as cur:
+                                # Look for a recent job with archive_path ending in the expected path
+                                expected_suffix = os.path.join(top, stack_name, filename).replace('\\', '/')
+                                cur.execute("SELECT id, archive_size_bytes, duration_seconds, archive_path FROM archive_jobs WHERE archive_path LIKE %s ORDER BY start_time DESC LIMIT 1;", ('%' + expected_suffix,))
+                                row = cur.fetchone()
+                                if row:
+                                    entry['job_id'] = row.get('id')
+                                    entry['archive_size_bytes_db'] = row.get('archive_size_bytes')
+                                    entry['duration_seconds'] = row.get('duration_seconds')
+                                    entry['duration_human'] = format_duration(row.get('duration_seconds')) if row.get('duration_seconds') is not None else None
+                                    entry['archive_path_db'] = row.get('archive_path')
+                            conn.close()
+                        except Exception:
+                            try:
+                                conn.close()
+                            except Exception:
+                                pass
+                        archive_files.append(entry)
                         total_size_bytes += stat_info.st_size
                         if stat_info.st_mtime > last_backup_timestamp:
                             last_backup_timestamp = stat_info.st_mtime
@@ -1158,6 +1212,31 @@ def scan_archives():
             except Exception:
                 continue
         group['__last_ts'] = group_max_ts
+
+        # Enrich group with last master job info and total size (from filesystem)
+        try:
+            conn = get_db_connection()
+            with conn.cursor(cursor_factory=DictCursor) as cur:
+                # find latest master job for this group name
+                cur.execute("SELECT start_time, end_time, duration_seconds FROM archive_jobs WHERE is_master = true AND stack_name = %s ORDER BY start_time DESC LIMIT 1;", (top,))
+                master_row = cur.fetchone()
+            conn.close()
+            if master_row:
+                group['master_start'] = master_row.get('start_time')
+                group['master_end'] = master_row.get('end_time')
+                group['master_duration_seconds'] = master_row.get('duration_seconds')
+            else:
+                group['master_start'] = None
+                group['master_end'] = None
+                group['master_duration_seconds'] = None
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+        group['total_size_bytes'] = total_size_bytes
+        group['total_size_human'] = format_bytes(total_size_bytes)
 
         # Decide whether this top-level group is a scheduled run or a manual run
         try:

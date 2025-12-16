@@ -20,19 +20,56 @@
             </h2>
             <div id="schedCollapse-{{ loop.index }}" class="accordion-collapse collapse{% if _is_open %} show{% endif %}" aria-labelledby="schedHeading-{{ loop.index }}" data-bs-parent="#schedulesAccordion">
                 <div class="accordion-body">
+                    {% if sched.master_start or sched.total_size_human %}
+                    <div class="mb-2 small text-muted">
+                        {% if sched.master_start %}
+                            Start: {{ sched.master_start.strftime('%Y-%m-%d %H:%M:%S') }}
+                        {% else %}
+                            Start: N/A
+                        {% endif %}
+                        &nbsp;|&nbsp;
+                        {% if sched.master_end %}
+                            End: {{ sched.master_end.strftime('%Y-%m-%d %H:%M:%S') }}
+                        {% else %}
+                            End: N/A
+                        {% endif %}
+                        &nbsp;|&nbsp;
+                        {% if sched.master_duration_seconds is not none %}
+                            Run: {{ sched.master_duration_seconds }}s
+                        {% else %}
+                            Run: N/A
+                        {% endif %}
+                        &nbsp;|&nbsp; Total size: {{ sched.total_size_human }}
+                    </div>
+                    {% endif %}
                     <div class="table-responsive">
                         <table class="table table-sm mb-0">
                             <thead>
-                                <tr><th>Stack</th><th>Filename</th><th>Size</th><th>Date</th><th class="text-end">Actions</th></tr>
+                                <tr><th>Stack</th><th>Filename</th><th>Size</th><th>Date</th><th>Duration</th><th class="text-end">Actions</th></tr>
                             </thead>
                             <tbody>
                                 {% for stack_name, stack_info in sched.stacks.items() %}
                                     {% for archive in stack_info.files %}
                                     <tr>
                                         <td>{{ stack_name }}</td>
-                                        <td>{{ archive.name }}</td>
+                                        <td>
+                                            {% if archive.job_id %}
+                                                <a href="#" class="archive-log-link" data-job-id="{{ archive.job_id }}">{{ archive.name }}</a>
+                                            {% else %}
+                                                {{ archive.name }}
+                                            {% endif %}
+                                        </td>
                                         <td>{{ (archive.size / 1024 / 1024) | round(2) }} MB</td>
                                         <td>{{ archive.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                                        <td>
+                                            {% if archive.duration_human %}
+                                                {{ archive.duration_human }}
+                                            {% elif archive.duration_seconds is not none %}
+                                                {{ archive.duration_seconds }}s
+                                            {% else %}
+                                                N/A
+                                            {% endif %}
+                                        </td>
                                         <td class="text-end">
                                             <a href="{{ url_for('download_archive', stack_name=(sched.name + '/' + stack_name), archive_filename=archive.name) }}" class="btn btn-sm btn-primary">Download</a>
                                             <form action="{{ url_for('delete_archive', stack_name=(sched.name + '/' + stack_name), archive_filename=archive.name) }}" method="post" class="d-inline">
@@ -66,10 +103,32 @@
             </h2>
             <div id="manualCollapse-{{ loop.index }}" class="accordion-collapse collapse{% if _is_open %} show{% endif %}" aria-labelledby="manualHeading-{{ loop.index }}" data-bs-parent="#manualAccordion">
                 <div class="accordion-body">
+                    {% if sched.master_start or sched.total_size_human %}
+                    <div class="mb-2 small text-muted">
+                        {% if sched.master_start %}
+                            Start: {{ sched.master_start.strftime('%Y-%m-%d %H:%M:%S') }}
+                        {% else %}
+                            Start: N/A
+                        {% endif %}
+                        &nbsp;|&nbsp;
+                        {% if sched.master_end %}
+                            End: {{ sched.master_end.strftime('%Y-%m-%d %H:%M:%S') }}
+                        {% else %}
+                            End: N/A
+                        {% endif %}
+                        &nbsp;|&nbsp;
+                        {% if sched.master_duration_seconds is not none %}
+                            Run: {{ sched.master_duration_seconds }}s
+                        {% else %}
+                            Run: N/A
+                        {% endif %}
+                        &nbsp;|&nbsp; Total size: {{ sched.total_size_human }}
+                    </div>
+                    {% endif %}
                     <div class="table-responsive">
                         <table class="table table-sm mb-0">
                             <thead>
-                                <tr><th>Stack</th><th>Filename</th><th>Size</th><th>Date</th><th class="text-end">Actions</th></tr>
+                                <tr><th>Stack</th><th>Filename</th><th>Size</th><th>Date</th><th>Duration</th><th class="text-end">Actions</th></tr>
                             </thead>
                             <tbody>
                                 {% for stack_name, stack_info in sched.stacks.items() %}
@@ -79,6 +138,13 @@
                                         <td>{{ archive.name }}</td>
                                         <td>{{ (archive.size / 1024 / 1024) | round(2) }} MB</td>
                                         <td>{{ archive.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                                        <td>
+                                            {% if archive.duration_seconds is not none %}
+                                                {{ archive.duration_seconds }}s
+                                            {% else %}
+                                                N/A
+                                            {% endif %}
+                                        </td>
                                         <td class="text-end">
                                             <a href="{{ url_for('download_archive', stack_name=(sched.name + '/' + stack_name), archive_filename=archive.name) }}" class="btn btn-sm btn-primary">Download</a>
                                             <form action="{{ url_for('delete_archive', stack_name=(sched.name + '/' + stack_name), archive_filename=archive.name) }}" method="post" class="d-inline">
@@ -101,5 +167,46 @@
 {% else %}
 <div class="alert alert-info" role="alert">No archives found in the directory.</div>
 {% endif %}
+
+<!-- Modal for archive job logs -->
+<div class="modal fade" id="archiveLogModal" tabindex="-1" aria-labelledby="archiveLogModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="archiveLogModalLabel">Archive Job Log</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <pre id="archiveLogContent" class="log-content">Loading...</pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+        document.querySelectorAll('.archive-log-link').forEach(function(el){
+                el.addEventListener('click', function(e){
+                        e.preventDefault();
+                        var jobId = this.getAttribute('data-job-id');
+                        var modal = new bootstrap.Modal(document.getElementById('archiveLogModal'));
+                        document.getElementById('archiveLogContent').textContent = 'Loading...';
+                        fetch('/job_log/' + jobId)
+                                .then(function(r){ return r.json(); })
+                                .then(function(j){
+                                        if (j.error){
+                                                document.getElementById('archiveLogContent').textContent = 'Error: ' + j.error;
+                                        } else {
+                                                document.getElementById('archiveLogContent').textContent = j.log || '';
+                                        }
+                                        modal.show();
+                                }).catch(function(){
+                                        document.getElementById('archiveLogContent').textContent = 'Failed to load log.';
+                                        modal.show();
+                                });
+                });
+        });
+});
+</script>
 
 {% endblock %}
