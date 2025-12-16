@@ -80,6 +80,58 @@ body {
     padding: 2rem;
 }
 
+/* Improve readability for Materialize login card */
+.login-card {
+    background-color: var(--card-bg) !important;
+    color: var(--text) !important;
+}
+.login-card .card-content, .login-card .card-body {
+    background-color: transparent !important;
+    color: var(--text) !important;
+}
+.login-card .card-title {
+    color: var(--text) !important;
+    opacity: 0.95;
+    font-weight: 700;
+}
+.login-card .input-field label {
+    color: rgba(255,255,255,0.75) !important;
+}
+.login-card .input-field input[type=text],
+.login-card .input-field input[type=text],
+.login-card .input-field input[type=password] {
+    color: var(--text) !important;
+    background: transparent !important;
+    border-bottom: 1px solid rgba(255,255,255,0.06) !important;
+    -webkit-text-fill-color: var(--text) !important;
+    caret-color: var(--accent) !important;
+}
+
+/* Autofill / browser fill */
+.login-card .input-field input:-webkit-autofill,
+.login-card .input-field input:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--text) !important;
+    box-shadow: 0 0 0px 1000px transparent inset !important;
+}
+
+/* Placeholder color */
+.login-card .input-field input::placeholder { color: rgba(255,255,255,0.45) !important; }
+/* Active / focused label uses accent */
+.login-card .input-field input:focus + label {
+    color: var(--accent) !important;
+}
+/* Avoid showing validation red underline in dark mode */
+.login-card .input-field input.invalid {
+    border-bottom: 1px solid rgba(255,255,255,0.06) !important;
+}
+.login-card .helper-text {
+    color: var(--muted) !important;
+}
+.login-card .btn {
+    background-color: var(--accent) !important;
+    color: #ffffff !important;
+}
+
 .log-content {
     background-color: var(--log-bg) !important;
 }
