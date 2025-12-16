@@ -175,6 +175,7 @@ initialize_app()
 # --- Scheduler (APScheduler) ---
 from apscheduler.schedulers.background import BackgroundScheduler
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+import threading as _threading
 
 
 def _job_runner(schedule_id):
@@ -454,6 +455,25 @@ def discover_stacks():
             stacks.append({'name': stack_dir, 'path': stack_path})
 
     return sorted(stacks, key=lambda s: s['name'])
+
+
+def discover_stacks_with_timeout(timeout_seconds=2):
+    """Call `discover_stacks()` but return empty list on timeout to avoid blocking request threads."""
+    result = []
+    def _worker():
+        nonlocal result
+        try:
+            result = discover_stacks()
+        except Exception:
+            result = []
+
+    th = _threading.Thread(target=_worker)
+    th.daemon = True
+    th.start()
+    th.join(timeout_seconds)
+    if th.is_alive():
+        return []
+    return result
 
 
 @app.before_request
@@ -878,7 +898,29 @@ def index():
         recent_jobs = cur.fetchall()
     conn.close()
 
-    return render_template('index.html', stacks=stacks, retention_days=retention_days, recent_jobs=recent_jobs)
+    # expose whether a cleanup is currently in progress so the UI can disable the manual trigger
+    cleanup_flag = get_setting('cleanup_in_progress')
+    cleanup_in_progress = True if (cleanup_flag and str(cleanup_flag).lower() == 'true') else False
+
+    # default cleanup description auto-fill: 'Manual Cleanup by <username> at <timestamp>'
+    default_cleanup_description = ''
+    user_id = session.get('user_id')
+    if user_id:
+        try:
+            user = get_user_data_by_id(user_id)
+            uname = user.get('display_name') or user.get('username')
+        except Exception:
+            uname = None
+    else:
+        uname = None
+
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    if uname:
+        default_cleanup_description = f"Manual Cleanup by {uname} at {ts}"
+    else:
+        default_cleanup_description = f"Manual Cleanup at {ts}"
+
+    return render_template('index.html', stacks=stacks, retention_days=retention_days, recent_jobs=recent_jobs, cleanup_in_progress=cleanup_in_progress, default_cleanup_description=default_cleanup_description)
 
 @app.route('/archive', methods=['POST'])
 def start_archive_route():
@@ -1009,7 +1051,7 @@ def schedules_route():
 
     # Listing only; creation/editing handled by separate endpoints
 
-    stacks = discover_stacks()
+    stacks = discover_stacks_with_timeout()
     conn = get_db_connection()
     with conn.cursor(cursor_factory=DictCursor) as cur:
         cur.execute("SELECT * FROM schedules ORDER BY id DESC;")
@@ -1137,7 +1179,7 @@ def edit_schedule_route(schedule_id):
         flash('Schedule updated.', 'success')
         return redirect(url_for('schedules_route'))
 
-    stacks = discover_stacks()
+    stacks = discover_stacks_with_timeout()
     return render_template('schedules_edit.html', sch=sch, stacks=stacks)
 
 
