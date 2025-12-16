@@ -156,6 +156,12 @@ body {
     border-radius: 4px;
 }
 
+/* Materialize brand/logo alignment */
+.brand-logo { display: flex !important; align-items: center !important; height: 56px; }
+.brand-logo .header-logo { height: 28px; margin-right: 10px; vertical-align: middle; }
+.brand-logo span { line-height: 28px; color: var(--text); font-weight: 600; }
+.nav-wrapper { padding-left: 12px; padding-right: 12px; }
+
 .nav-link { color: inherit !important; }
 
 /* Buttons: prefer bootstrap defaults, but tweak dark-mode accents */
