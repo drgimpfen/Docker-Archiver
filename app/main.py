@@ -333,7 +333,23 @@ def _serialize_webauthn_obj(obj):
         return obj
     # dict
     if isinstance(obj, dict):
-        return {k: _serialize_webauthn_obj(v) for k, v in obj.items()}
+        # Map some snake_case keys from the library to the camelCase names
+        # expected by the browser WebAuthn API (publicKeyCredentialCreationOptions).
+        key_map = {
+            'pub_key_cred_params': 'pubKeyCredParams',
+            'authenticator_selection': 'authenticatorSelection',
+            'exclude_credentials': 'excludeCredentials',
+            'rp': 'rp',
+            'user': 'user',
+            'timeout': 'timeout',
+            'attestation': 'attestation',
+            'challenge': 'challenge'
+        }
+        out = {}
+        for k, v in obj.items():
+            mapped = key_map.get(k, k)
+            out[mapped] = _serialize_webauthn_obj(v)
+        return out
     # list/tuple
     if isinstance(obj, (list, tuple)):
         return [_serialize_webauthn_obj(v) for v in obj]
