@@ -269,8 +269,8 @@ body.has-sidebar .app-main { margin-left: 240px; }
 /* Header social icons */
 .header-social-icon { height: 20px; width: auto; margin-left: 8px; opacity: 0.95; }
 
-/* Recent activity card centering */
-.recent-card { max-width: 1200px; margin: 0 auto; }
+/* Recent activity card: use full available width inside the container and remove fixed max-width */
+.recent-card { width: 100%; max-width: none; margin: 0; padding: 0 12px; box-shadow: none; border-radius: 8px; }
 
 /* Ensure recent card text/table is readable in dark mode */
 .recent-card, .recent-card th, .recent-card td, .recent-card .card-header {
@@ -279,9 +279,9 @@ body.has-sidebar .app-main { margin-left: 240px; }
 .recent-card .card-header { background-color: var(--card-bg); border-bottom: 1px solid var(--border); }
 .recent-card .table { color: var(--text) !important; }
 
-/* Login card centering */
-.login-card { max-width: 560px; margin: 0 auto; }
-.login-card .card-body { padding: 1.5rem; }
+/* Login card: wider and centered on larger screens */
+.login-card { width: 100%; max-width: 900px; margin: 0 auto; }
+.login-card .card-body { padding: 2rem; }
 
 
 
