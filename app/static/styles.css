@@ -149,6 +149,38 @@ body {
 
 .accordion .list-card { margin-bottom: 8px; border-radius: 8px; }
 
+/* Accordion / Archives polish: make headers match dark theme and use subtle accent when expanded */
+.accordion-button {
+    background-color: var(--card-bg) !important;
+    color: var(--text) !important;
+    border: 1px solid rgba(255,255,255,0.03) !important;
+}
+.accordion-button:not(.collapsed) {
+    /* subtle accent background when expanded */
+    background-color: rgba(93,182,255,0.08) !important; /* light tint of --accent */
+    color: var(--text) !important;
+}
+.accordion-button.collapsed {
+    box-shadow: none !important;
+}
+.accordion-item.list-card {
+    background-color: var(--card-bg) !important;
+    border: 1px solid rgba(255,255,255,0.03) !important;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+    margin-bottom: 0.6rem;
+    border-radius: 8px;
+}
+.accordion-body {
+    background-color: var(--card-bg) !important;
+    color: var(--text) !important;
+}
+
+/* Make badge-secondary more muted on dark background */
+.dark-mode .badge-secondary {
+    background-color: rgba(255,255,255,0.06) !important;
+    color: var(--text) !important;
+}
+
 /* Make section headings brighter and slightly larger */
 h2 { color: var(--text); font-weight:700; margin-bottom: 0.75rem; }
 
