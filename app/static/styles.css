@@ -39,7 +39,7 @@
     --border: #dee2e6;
     --log-bg: #f8f9fa;
     --table-hover: rgba(0,0,0,0.04);
-    --accent: #0d6efd;
+    --accent: #5db6ff; /* lighter accent */
 }
 
 /* Dark mode overrides applied when body has .dark-mode */
@@ -54,7 +54,7 @@
     --border: rgba(255,255,255,0.06);
     --log-bg: #071018;
     --table-hover: rgba(255,255,255,0.035);
-    --accent: #2a7ac7;
+    --accent: #5db6ff; /* lighter accent matching :root */
 }
 
 body {
@@ -68,6 +68,16 @@ body {
     border-color: var(--border) !important;
     transition: background-color 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
     box-shadow: 0 4px 12px rgba(0,0,0,0.55);
+}
+
+/* Stronger visual treatment for login card to improve contrast */
+.login-card {
+    border-radius: 10px;
+    padding: 0.25rem;
+}
+.login-card .card-body {
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.02));
+    padding: 2rem;
 }
 
 .log-content {
@@ -98,8 +108,8 @@ body {
 
 /* Buttons: prefer bootstrap defaults, but tweak dark-mode accents */
 .dark-mode .btn-primary {
-    background-color: #246bff !important;
-    border-color: #1b5ed0 !important;
+    background-color: var(--accent) !important;
+    border-color: rgba(0,0,0,0.2) !important;
     color: #fff !important;
 }
 
@@ -115,6 +125,42 @@ body {
     color: var(--text) !important;
     border: 1px solid rgba(255,255,255,0.06) !important;
 }
+
+/* Improve input contrast and placeholder visibility */
+.dark-mode .form-control::placeholder { color: rgba(255,255,255,0.45) !important; }
+.dark-mode .form-control { box-shadow: inset 0 1px 0 rgba(0,0,0,0.3); }
+
+/* Make primary form buttons stand out on left column */
+.row .btn-primary { background-color: var(--accent) !important; border-color: rgba(0,0,0,0.2) !important; color: #fff !important; }
+
+/* Archive control card (left column) — improved contrast and spacing */
+.archive-card { border-radius: 9px; }
+.archive-card .card-body {
+    background-color: rgba(255,255,255,0.01) !important;
+    padding: 1.6rem !important;
+}
+
+/* Make section headings brighter and slightly larger */
+h2 { color: var(--text); font-weight:700; margin-bottom: 0.75rem; }
+
+/* Form labels and stack list contrast */
+.archive-card .form-label, .archive-card .form-check-label { color: var(--text) !important; font-weight: 600; }
+.archive-card .text-muted { color: var(--muted) !important; }
+.stack-list { border: 1px solid rgba(255,255,255,0.04); background: transparent; padding: 14px; border-radius: 6px; }
+
+/* Make checkboxes more visible on dark backgrounds */
+.form-check-input { width: 18px; height: 18px; border-radius: 4px; }
+.dark-mode .form-check-input {
+    background-color: #0b0c0e !important;
+    border: 1px solid rgba(255,255,255,0.12) !important;
+    box-shadow: none !important;
+}
+
+/* Ensure small helper text and placeholders are readable */
+.archive-card .form-control::placeholder { color: rgba(255,255,255,0.45) !important; }
+
+/* Slightly increase spacing below the form to avoid cramped look */
+.archive-card .btn { margin-top: 0.25rem; }
 
 /* Tables */
 .dark-mode .table thead th {
