@@ -8,10 +8,12 @@ RUN apt-get update \
 		curl \
 		gnupg2 \
 		gosu \
-		docker.io \
-		docker-compose-plugin \
-	&& rm -rf /var/lib/apt/lists/*
-## Do not install the legacy docker-compose binary; rely on the docker CLI plugin (`docker compose`).
+	&& rm -rf /var/lib/apt/lists/* \
+	# Install Docker using the official convenience script (get.docker.com)
+	&& curl -fsSL https://get.docker.com -o /tmp/install-docker.sh \
+	&& sh /tmp/install-docker.sh \
+	&& rm -f /tmp/install-docker.sh
+	# The get.docker.com script installs Docker and docker compose; no manual plugin download required
 
 # Set working directory
 WORKDIR /app
