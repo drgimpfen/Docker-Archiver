@@ -9,9 +9,9 @@ set -euo pipefail
 #    WEB_SERVICE=web PG_CONTAINER=postgres STACK_PATH=/srv/stacks/my_stack ./tools/run_smoke_test.sh
 
 # Defaults (override via env)
-WEB_SERVICE=${WEB_SERVICE:-web}
-PG_CONTAINER=${PG_CONTAINER:-postgres}
-COMPOSE_CMD=${COMPOSE_CMD:-docker-compose}
+WEB_SERVICE=${WEB_SERVICE:-app}
+PG_CONTAINER=${PG_CONTAINER:-db}
+COMPOSE_CMD=${COMPOSE_CMD:-docker compose}
 WEB_HOST_PORT=${WEB_HOST_PORT:-}
 APP_INTERNAL_PORT=${APP_INTERNAL_PORT:-5000}
 STACK_PATH=${STACK_PATH:-}
@@ -48,7 +48,10 @@ else
   echo "No host port provided; attempting in-container curl via $COMPOSE_CMD exec $WEB_SERVICE"
   # Try to run curl inside the web container. If curl not available, try python fallback.
   set +e
-  $COMPOSE_CMD exec -T $WEB_SERVICE sh -c "curl -s -X POST http://localhost:$APP_INTERNAL_PORT/archive -F 'stacks=$STACK_PATH' -F 'manual_description=smoke test' -F 'store_unpacked=on'"
+  # Attempt to create an initial admin user (idempotent) and store cookies
+  $COMPOSE_CMD exec -T $WEB_SERVICE sh -c "curl -s -c /tmp/cookies -X POST http://localhost:$APP_INTERNAL_PORT/setup -F 'username=smoke' -F 'password=smokepass' || true"
+  # Try the archive POST using stored cookies (works if setup created a session or user already exists)
+  $COMPOSE_CMD exec -T $WEB_SERVICE sh -c "curl -s -b /tmp/cookies -X POST http://localhost:$APP_INTERNAL_PORT/archive -F 'stacks=$STACK_PATH' -F 'manual_description=smoke test' -F 'store_unpacked=on'"
   rc=$?
   if [ $rc -ne 0 ]; then
     echo "In-container curl failed (rc=$rc), trying Python fallback inside container..."
