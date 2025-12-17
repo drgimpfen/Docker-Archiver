@@ -523,14 +523,47 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir, archive_d
 
     # Mark archive job as complete
     conn = get_db_connection()
-    with conn.cursor() as cur:
-        cur.execute("UPDATE archive_jobs SET status = %s, end_time = %s WHERE id = %s;", (status, datetime.now(), archive_job_id))
-        conn.commit()
-    conn.close()
     try:
+        # update legacy archive_jobs with end_time
+        end_time = datetime.now()
+        with conn.cursor() as cur:
+            cur.execute("UPDATE archive_jobs SET status = %s, end_time = %s WHERE id = %s;", (status, end_time, archive_job_id))
+            conn.commit()
+        # compute total size of created archives
+        total_new = sum([s for (_, s) in created_archives]) if created_archives else 0
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    # Mirror to unified jobs table: include duration and total archive size when possible
+    try:
+        # attempt to read start_time from legacy archive_jobs to compute duration
+        start_time = None
         cj = get_db_connection()
+        with cj.cursor(cursor_factory=DictCursor) as csel:
+            csel.execute("SELECT start_time FROM archive_jobs WHERE id = %s;", (archive_job_id,))
+            row = csel.fetchone()
+            if row and 'start_time' in row:
+                start_time = row['start_time']
+        if start_time:
+            duration_seconds = int((end_time - start_time).total_seconds())
+        else:
+            duration_seconds = None
+
         with cj.cursor() as c2:
-            c2.execute("UPDATE jobs SET status=%s, end_time=%s WHERE legacy_archive_id = %s;", (status, datetime.now(), archive_job_id))
+            # update jobs row(s) that mirror this archive master
+            if duration_seconds is not None:
+                c2.execute(
+                    "UPDATE jobs SET status=%s, end_time=%s, duration_seconds=%s, archive_size_bytes=%s, log = COALESCE(log,'') || %s WHERE legacy_archive_id = %s;",
+                    (status, end_time, duration_seconds, total_new, f"Master finished. Total new archives size: {format_bytes(total_new)}\n", archive_job_id)
+                )
+            else:
+                c2.execute(
+                    "UPDATE jobs SET status=%s, end_time=%s, archive_size_bytes=%s, log = COALESCE(log,'') || %s WHERE legacy_archive_id = %s;",
+                    (status, end_time, total_new, f"Master finished. Total new archives size: {format_bytes(total_new)}\n", archive_job_id)
+                )
             cj.commit()
         cj.close()
     except Exception:
