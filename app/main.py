@@ -2,6 +2,7 @@ import os
 import psycopg2
 from psycopg2.extras import DictCursor
 import threading
+import threading as _threading
 import time
 from flask import Flask, render_template, render_template_string, request, redirect, url_for, flash, send_from_directory, session, jsonify
 from jinja2 import TemplateNotFound
@@ -22,6 +23,8 @@ except Exception as e:
     )
 
 import archive
+import retention
+from app.db import get_db_connection
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24))
@@ -37,15 +40,7 @@ RP_NAME = 'Docker Archiver'
 ORIGIN = 'http://localhost:5000' # Your full origin URL
 
 
-def get_db_connection():
-    """Establishes a connection to the database."""
-    database_url = DATABASE_URL
-    if not database_url:
-        raise ValueError("DATABASE_URL environment variable is not set.")
-    # allow a short connect timeout so init attempts fail fast and can be retried
-    connect_timeout = int(os.environ.get('DB_CONNECT_TIMEOUT', '5'))
-    conn = psycopg2.connect(database_url, connect_timeout=connect_timeout)
-    return conn
+# `get_db_connection` provided by app.db
 
 def get_user_count():
     """Returns the number of users in the database."""
@@ -102,6 +97,44 @@ def init_db():
         cur.execute("ALTER TABLE archive_jobs ADD COLUMN IF NOT EXISTS is_archive BOOLEAN DEFAULT FALSE;")
         # Add archive_id to link per-stack jobs to their archive run
         cur.execute("ALTER TABLE archive_jobs ADD COLUMN IF NOT EXISTS archive_id INTEGER;")
+        # Add reclaimed_bytes for retention runs (freed space)
+        cur.execute("ALTER TABLE archive_jobs ADD COLUMN IF NOT EXISTS reclaimed_bytes BIGINT;")
+        # Create retention_jobs table for dedicated retention records
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS retention_jobs (
+                id SERIAL PRIMARY KEY,
+                archive_job_id INTEGER,
+                start_time TIMESTAMP NOT NULL,
+                end_time TIMESTAMP,
+                duration_seconds INTEGER,
+                status VARCHAR(50),
+                reclaimed_bytes BIGINT,
+                job_type VARCHAR(50) DEFAULT 'manual',
+                description TEXT,
+                log TEXT
+            );
+        """)
+        # Unified jobs table to simplify querying across archive and retention runs
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS jobs (
+                id SERIAL PRIMARY KEY,
+                parent_id INTEGER,
+                legacy_archive_id INTEGER,
+                legacy_retention_id INTEGER,
+                job_type VARCHAR(50),
+                stack_name VARCHAR(255),
+                archive_path VARCHAR(1024),
+                archive_size_bytes BIGINT,
+                start_time TIMESTAMP NOT NULL,
+                end_time TIMESTAMP,
+                duration_seconds INTEGER,
+                status VARCHAR(50),
+                reclaimed_bytes BIGINT,
+                description TEXT,
+                log TEXT,
+                job_id INTEGER DEFAULT nextval('job_counter')
+            );
+        """)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 key VARCHAR(100) PRIMARY KEY,
@@ -196,120 +229,12 @@ def initialize_app():
 initialize_app()
 
 
-# --- Scheduler (APScheduler) ---
-from apscheduler.schedulers.background import BackgroundScheduler
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-import threading as _threading
-
-
-def _job_runner(schedule_id):
-    """Wrapper that loads schedule by id, updates last_run and triggers archive."""
-    try:
-        conn = get_db_connection()
-        with conn.cursor(cursor_factory=DictCursor) as cur:
-            cur.execute("SELECT * FROM schedules WHERE id = %s;", (schedule_id,))
-            s = cur.fetchone()
-        conn.close()
-
-        if not s or not s.get('enabled'):
-            return
-
-        schedule_type = (s.get('type') or 'archive').lower()
-        stack_paths = [p for p in (s.get('stack_paths') or '').split('\n') if p.strip()]
-        retention = s.get('retention_days') or 28
-
-        # update last_run
-        now = datetime.now()
-        conn = get_db_connection()
-        with conn.cursor() as cur:
-            cur.execute("UPDATE schedules SET last_run = %s WHERE id = %s;", (now, schedule_id))
-            conn.commit()
-        conn.close()
-
-        # pass schedule name and description to archive/cleanup as archive_name/archive_description
-        archive_name = s.get('name')
-        archive_description = s.get('description') if s.get('description') else None
-        if schedule_type == 'cleanup':
-            # For cleanup schedules, run cleanup for this schedule only
-            threading.Thread(target=archive.run_cleanup_job, args=(CONTAINER_ARCHIVE_DIR, archive_name, archive_description, schedule_id), daemon=True).start()
-        else:
-            store_unpacked_flag = bool(s.get('store_unpacked'))
-            # Pass schedule name as schedule_label so archives are grouped under /archives/<schedule_name>/
-            threading.Thread(target=archive.run_archive_job, args=(stack_paths, retention, CONTAINER_ARCHIVE_DIR, archive_name, archive_description, archive_name, store_unpacked_flag, 'scheduled'), daemon=True).start()
-    except Exception as e:
-        print(f"[scheduler] job_runner error for schedule {schedule_id}: {e}")
-
-
-def _schedule_db_job(scheduler, s):
-    """Register a schedule `s` (dict) with APScheduler."""
-    try:
-        time_val = (s.get('time') or '00:00').strip()
-        hh, mm = (int(x) for x in time_val.split(':'))
-    except Exception:
-        return
-
-    job_id = f"schedule_{s['id']}"
-    try:
-        scheduler.add_job(
-            func=_job_runner,
-            trigger='cron',
-            hour=hh,
-            minute=mm,
-            args=(s['id'],),
-            id=job_id,
-            replace_existing=True,
-        )
-    except Exception as e:
-        print(f"[scheduler] failed to add job {job_id}: {e}")
-
-
-def _load_and_schedule_all(scheduler):
-    try:
-        conn = get_db_connection()
-        with conn.cursor(cursor_factory=DictCursor) as cur:
-            cur.execute("SELECT * FROM schedules WHERE enabled = true;")
-            rows = cur.fetchall()
-        conn.close()
-        cleanup_scheduled = False
-        for s in rows:
-            try:
-                if (s.get('type') or 'archive').lower() == 'cleanup':
-                    if cleanup_scheduled:
-                        # skip any additional cleanup schedules
-                        continue
-                    cleanup_scheduled = True
-                _schedule_db_job(scheduler, s)
-            except Exception:
-                continue
-    except Exception as e:
-        print(f"[scheduler] load failed: {e}")
-
-
-def _start_scheduler():
-    tz_name = os.environ.get('TZ', 'UTC')
-    try:
-        tz = ZoneInfo(tz_name)
-    except Exception:
-        try:
-            tz = ZoneInfo('UTC')
-        except Exception:
-            tz = None
-
-    scheduler = BackgroundScheduler(timezone=tz)
-    try:
-        scheduler.start()
-    except Exception as e:
-        print(f"[scheduler] could not start: {e}")
-        return None
-
-    # Load schedules from DB and schedule enabled ones
-    _load_and_schedule_all(scheduler)
-    return scheduler
-
+# --- Scheduler (moved to app/scheduler.py) ---
+from app import scheduler
 
 # start APScheduler in background
 try:
-    _SCHEDULER = _start_scheduler()
+    _SCHEDULER = scheduler.start_scheduler()
 except Exception:
     _SCHEDULER = None
 
@@ -994,6 +919,7 @@ def index():
     
     conn = get_db_connection()
     recent_jobs = []
+    retention_runs = []
     try:
         with conn.cursor(cursor_factory=DictCursor) as cur:
             # Get last 10 top-level archive runs only
@@ -1033,10 +959,33 @@ def index():
                     'size_human': format_bytes(total_size_bytes) if total_size_bytes else 'N/A',
                     'duration_human': duration_human,
                 })
+
+            # Fetch recent retention runs (master retention jobs)
+            try:
+                cur.execute(
+                    "SELECT id, start_time, status, duration_seconds, reclaimed_bytes, job_type FROM archive_jobs WHERE log LIKE 'Starting retention run%" + "' ORDER BY start_time DESC LIMIT 5;"
+                )
+                rr = cur.fetchall()
+                for row in rr:
+                    start = row.get('start_time')
+                    start_str = format_start_time_ordinal(start) if start else None
+                    reclaimed_bytes = row.get('reclaimed_bytes')
+                    entry = {
+                        'id': row.get('id'),
+                        'trigger': 'Manual' if (row.get('job_type') or 'manual') == 'manual' else 'Automatic',
+                        'start': start,
+                        'start_str': start_str,
+                        'status': row.get('status'),
+                        'duration_human': format_duration(row.get('duration_seconds')) if row.get('duration_seconds') is not None else 'N/A',
+                        'reclaimed_human': format_bytes(int(reclaimed_bytes)) if reclaimed_bytes is not None else 'N/A'
+                    }
+                    retention_runs.append(entry)
+            except Exception:
+                retention_runs = []
     finally:
         conn.close()
 
-    # expose whether a cleanup is currently in progress so the UI can disable the manual trigger
+    # expose whether a cleanup/retention is currently in progress so the UI can disable the manual trigger
     cleanup_flag = get_setting('cleanup_in_progress')
     cleanup_in_progress = True if (cleanup_flag and str(cleanup_flag).lower() == 'true') else False
 
@@ -1058,7 +1007,7 @@ def index():
     else:
         default_cleanup_description = f"Manual Cleanup at {ts}"
 
-    return render_template('index.html', stacks=stacks, retention_days=retention_days, recent_jobs=recent_jobs, cleanup_in_progress=cleanup_in_progress, default_cleanup_description=default_cleanup_description)
+    return render_template('index.html', stacks=stacks, retention_days=retention_days, recent_jobs=recent_jobs, retention_runs=retention_runs, cleanup_in_progress=cleanup_in_progress, default_cleanup_description=default_cleanup_description)
 
 @app.route('/archive', methods=['POST'])
 def start_archive_route():
@@ -1072,30 +1021,24 @@ def start_archive_route():
     
     stack_names_for_flash = [os.path.basename(path) for path in selected_stack_paths]
 
-    # Build archive name and optional manual label/description
-    archive_name = request.form.get('manual_name')
+    # No archive name is used for manual runs; only optional description is kept
     archive_description = request.form.get('manual_description')
-    if not archive_name or not archive_name.strip():
-        # fallback to automatic name containing stacks
-        ts_label = datetime.now().strftime('%Y%m%d_%H%M%S')
-        archive_name = f"manual_run_{ts_label}"
-    else:
-        # sanitize name for filesystem use
-        archive_name = archive_name.strip()
-        for ch in (' ', ':', '/', '\\', ',', '"', "'"):
-            archive_name = archive_name.replace(ch, '_')
+    archive_name = None
+
+    # Respect user's choice to store an unpacked directory snapshot instead of a .tar
+    store_unpacked = True if request.form.get('store_unpacked') == 'on' else False
 
     # Start archive job and group files under the provided archive_name
     # Retention is managed in Settings; manual archive form does not change it
     retention_days = None
     thread = threading.Thread(
         target=archive.run_archive_job,
-        args=(selected_stack_paths, retention_days, CONTAINER_ARCHIVE_DIR, archive_name, archive_description, archive_name, False, 'manual'),
+        args=(selected_stack_paths, retention_days, CONTAINER_ARCHIVE_DIR, archive_description, store_unpacked, 'manual'),
         daemon=True
     )
     thread.start()
 
-    flash(f"Archiving process started in the background for: {', '.join(stack_names_for_flash)} (group: {archive_name})", 'info')
+    flash(f"Archiving process started in the background for: {', '.join(stack_names_for_flash)}", 'info')
     return redirect(url_for('index'))
 
 
@@ -1106,9 +1049,9 @@ def archive_route():
     return render_template('archive.html', stacks=stacks)
 
 
-@app.route('/cleanup', methods=['POST'])
-def start_cleanup_route():
-    """Starts a global cleanup process in background applying retention of all enabled schedules."""
+@app.route('/retention', methods=['POST'])
+def start_retention_route():
+    """Starts a manual retention run in background applying configured retention to all stacks."""
     # Prevent starting if a cleanup is already in progress
     try:
         if str(archive._get_setting('cleanup_in_progress')).lower() == 'true':
@@ -1118,11 +1061,10 @@ def start_cleanup_route():
         # If check fails, fall through and attempt start (best-effort)
         pass
 
-    archive_name = 'Manual Cleanup'
     archive_description = request.form.get('description')
-    thread = threading.Thread(target=archive.run_cleanup_job, args=(CONTAINER_ARCHIVE_DIR, archive_name, archive_description), daemon=True)
+    thread = threading.Thread(target=retention.run_retention_now, args=(CONTAINER_ARCHIVE_DIR, archive_description, 'manual'), daemon=True)
     thread.start()
-    flash('Cleanup process started in the background.', 'info')
+    flash('Retention process started in the background. A notification will be sent when it completes.', 'info')
     return redirect(url_for('index'))
 
 
@@ -1180,6 +1122,37 @@ def job_log(job_id):
         if not row:
             return jsonify({'error': 'Job not found'}), 404
         return jsonify({'log': row.get('log') or ''})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/retention/<int:retention_id>')
+def retention_detail(retention_id):
+    """Return retention job details as JSON for the modal."""
+    try:
+        conn = get_db_connection()
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            cur.execute(
+                "SELECT id, archive_job_id, start_time, end_time, duration_seconds, status, reclaimed_bytes, job_type, description, log FROM retention_jobs WHERE id = %s;",
+                (retention_id,)
+            )
+            row = cur.fetchone()
+        conn.close()
+        if not row:
+            return jsonify({'error': 'Retention job not found'}), 404
+
+        return jsonify({
+            'id': row.get('id'),
+            'archive_job_id': row.get('archive_job_id'),
+            'start_time': row.get('start_time').isoformat() if row.get('start_time') else None,
+            'end_time': row.get('end_time').isoformat() if row.get('end_time') else None,
+            'duration_seconds': row.get('duration_seconds'),
+            'status': row.get('status'),
+            'reclaimed_bytes': row.get('reclaimed_bytes'),
+            'job_type': row.get('job_type'),
+            'description': row.get('description'),
+            'log': row.get('log') or ''
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1414,11 +1387,11 @@ def create_schedule_route():
     if not user_id:
         return redirect(url_for('login_route'))
 
-    name = request.form.get('name')
+    # name field removed; keep name NULL
+    name = None
     time_val = request.form.get('time')
     description = request.form.get('description')
     stacks = request.form.getlist('stacks')
-    retention_days = int(request.form.get('retention_days') or 28)
     schedule_type = request.form.get('type') or 'archive'
     store_unpacked = True if request.form.get('store_unpacked') == 'on' else False
     stack_text = '\n'.join(stacks)
@@ -1440,8 +1413,8 @@ def create_schedule_route():
     conn = get_db_connection()
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO schedules (name, time, stack_paths, retention_days, enabled, description, type, store_unpacked) VALUES (%s, %s, %s, %s, %s, %s, %s, %s);",
-            (name, time_val, stack_text, retention_days, True, description, schedule_type, store_unpacked)
+            "INSERT INTO schedules (name, time, stack_paths, enabled, description, type, store_unpacked) VALUES (%s, %s, %s, %s, %s, %s, %s);",
+            (name, time_val, stack_text, True, description, schedule_type, store_unpacked)
         )
         conn.commit()
     conn.close()
@@ -1455,7 +1428,7 @@ def create_schedule_route():
                 cur.execute("SELECT * FROM schedules WHERE id = %s;", (new_id,))
                 new_s = cur.fetchone()
             if new_s:
-                _schedule_db_job(_SCHEDULER, new_s)
+                scheduler.schedule_db_job(_SCHEDULER, new_s)
     except Exception:
         pass
     return redirect(url_for('schedules_route'))
@@ -1488,13 +1461,13 @@ def edit_schedule_route(schedule_id):
         return redirect(url_for('schedules_route'))
 
     if request.method == 'POST':
-        name = request.form.get('name')
+        # name removed; keep existing DB value or NULL
+        name = None
         time_val = request.form.get('time')
         description = request.form.get('description')
         schedule_type = request.form.get('type') or 'archive'
         store_unpacked = True if request.form.get('store_unpacked') == 'on' else False
         stacks = request.form.getlist('stacks')
-        retention_days = int(request.form.get('retention_days') or 28)
         enabled = True if request.form.get('enabled') == 'true' else False
 
         stack_text = '\n'.join(stacks)
@@ -1515,14 +1488,14 @@ def edit_schedule_route(schedule_id):
 
         conn = get_db_connection()
         with conn.cursor() as cur:
-            cur.execute("UPDATE schedules SET name=%s, time=%s, stack_paths=%s, retention_days=%s, enabled=%s, description=%s, type=%s, store_unpacked=%s WHERE id=%s;",
-                        (name, time_val, stack_text, retention_days, enabled, description, schedule_type, store_unpacked, schedule_id))
+            cur.execute("UPDATE schedules SET time=%s, stack_paths=%s, enabled=%s, description=%s, type=%s, store_unpacked=%s WHERE id=%s;",
+                        (time_val, stack_text, enabled, description, schedule_type, store_unpacked, schedule_id))
             conn.commit()
         conn.close()
         # update scheduler
         try:
             if _SCHEDULER is not None:
-                _schedule_db_job(_SCHEDULER, {'id': schedule_id, 'time': time_val})
+                scheduler.schedule_db_job(_SCHEDULER, {'id': schedule_id, 'time': time_val})
         except Exception:
             pass
         flash('Schedule updated.', 'success')
@@ -1577,7 +1550,7 @@ def toggle_schedule_route(schedule_id):
                 cur.execute("SELECT * FROM schedules WHERE id = %s;", (schedule_id,))
                 s = cur.fetchone()
             if s and s.get('enabled'):
-                _schedule_db_job(_SCHEDULER, s)
+                scheduler.schedule_db_job(_SCHEDULER, s)
             else:
                 try:
                     _SCHEDULER.remove_job(f"schedule_{schedule_id}")

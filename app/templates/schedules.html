@@ -11,10 +11,9 @@
                 <table class="table table-sm align-middle mb-0">
                     <thead class="table-light">
                         <tr>
-                            <th>Name</th>
+                            <th>Description</th>
                             <th>Time</th>
                             <th style="min-width:220px">Stacks</th>
-                            <th>Retention</th>
                             <th>Type</th>
                             <th>Enabled</th>
                             <th></th>
@@ -24,14 +23,14 @@
                         {% for sch in schedules %}
                         <tr>
                             <td class="fw-semibold text-wrap">
-                                {{ sch.name }}
                                 {% if sch.description %}
-                                <div class="text-muted small mt-1">{{ sch.description }}</div>
+                                <div class="text-muted">{{ sch.description }}</div>
+                                {% else %}
+                                <div class="text-muted small">(no description)</div>
                                 {% endif %}
                             </td>
                             <td class="text-muted">{{ sch.time }}</td>
                             <td class="schedule-stack-path">{{ sch.stack_paths.replace('\n','<br>')|safe }}</td>
-                            <td>{{ sch.retention_days }}</td>
                             <td>{{ sch.type if sch.type else 'archive' }}</td>
                             <td>{{ 'Yes' if sch.enabled else 'No' }}</td>
                             <td>
@@ -64,10 +63,7 @@
             <div class="card-body">
                 <h3>New Schedule</h3>
                 <form method="post" action="{{ url_for('create_schedule_route') }}">
-                    <div class="mb-3">
-                        <label class="form-label">Name</label>
-                        <input name="name" class="form-control" required />
-                    </div>
+                    <!-- Name removed: schedules are identified by ID; description is optional -->
                     <div class="mb-3">
                         <label class="form-label">Description (optional)</label>
                         <input name="description" class="form-control" placeholder="Short description for this schedule" />
@@ -84,10 +80,6 @@
                             {% endfor %}
                         </select>
                         <small class="form-text text-muted">Hold Ctrl/Cmd to select multiple.</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Retention days</label>
-                        <input name="retention_days" class="form-control" value="28" />
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Schedule Type</label>
@@ -107,10 +99,7 @@
                 <h5>Create Cleanup-only Schedule</h5>
                 <form method="post" action="{{ url_for('create_schedule_route') }}">
                     <input type="hidden" name="type" value="cleanup" />
-                    <div class="mb-3">
-                        <label class="form-label">Name</label>
-                        <input name="name" class="form-control" required />
-                    </div>
+                    <!-- Name removed for cleanup schedules as well -->
                     <div class="mb-3">
                         <label class="form-label">Time</label>
                         <input name="time" type="time" class="form-control" required />
@@ -122,10 +111,6 @@
                             <option value="{{ s.path }}">{{ s.name }} — {{ s.path }}</option>
                             {% endfor %}
                         </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Retention days</label>
-                        <input name="retention_days" class="form-control" value="28" />
                     </div>
                     <div class="mb-3 form-check">
                         <input class="form-check-input" type="checkbox" id="store_unpacked_cleanup" name="store_unpacked">

@@ -5,20 +5,18 @@ import shutil
 from datetime import datetime
 import psycopg2
 from psycopg2.extras import DictCursor
+import retention
+from app.db import get_db_connection
 try:
     import apprise
     import html as _html
 except Exception:
     apprise = None
+    _html = None
 
 # --- HELPER FUNCTIONS ---
 
-def get_db_connection():
-    """Establishes a connection to the database using environment variables."""
-    database_url = os.environ.get('DATABASE_URL')
-    if not database_url:
-        raise ValueError("DATABASE_URL environment variable is not set.")
-    return psycopg2.connect(database_url)
+# use centralized DB connection from app.db
 
 def format_bytes(size_bytes):
     """Converts bytes to human-readable format."""
@@ -43,7 +41,18 @@ def log_to_db(job_id, message):
             (f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}\n", job_id)
         )
         conn.commit()
+    try:
+        # Also mirror logs to unified jobs table if present
+        with get_db_connection().cursor() as cur2:
+            cur2.execute("UPDATE jobs SET log = COALESCE(log,'') || %s WHERE legacy_archive_id = %s;",
+                         (f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}\n", job_id))
+            cur2.connection.commit()
+    except Exception:
+        pass
     conn.close()
+
+
+# retention logging moved to app/retention.py
 
 
 def _get_setting(key):
@@ -56,6 +65,38 @@ def _get_setting(key):
             return row['value'] if row else None
     finally:
         conn.close()
+
+
+def _detect_compose_cmd(stack_path):
+    """Return the compose command list and compose file path for a stack."""
+    compose_file = "compose.yaml" if os.path.exists(os.path.join(stack_path, "compose.yaml")) else "docker-compose.yml"
+    compose_file_path = os.path.join(stack_path, compose_file)
+    compose_cmd = None
+    if shutil.which('docker-compose'):
+        compose_cmd = ['docker-compose']
+    else:
+        if shutil.which('docker'):
+            try:
+                subprocess.run(['docker', 'compose', 'version'], capture_output=True, check=True, timeout=5)
+                compose_cmd = ['docker', 'compose']
+            except Exception:
+                compose_cmd = None
+    if not compose_cmd:
+        compose_cmd = ['docker-compose']
+    return compose_cmd, compose_file_path
+
+
+def _is_compose_running(stack_path):
+    """Return True if any container in the compose project is currently running."""
+    try:
+        compose_cmd, compose_file_path = _detect_compose_cmd(stack_path)
+        # run `compose ps -q` to get container ids
+        cmd = compose_cmd + ['-f', compose_file_path, 'ps', '-q']
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        out = (proc.stdout or '').strip()
+        return bool(out)
+    except Exception:
+        return False
 
 
 def _set_setting(key, value):
@@ -249,14 +290,11 @@ def compose_action(stack_path, job_id, action="down"):
     except Exception as e:
         log_to_db(job_id, f"Compose command failed: {e}. Command tried: {cmd}")
 
-def create_archive(stack_name, stack_path, backup_dir, job_id, schedule_label=None):
+def create_archive(stack_name, stack_path, backup_dir, job_id):
     """Creates a TAR archive and returns its path and size."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     archive_name_base = f"{stack_name}_{timestamp}.tar"
-    if schedule_label:
-        final_backup_path = os.path.join(backup_dir, schedule_label, stack_name)
-    else:
-        final_backup_path = os.path.join(backup_dir, stack_name)
+    final_backup_path = os.path.join(backup_dir, stack_name)
     os.makedirs(final_backup_path, exist_ok=True)
     
     target_filename = os.path.join(final_backup_path, archive_name_base)
@@ -272,57 +310,50 @@ def create_archive(stack_name, stack_path, backup_dir, job_id, schedule_label=No
     log_to_db(job_id, f"Archive created: {target_filename}. Size: {format_bytes(size_bytes)}.")
     return target_filename, size_bytes
 
-def cleanup_local_archives(archive_dir, retention_days_str, archive_job_id):
-    """Deletes old local archives based on retention days."""
-    try:
-        retention_days = int(retention_days_str)
-    except (ValueError, TypeError):
-        log_to_db(archive_job_id, f"Invalid retention period '{retention_days_str}'. Skipping cleanup.")
-        return
-
-    log_to_db(archive_job_id, f"Starting cleanup. Deleting archives older than {retention_days} days in {archive_dir}.")
-    
-    deleted_count = 0
-    freed_space = 0
-
-    for root, dirs, files in os.walk(archive_dir):
-        for file in files:
-            if file.endswith(".tar"):
-                file_path = os.path.join(root, file)
-                file_mtime = os.path.getmtime(file_path)
-                if (datetime.now() - datetime.fromtimestamp(file_mtime)).days > retention_days:
-                    try:
-                        size = os.path.getsize(file_path)
-                        os.remove(file_path)
-                        log_to_db(archive_job_id, f"Deleted old archive: {file_path}")
-                        deleted_count += 1
-                        freed_space += size
-                    except OSError as e:
-                        log_to_db(archive_job_id, f"Error deleting file {file_path}: {e}")
-    log_to_db(archive_job_id, f"Cleanup finished. Deleted {deleted_count} files, freeing {format_bytes(freed_space)}.")
-    # Return summary values for notifications
-    return deleted_count, freed_space
+def cleanup_local_archives(archive_dir, retention_days_str, job_id, job_table='archive'):
+    """Wrapper that delegates to `retention.cleanup_local_archives` for retention logging.
+    Keeps signature for backward compatibility.
+    """
+    if job_table == 'retention':
+        return retention.cleanup_local_archives(archive_dir, retention_days_str, job_id, job_table='retention')
+    # fallback: call retention but map logs to archive job id
+    return retention.cleanup_local_archives(archive_dir, retention_days_str, job_id, job_table='retention')
 
 # --- MAIN ORCHESTRATOR ---
 
-def run_archive_job(selected_stack_paths, retention_days, archive_dir, archive_name=None, archive_description=None, schedule_label=None, store_unpacked=False, job_type='manual'):
+def run_archive_job(selected_stack_paths, retention_days, archive_dir, archive_description=None, store_unpacked=False, job_type='manual'):
     """
     The main function to be run in a background thread.
     It orchestrates the entire archiving process for a list of stack paths.
     """
     # Create a top-level "archive" job entry for the overall process (mainly for cleanup logs)
-    archive_label = archive_name or 'Archive Run'
+    # No archive name is stored; use empty string to satisfy NOT NULL column until schema is migrated.
     conn = get_db_connection()
     with conn.cursor(cursor_factory=DictCursor) as cur:
         cur.execute(
             "INSERT INTO archive_jobs (stack_name, start_time, status, log, is_archive, job_type) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id, job_id;",
-            (archive_label, datetime.now(), 'Running', 'Starting archiving process...\n', True, job_type)
+            ('', datetime.now(), 'Running', 'Starting archiving process...\n', True, job_type)
         )
         res = cur.fetchone()
         archive_job_id = res['id']
         archive_job_seq = res.get('job_id')
         conn.commit()
     conn.close()
+
+    # Mirror a top-level entry into unified `jobs` table (legacy mapping)
+    try:
+        connj = get_db_connection()
+        with connj.cursor() as cj:
+            cj.execute(
+                "INSERT INTO jobs (legacy_archive_id, job_type, start_time, status, description, log) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id;",
+                (archive_job_id, 'archive_master', datetime.now(), 'Running', archive_description, 'Starting archiving process...\n')
+            )
+            jres = cj.fetchone()
+            jobs_master_id = jres[0] if jres else None
+            connj.commit()
+        connj.close()
+    except Exception:
+        jobs_master_id = None
 
     created_archives = []
 
@@ -344,6 +375,19 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir, archive_n
             job_seq = res.get('job_id')
             conn.commit()
         conn.close()
+        # mirror per-stack entry into unified jobs table linking to master jobs entry
+        try:
+            connj = get_db_connection()
+            with connj.cursor() as cj:
+                cj.execute(
+                    "INSERT INTO jobs (parent_id, legacy_archive_id, job_type, stack_name, start_time, status, log) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id;",
+                    (jobs_master_id, job_id, 'archive_stack', stack_name, start_time, 'Running', f"Starting archive for stack: {stack_name}\n")
+                )
+                per_j = cj.fetchone()
+                connj.commit()
+            connj.close()
+        except Exception:
+            pass
 
         try:
             # Verify the stack path exists before proceeding
@@ -354,8 +398,7 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir, archive_n
             compose_action(stack_path, job_id, action="down")
             
             # 2. Archive Stack
-            # If a schedule_label is provided (scheduled run), group archives under it
-            archive_path, archive_size = create_archive(stack_name, stack_path, archive_dir, job_id, schedule_label=schedule_label)
+            archive_path, archive_size = create_archive(stack_name, stack_path, archive_dir, job_id)
             created_archives.append((archive_path, archive_size))
             
             # 3. Start Stack
@@ -382,13 +425,23 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir, archive_n
                 )
                 conn.commit()
             conn.close()
+            # mirror update to unified jobs table if present
+            try:
+                cj = get_db_connection()
+                with cj.cursor() as c2:
+                    c2.execute(
+                        "UPDATE jobs SET status=%s, end_time=%s, duration_seconds=%s, archive_path=%s, archive_size_bytes=%s, log = COALESCE(log,'') || %s WHERE legacy_archive_id = %s;",
+                        ('Success', end_time, int(duration), archive_path, archive_size, f"Archive completed: {archive_path} ({format_bytes(archive_size)})\n", job_id)
+                    )
+                    cj.commit()
+                cj.close()
+            except Exception:
+                pass
             # 5. Optionally create unpacked snapshot directory and update `latest` pointer when requested
             if store_unpacked:
                 try:
                     ts = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-                    # sanitize schedule/master name for filesystem
-                    schedule_label = (archive_name or 'manual').replace(' ', '_').replace(':', '').replace(',', '')
-                    snapshot_dir = os.path.join(archive_dir, schedule_label, stack_name, ts)
+                    snapshot_dir = os.path.join(archive_dir, stack_name, ts)
                     os.makedirs(snapshot_dir, exist_ok=True)
                     # Extract the tar into the snapshot directory (use run_command to log)
                     try:
@@ -398,7 +451,7 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir, archive_n
                         log_to_db(job_id, f"Failed to extract archive to snapshot dir: {e}")
 
                     # Create or update a 'latest' symlink (or fallback to a text pointer on platforms without symlink support)
-                    latest_link = os.path.join(archive_dir, schedule_label, stack_name, 'latest')
+                    latest_link = os.path.join(archive_dir, stack_name, 'latest')
                     try:
                         if os.path.islink(latest_link) or os.path.exists(latest_link):
                             try:
@@ -437,6 +490,15 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir, archive_n
                 )
                 conn.commit()
             conn.close()
+            try:
+                cj = get_db_connection()
+                with cj.cursor() as c2:
+                    c2.execute("UPDATE jobs SET status=%s, end_time=%s, duration_seconds=%s WHERE legacy_archive_id = %s;",
+                               ('Failed', end_time, int(duration), job_id))
+                    cj.commit()
+                cj.close()
+            except Exception:
+                pass
             # Attempt to restart the stack even on failure
             try:
                 log_to_db(job_id, "Attempting to restart the stack after failure...")
@@ -453,12 +515,27 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir, archive_n
         log_to_db(archive_job_id, f'Archiving finish logging failed: {e}')
         status = 'Failed'
 
+    # Perform retention cleanup automatically after archiving by delegating to the retention module
+    try:
+        cleanup_summary_lines = retention.run_retention_for_archives(created_archives, archive_dir, archive_job_id, archive_description, jobs_master_id if 'jobs_master_id' in locals() else None)
+    except Exception:
+        cleanup_summary_lines = []
+
     # Mark archive job as complete
     conn = get_db_connection()
     with conn.cursor() as cur:
         cur.execute("UPDATE archive_jobs SET status = %s, end_time = %s WHERE id = %s;", (status, datetime.now(), archive_job_id))
         conn.commit()
     conn.close()
+    try:
+        cj = get_db_connection()
+        with cj.cursor() as c2:
+            c2.execute("UPDATE jobs SET status=%s, end_time=%s WHERE legacy_archive_id = %s;", (status, datetime.now(), archive_job_id))
+            cj.commit()
+        cj.close()
+    except Exception:
+        pass
+
     # send master notification
     try:
         # Build summary block
@@ -499,6 +576,13 @@ def run_archive_job(selected_stack_paths, retention_days, archive_dir, archive_n
         desc_block = ''
         if archive_description:
             desc_block = f"DESCRIPTION: {archive_description}\n\n"
+
+        # If automatic retention ran and produced summary lines, include them here
+        if 'cleanup_summary_lines' in locals() and cleanup_summary_lines:
+            retention_block = ['\n', 'RETENTION SUMMARY:', '----------------------------------------------------------------']
+            retention_block.extend(cleanup_summary_lines)
+            retention_block.append('----------------------------------------------------------------')
+            summary = summary + '\n' + '\n'.join(retention_block)
 
         body = desc_block + summary + '\n\nLOG:\n' + archive_log
 
@@ -553,171 +637,4 @@ def get_job_name(job_id):
             conn.close()
         except Exception:
             pass
-
-
-def _delete_old_files_in_dir(target_dir, retention_days, archive_job_id):
-    """Delete .tar files in target_dir older than retention_days.
-    Returns (deleted_count, freed_bytes, deleted_files_list).
-    `deleted_files_list` is a list of tuples: (relative_path, size_bytes).
-    """
-    deleted_count = 0
-    freed_space = 0
-    deleted_files = []
-    if not os.path.isdir(target_dir):
-        log_to_db(archive_job_id, f"Archive directory not found for cleanup: {target_dir}")
-        return deleted_count, freed_space, deleted_files
-
-    for fname in os.listdir(target_dir):
-        entry_path = os.path.join(target_dir, fname)
-        try:
-            mtime = os.path.getmtime(entry_path)
-        except Exception:
-            continue
-        try:
-            if (datetime.now() - datetime.fromtimestamp(mtime)).days > int(retention_days):
-                # Directory (snapshot) removal
-                if os.path.isdir(entry_path):
-                    try:
-                        size = get_dir_size(entry_path)
-                    except Exception:
-                        size = 0
-                    try:
-                        shutil.rmtree(entry_path)
-                        log_to_db(archive_job_id, f"Deleted old snapshot dir: {entry_path} ({format_bytes(size)})")
-                        deleted_count += 1
-                        freed_space += size
-                        deleted_files.append((entry_path, size))
-                    except OSError as e:
-                        log_to_db(archive_job_id, f"Error deleting directory {entry_path}: {e}")
-                else:
-                    # File handling (tar archives)
-                    if not entry_path.endswith('.tar'):
-                        continue
-                    try:
-                        size = os.path.getsize(entry_path)
-                    except Exception:
-                        size = 0
-                    try:
-                        os.remove(entry_path)
-                        log_to_db(archive_job_id, f"Deleted old archive: {entry_path} ({format_bytes(size)})")
-                        deleted_count += 1
-                        freed_space += size
-                        deleted_files.append((entry_path, size))
-                    except OSError as e:
-                        log_to_db(archive_job_id, f"Error deleting file {entry_path}: {e}")
-        except Exception:
-            continue
-
-    return deleted_count, freed_space, deleted_files
-
-
-def run_cleanup_job(archive_dir, archive_name=None, archive_description=None, schedule_id=None):
-    """Run cleanup across all configured schedules, applying each schedule's retention to its stacks.
-
-    This creates an archive job entry and logs per-stack cleanup actions. It sends a final summary notification.
-    """
-    archive_label = archive_name or 'Cleanup Job'
-    # Acquire lock: prevent concurrent cleanup runs
-    try:
-        if str(_get_setting('cleanup_in_progress')).lower() == 'true':
-            # log and exit
-            # create a transient master job to record the refused attempt
-            conn = get_db_connection()
-            with conn.cursor(cursor_factory=DictCursor) as cur:
-                cur.execute(
-                    "INSERT INTO archive_jobs (stack_name, start_time, status, log, is_archive) VALUES (%s, %s, %s, %s, %s) RETURNING id;",
-                    (archive_label + ' (refused)', datetime.now(), 'Failed', 'Cleanup already in progress; refused to start.\n', True)
-                )
-                conn.commit()
-            conn.close()
-            return
-        # mark in-progress
-        _set_setting('cleanup_in_progress', 'true')
-    except Exception:
-        # if lock operations fail, proceed but log a warning (best-effort)
-        pass
-    conn = get_db_connection()
-    with conn.cursor(cursor_factory=DictCursor) as cur:
-        cur.execute(
-            "INSERT INTO archive_jobs (stack_name, start_time, status, log, is_archive, job_type) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id, job_id;",
-            (archive_label, datetime.now(), 'Running', 'Starting cleanup across configured schedules...\n', True, 'cleanup')
-        )
-        res = cur.fetchone()
-        archive_job_id = res['id']
-        archive_job_seq = res.get('job_id')
-        conn.commit()
-    conn.close()
-
-    total_deleted = 0
-    total_freed = 0
-    per_schedule_summary = []
-
-    try:
-        conn = get_db_connection()
-        with conn.cursor(cursor_factory=DictCursor) as cur:
-            if schedule_id:
-                cur.execute("SELECT id, name, stack_paths, retention_days, store_unpacked FROM schedules WHERE id = %s AND enabled = true;", (schedule_id,))
-            else:
-                cur.execute("SELECT id, name, stack_paths, retention_days, store_unpacked FROM schedules WHERE enabled = true;")
-            schedules = cur.fetchall()
-        conn.close()
-    except Exception as e:
-        log_to_db(archive_job_id, f"Failed to load schedules for cleanup: {e}")
-        schedules = []
-
-    for s in schedules:
-        try:
-            s_name = s.get('name') or f"schedule_{s.get('id')}"
-            retention = s.get('retention_days') or 28
-            paths = [p for p in (s.get('stack_paths') or '').split('\n') if p.strip()]
-            schedule_deleted = 0
-            schedule_freed = 0
-            for sp in paths:
-                stack_name = os.path.basename(sp)
-                # For scheduled runs we store archives under archive_dir/<schedule_name>/<stack_name>/
-                target_dir = os.path.join(archive_dir, s_name, stack_name)
-                dcount, dfreed, dfiles = _delete_old_files_in_dir(target_dir, retention, archive_job_id)
-                schedule_deleted += dcount
-                schedule_freed += dfreed
-                # attach file details for this schedule
-                if dfiles:
-                    if 'files' not in locals():
-                        files = {}
-                    files.setdefault(s_name, []).extend(dfiles)
-            total_deleted += schedule_deleted
-            total_freed += schedule_freed
-            per_schedule_summary.append((s_name, schedule_deleted, schedule_freed))
-        except Exception as e:
-            log_to_db(archive_job_id, f"Cleanup error for schedule {s.get('name')}: {e}")
-
-    # finalize master job
-    log_to_db(archive_job_id, f"Cleanup finished. Deleted {total_deleted} files, freeing {format_bytes(total_freed)}.")
-    conn = get_db_connection()
-    with conn.cursor() as cur:
-        cur.execute("UPDATE archive_jobs SET status = %s, end_time = %s WHERE id = %s;", ('Success', datetime.now(), archive_job_id))
-        conn.commit()
-    conn.close()
-
-    # Build notification body
-    try:
-        desc_block = f"DESCRIPTION: {archive_description}\n\n" if archive_description else ''
-        lines = [f"CLEANUP JOB: {archive_label}", '----------------------------------------------------------------']
-        # per-schedule summaries
-        for sname, dcount, dfreed in per_schedule_summary:
-            lines.append(f"{sname}: Deleted {dcount} files, Freed {format_bytes(dfreed)}")
-            # include per-file listing if present
-            if 'files' in locals() and files.get(sname):
-                for fpath, fsize in files.get(sname):
-                    lines.append(f"    - {fpath} ({format_bytes(fsize)})")
-        lines.append('----------------------------------------------------------------')
-        lines.append(f"TOTAL: Deleted {total_deleted} files, Freed {format_bytes(total_freed)}")
-        body = desc_block + '\n'.join(lines)
-        send_apprise_notification(title=f"Cleanup run completed — {archive_label}", body=body, job_id=archive_job_id)
-    except Exception:
-        pass
-    finally:
-        # release lock
-        try:
-            _set_setting('cleanup_in_progress', 'false')
-        except Exception:
-            pass
+# Retention/cleanup logic moved to app/retention.py

@@ -5,10 +5,7 @@
   <div class="card-body">
     <h2 class="card-title">Edit Schedule</h2>
     <form method="post">
-      <div class="mb-3">
-        <label class="form-label">Name</label>
-        <input name="name" class="form-control" value="{{ sch.name }}" required />
-      </div>
+      <!-- Name removed: schedules are identified by ID; description is optional -->
       <div class="mb-3">
         <label class="form-label">Description (optional)</label>
         <input name="description" class="form-control" value="{{ sch.description or '' }}" placeholder="Short description for this schedule" />
@@ -25,10 +22,7 @@
             {% endfor %}
         </select>
       </div>
-      <div class="mb-3">
-        <label class="form-label">Retention days</label>
-        <input name="retention_days" class="form-control" value="{{ sch.retention_days }}" />
-      </div>
+      <!-- Per-schedule retention removed: global retention setting is used -->
       <div class="mb-3">
         <label class="form-label">Enabled</label>
         <select name="enabled" class="form-select">

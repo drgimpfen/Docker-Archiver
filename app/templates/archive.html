@@ -24,14 +24,16 @@
               {% endif %}
             </div>
 
-            <div class="mb-3">
-              <label for="manual_name" class="form-label"><strong>Manual Run Name (optional)</strong></label>
-              <input type="text" class="form-control" id="manual_name" name="manual_name" placeholder="Optional name for this run (used to group archives)">
-            </div>
+            <!-- Manual Run Name removed — name is auto-generated -->
 
             <div class="mb-3">
               <label for="manual_description" class="form-label"><strong>Manual Run Description (optional)</strong></label>
               <textarea class="form-control" id="manual_description" name="manual_description" rows="4" placeholder="Optional description shown in notifications"></textarea>
+            </div>
+
+            <div class="mb-3 form-check">
+              <input class="form-check-input" type="checkbox" id="store_unpacked" name="store_unpacked">
+              <label class="form-check-label" for="store_unpacked">Store unpacked snapshot (directory) instead of tar</label>
             </div>
 
             <div class="d-grid">
