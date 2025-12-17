@@ -524,26 +524,23 @@ def discover_stacks():
                     continue
         return False
 
+    def _find_compose(path):
+        for fname in ('docker-compose.yml', 'compose.yaml'):
+            candidate = os.path.join(path, fname)
+            if os.path.exists(candidate):
+                return candidate
+        return None
+
     for volume_dir in os.listdir(LOCAL_STACKS_PATH):
         base_path = os.path.join(LOCAL_STACKS_PATH, volume_dir)
         if not os.path.isdir(base_path):
             continue
 
-        for stack_dir in os.listdir(base_path):
-            stack_path = os.path.join(base_path, stack_dir)
-            if not os.path.isdir(stack_path):
-                continue
-
-            # Check for a compose file to identify a stack
-            compose_path = None
-            for fname in ('docker-compose.yml', 'compose.yaml'):
-                candidate = os.path.join(stack_path, fname)
-                if os.path.exists(candidate):
-                    compose_path = candidate
-                    break
-
-            if not compose_path:
-                continue
+        # Case A: the mounted folder itself is a stack (contains compose file)
+        compose_in_base = _find_compose(base_path)
+        if compose_in_base:
+            stack_path = base_path
+            stack_dir = os.path.basename(stack_path)
 
             # By default do not include stacks that are the same directory as the app
             try:
@@ -553,15 +550,13 @@ def discover_stacks():
                 pass
 
             is_self = False
-            # If PyYAML is available, parse the compose file and look for build contexts
             if yaml is not None:
                 try:
-                    with open(compose_path, 'r', encoding='utf-8') as cf:
+                    with open(compose_in_base, 'r', encoding='utf-8') as cf:
                         doc = yaml.safe_load(cf)
                         services = doc.get('services') if isinstance(doc, dict) else None
                         if isinstance(services, dict):
                             for svc_name, svc_def in services.items():
-                                # check for explicit exclude label on the service
                                 try:
                                     svc_labels = svc_def.get('labels') if isinstance(svc_def, dict) else None
                                 except Exception:
@@ -570,7 +565,6 @@ def discover_stacks():
                                     is_self = True
                                     break
 
-                                # check for a build context pointing into the app dir
                                 build = svc_def.get('build') if isinstance(svc_def, dict) else None
                                 if isinstance(build, dict):
                                     ctx = build.get('context')
@@ -584,21 +578,71 @@ def discover_stacks():
                                     if abs_ctx.startswith(app_dir):
                                         is_self = True
                                         break
-                                # weaker signals (container_name/image) are intentionally ignored for exclusion
-                        # also check top-level labels for exclusion
                         top_labels = doc.get('labels') if isinstance(doc, dict) else None
                         if _labels_indicate_exclude(top_labels):
                             is_self = True
-                # end services loop
-                        # end services loop
                 except Exception:
-                    # parsing error — fall back to safer checks below
+                    pass
+
+            if not is_self:
+                stacks.append({'name': stack_dir, 'path': stack_path})
+            # don't search deeper if base itself is a stack
+            continue
+
+        # Case B: look one level deep for stacks inside subfolders
+        for stack_dir in os.listdir(base_path):
+            stack_path = os.path.join(base_path, stack_dir)
+            if not os.path.isdir(stack_path):
+                continue
+
+            compose_path = _find_compose(stack_path)
+            if not compose_path:
+                continue
+
+            try:
+                if os.path.abspath(stack_path) == app_dir:
+                    continue
+            except Exception:
+                pass
+
+            is_self = False
+            if yaml is not None:
+                try:
+                    with open(compose_path, 'r', encoding='utf-8') as cf:
+                        doc = yaml.safe_load(cf)
+                        services = doc.get('services') if isinstance(doc, dict) else None
+                        if isinstance(services, dict):
+                            for svc_name, svc_def in services.items():
+                                try:
+                                    svc_labels = svc_def.get('labels') if isinstance(svc_def, dict) else None
+                                except Exception:
+                                    svc_labels = None
+                                if _labels_indicate_exclude(svc_labels):
+                                    is_self = True
+                                    break
+
+                                build = svc_def.get('build') if isinstance(svc_def, dict) else None
+                                if isinstance(build, dict):
+                                    ctx = build.get('context')
+                                    if ctx:
+                                        abs_ctx = os.path.abspath(os.path.join(stack_path, ctx)) if not os.path.isabs(ctx) else os.path.abspath(ctx)
+                                        if abs_ctx.startswith(app_dir):
+                                            is_self = True
+                                            break
+                                elif isinstance(build, str):
+                                    abs_ctx = os.path.abspath(os.path.join(stack_path, build)) if not os.path.isabs(build) else os.path.abspath(build)
+                                    if abs_ctx.startswith(app_dir):
+                                        is_self = True
+                                        break
+                        top_labels = doc.get('labels') if isinstance(doc, dict) else None
+                        if _labels_indicate_exclude(top_labels):
+                            is_self = True
+                except Exception:
                     pass
 
             if is_self:
                 continue
 
-            # fallback: avoid naive name-only exclusion; include stack
             stacks.append({'name': stack_dir, 'path': stack_path})
 
     return sorted(stacks, key=lambda s: s['name'])

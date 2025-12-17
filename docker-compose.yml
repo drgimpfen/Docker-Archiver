@@ -8,7 +8,6 @@ services:
       - /opt/stacks:/local/stacks
       - /opt/dockge:/local/dockge
       - /var/backups/docker:/archives
-      - ./app_data:/data
     environment:
       - DATABASE_URL=postgresql://user:password@db:5432/docker_archiver
       - TZ=Europe/Berlin
