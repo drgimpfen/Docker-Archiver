@@ -4,7 +4,7 @@ import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 from zoneinfo import ZoneInfo
 
-from app.db import get_db_connection
+from db import get_db_connection
 from psycopg2.extras import DictCursor
 import archive
 import retention

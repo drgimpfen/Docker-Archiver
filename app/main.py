@@ -24,7 +24,7 @@ except Exception as e:
 
 import archive
 import retention
-from app.db import get_db_connection
+from db import get_db_connection
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24))

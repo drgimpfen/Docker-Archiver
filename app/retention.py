@@ -4,7 +4,7 @@ import subprocess
 from datetime import datetime
 import psycopg2
 from psycopg2.extras import DictCursor
-from app.db import get_db_connection
+from db import get_db_connection
 try:
     import apprise
     import html as _html
