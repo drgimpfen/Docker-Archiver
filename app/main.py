@@ -722,29 +722,28 @@ def setup_route():
         session['user_id'] = user_id
         flash('Admin user created successfully! You are now logged in.', 'success')
         return redirect(url_for('index'))
-        
-        # render setup template if present; otherwise show a safe fallback so app won't error on missing file
-        try:
-                return render_template('setup_initial_user.html')
-        except TemplateNotFound:
-                # Simple fallback page allowing initial setup without the template file
-                fallback_html = '''
-                <!doctype html>
-                <html><head><meta charset="utf-8"><title>Initial Setup</title></head>
-                <body style="font-family:Arial,Helvetica,sans-serif;margin:24px;">
-                    <h2>Initial Setup</h2>
-                    <p>The setup template is missing from the container. You can still create the first admin user using the form below.</p>
-                    <form method="post">
-                        <label>Username:<br><input name="username" required></label><br><br>
-                        <label>Password:<br><input name="password" type="password" required></label><br><br>
-                        <label>Email (optional):<br><input name="email" type="email"></label><br><br>
-                        <label>Display name (optional):<br><input name="display_name"></label><br><br>
-                        <button type="submit">Create Admin User</button>
-                    </form>
-                    <p style="margin-top:16px;color:#666">Tip: For development, mount the local <code>app/</code> folder into the container or copy the missing template into the container.</p>
-                </body></html>
-                '''
-                return render_template_string(fallback_html)
+
+    # For GET (or if POST failed validation) render the setup template or a small fallback
+    try:
+        return render_template('setup_initial_user.html')
+    except TemplateNotFound:
+        fallback_html = '''
+        <!doctype html>
+        <html><head><meta charset="utf-8"><title>Initial Setup</title></head>
+        <body style="font-family:Arial,Helvetica,sans-serif;margin:24px;">
+            <h2>Initial Setup</h2>
+            <p>The setup template is missing from the container. You can still create the first admin user using the form below.</p>
+            <form method="post">
+                <label>Username:<br><input name="username" required></label><br><br>
+                <label>Password:<br><input name="password" type="password" required></label><br><br>
+                <label>Email (optional):<br><input name="email" type="email"></label><br><br>
+                <label>Display name (optional):<br><input name="display_name"></label><br><br>
+                <button type="submit">Create Admin User</button>
+            </form>
+            <p style="margin-top:16px;color:#666">Tip: For development, mount the local <code>app/</code> folder into the container or copy the missing template into the container.</p>
+        </body></html>
+        '''
+        return render_template_string(fallback_html)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login_route():
