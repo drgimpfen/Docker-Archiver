@@ -16,12 +16,14 @@
 - 📦 **Stack Discovery** - Automatically discovers Docker Compose stacks from mounted directories
 - ⏱️ **Flexible Scheduling** - Cron-based scheduling with maintenance mode support
 - 🔄 **GFS Retention** - Grandfather-Father-Son retention policy (keep X days/weeks/months/years)
+- 🧹 **Automatic Cleanup** - Scheduled cleanup of orphaned archives, old logs, and temp files
 - 🎯 **Dry Run Mode** - Test archive operations without making changes
 - 📊 **Job History** - Detailed logs and metrics for all archive/retention runs
-- 🔔 **Notifications** - Apprise integration for multi-service notifications
+- 🔔 **Smart Notifications** - Apprise integration with customizable subject tags and HTML/text format
 - 🌓 **Dark/Light Mode** - Modern Bootstrap UI with theme toggle
 - 🔐 **User Authentication** - Secure login system (role-based access coming soon)
 - 💾 **Multiple Formats** - Support for tar, tar.gz, tar.zst, or folder output
+- 🌍 **Timezone Support** - Configurable timezone via environment variable
 
 ## Architecture
 
@@ -169,22 +171,30 @@ Docker Archiver uses [Apprise](https://github.com/caronc/apprise) for notificati
 
 ### Setup
 
-**Option 1: Apprise URLs (Manual)**
+**Option 1: Apprise URLs (Recommended)**
 1. Go to **Settings** → **Notifications**
 2. Add Apprise URLs (one per line):
    ```
    discord://webhook_id/webhook_token
    telegram://bot_token/chat_id
    ```
-3. Select which events to notify
-4. Save settings
+   **Note:** `mailto://` URLs are not allowed. Use SMTP environment variables for email notifications.
+3. Select which events to notify:
+   - Archive Success
+   - Archive Error
+   - Retention Cleanup
+   - Cleanup Task
+4. Optional: Add subject tag prefix (e.g., `[Production]`, `[TEST]`)
+5. Optional: Toggle between HTML and Plain Text format
+6. Test your configuration with the "Send Test Notification" button
+7. Save settings
 
 **Option 2: SMTP/Email (Automatic)**
 1. Configure SMTP in `.env` file (see Environment Variables above)
 2. Add email address in **Profile** page
 3. All users with configured email addresses automatically receive notifications
 
-**Combined:** Both methods can be used simultaneously (Apprise URLs + SMTP emails).
+**Important:** Do not use both SMTP environment variables AND Apprise `mailto://` URLs for the same email address, as this will result in duplicate notifications. Use SMTP environment variables for email, and Apprise for other services (Discord, Telegram, etc.).
 
 ## API Documentation
 
