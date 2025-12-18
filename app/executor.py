@@ -31,7 +31,8 @@ class ArchiveExecutor:
         self.dry_run_config = dry_run_config or {}
         self.job_id = None
         self.log_buffer = []
-        self.docker_client = docker.from_env()
+        # Use unix socket directly to avoid http+docker scheme issues
+        self.docker_client = docker.DockerClient(base_url='unix://var/run/docker.sock')
     
     def log(self, level, message):
         """Add log entry with timestamp."""
