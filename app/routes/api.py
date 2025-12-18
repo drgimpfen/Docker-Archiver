@@ -59,7 +59,9 @@ def get_job_details(job_id):
         
         # Get job
         cur.execute("""
-            SELECT j.*, a.name as archive_name 
+            SELECT j.*, 
+                   a.name as archive_name,
+                   EXTRACT(EPOCH FROM (j.end_time - j.start_time))::INTEGER as duration_seconds
             FROM jobs j
             LEFT JOIN archives a ON j.archive_id = a.id
             WHERE j.id = %s;

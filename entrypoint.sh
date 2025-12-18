@@ -4,7 +4,7 @@ set -e
 echo "[Entrypoint] Waiting for PostgreSQL to be ready..."
 
 # Use Python script to wait for database
-python3 wait_for_db.py || {
+python3 tools/wait_for_db.py || {
   echo "[Entrypoint] ERROR: PostgreSQL connection failed"
   exit 1
 }
