@@ -6,7 +6,6 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
-import docker
 from app.db import get_db
 from app.stacks import validate_stack, find_compose_file
 
@@ -31,17 +30,6 @@ class ArchiveExecutor:
         self.dry_run_config = dry_run_config or {}
         self.job_id = None
         self.log_buffer = []
-        # Use unix socket directly to avoid http+docker scheme issues
-        # Clear DOCKER_HOST env var that might cause issues
-        old_docker_host = os.environ.get('DOCKER_HOST')
-        if old_docker_host:
-            del os.environ['DOCKER_HOST']
-        try:
-            self.docker_client = docker.DockerClient(base_url='unix://var/run/docker.sock')
-        finally:
-            # Restore DOCKER_HOST if it was set
-            if old_docker_host:
-                os.environ['DOCKER_HOST'] = old_docker_host
     
     def log(self, level, message):
         """Add log entry with timestamp."""
@@ -199,13 +187,35 @@ class ArchiveExecutor:
     def _is_stack_running(self, stack_name, stack_path):
         """Check if any containers in the stack are running."""
         try:
-            # Get compose project name (usually directory name)
-            project_name = Path(stack_path).name
+            compose_file = find_compose_file(stack_path)
+            if not compose_file:
+                self.log('WARNING', f"No compose file found for {stack_name}")
+                return False
             
-            # List containers with this project label
-            containers = self.docker_client.containers.list(
-                filters={'label': f'com.docker.compose.project={project_name}'}
+            # Use docker compose ps to check stack status
+            result = subprocess.run(
+                ['docker', 'compose', '-f', compose_file, 'ps', '-q'],
+                cwd=stack_path,
+                capture_output=True,
+                text=True,
+                timeout=30
             )
+            
+            # If there are container IDs, check if any are running
+            if result.returncode == 0 and result.stdout.strip():
+                container_ids = result.stdout.strip().split('\n')
+                for container_id in container_ids:
+                    inspect_result = subprocess.run(
+                        ['docker', 'inspect', '-f', '{{.State.Running}}', container_id],
+                        capture_output=True,
+                        text=True,
+                        timeout=10
+                    )
+                    if inspect_result.returncode == 0 and inspect_result.stdout.strip() == 'true':
+                        return True
+                return False
+            
+            containers = []
             return len(containers) > 0
         except Exception as e:
             self.log('WARNING', f"Could not check running state for {stack_name}: {e}")

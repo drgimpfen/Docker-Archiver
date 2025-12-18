@@ -17,6 +17,7 @@ apprise==1.7.1
 
 # Docker client (for status checks)
 docker==7.0.0
+requests-unixsocket==0.3.0
 
 # WSGI server
 gunicorn==21.2.0
