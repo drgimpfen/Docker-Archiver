@@ -4,6 +4,7 @@ Archive execution engine with phased processing.
 import os
 import subprocess
 import time
+import json
 from datetime import datetime
 from pathlib import Path
 from app.db import get_db
@@ -80,7 +81,7 @@ class ArchiveExecutor:
                 RETURNING id;
             """, (
                 self.config['id'], 'archive', 'running', start_time,
-                self.is_dry_run, str(self.dry_run_config) if self.dry_run_config else None,
+                self.is_dry_run, json.dumps(self.dry_run_config) if self.dry_run_config else None,
                 triggered_by, ''
             ))
             job_id = cur.fetchone()['id']

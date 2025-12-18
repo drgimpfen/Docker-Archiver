@@ -41,6 +41,15 @@ def create():
     """Create new archive configuration."""
     try:
         name = request.form.get('name')
+        
+        # Check if archive name already exists
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM archives WHERE name = %s;", (name,))
+            if cur.fetchone():
+                flash(f'Archive name "{name}" already exists. Please choose a different name.', 'danger')
+                return redirect(url_for('archives.list_archives'))
+        
         stacks = request.form.getlist('stacks')
         stop_containers = request.form.get('stop_containers') == 'on'
         schedule_enabled = request.form.get('schedule_enabled') == 'on'
@@ -86,7 +95,7 @@ def create():
 def edit(archive_id):
     """Edit archive configuration."""
     try:
-        name = request.form.get('name')
+        # Note: name field is ignored - archives cannot be renamed
         stacks = request.form.getlist('stacks')
         stop_containers = request.form.get('stop_containers') == 'on'
         schedule_enabled = request.form.get('schedule_enabled') == 'on'
@@ -101,16 +110,21 @@ def edit(archive_id):
         
         with get_db() as conn:
             cur = conn.cursor()
+            # Get current name for success message
+            cur.execute("SELECT name FROM archives WHERE id = %s;", (archive_id,))
+            archive = cur.fetchone()
+            archive_name = archive['name'] if archive else 'Archive'
+            
             cur.execute("""
                 UPDATE archives SET
-                    name = %s, stacks = %s, stop_containers = %s,
+                    stacks = %s, stop_containers = %s,
                     schedule_enabled = %s, schedule_cron = %s, output_format = %s,
                     retention_keep_days = %s, retention_keep_weeks = %s,
                     retention_keep_months = %s, retention_keep_years = %s,
                     retention_one_per_day = %s, updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s;
             """, (
-                name, stacks, stop_containers, schedule_enabled, schedule_cron,
+                stacks, stop_containers, schedule_enabled, schedule_cron,
                 output_format, keep_days, keep_weeks, keep_months, keep_years,
                 one_per_day, archive_id
             ))
@@ -118,7 +132,7 @@ def edit(archive_id):
         
         reload_schedules()
         
-        flash(f'Archive "{name}" updated successfully!', 'success')
+        flash(f'Archive "{archive_name}" updated successfully!', 'success')
         return redirect(url_for('archives.list_archives'))
         
     except Exception as e:
