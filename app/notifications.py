@@ -1,6 +1,7 @@
 """
 Notification system using Apprise.
 """
+import os
 from app.db import get_db
 
 
@@ -16,6 +17,54 @@ def get_setting(key, default=''):
         return default
 
 
+def get_user_emails():
+    """Get all user email addresses that are configured."""
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT email FROM users WHERE email IS NOT NULL AND email != '';")
+            results = cur.fetchall()
+            return [row['email'] for row in results]
+    except Exception:
+        return []
+
+
+def get_apprise_instance():
+    """
+    Create and configure Apprise instance with URLs from settings and environment.
+    Automatically includes user emails if SMTP is configured via environment.
+    """
+    import apprise
+    
+    apobj = apprise.Apprise()
+    
+    # Add URLs from settings
+    apprise_urls = get_setting('apprise_urls', '')
+    for url in apprise_urls.strip().split('\n'):
+        url = url.strip()
+        if url:
+            apobj.add(url)
+    
+    # Add SMTP/Email if configured via environment variables
+    smtp_server = os.environ.get('SMTP_SERVER')
+    smtp_user = os.environ.get('SMTP_USER')
+    smtp_password = os.environ.get('SMTP_PASSWORD')
+    smtp_port = os.environ.get('SMTP_PORT', '587')
+    smtp_from = os.environ.get('SMTP_FROM')
+    
+    if smtp_server and smtp_user and smtp_password and smtp_from:
+        # Get user emails
+        user_emails = get_user_emails()
+        
+        for email in user_emails:
+            # Build mailto URL for Apprise
+            # Format: mailtos://user:pass@server:port/?from=sender&to=recipient
+            mailto_url = f"mailtos://{smtp_user}:{smtp_password}@{smtp_server}:{smtp_port}/?from={smtp_from}&to={email}"
+            apobj.add(mailto_url)
+    
+    return apobj
+
+
 def should_notify(event_type):
     """Check if notifications are enabled for this event type."""
     key = f"notify_on_{event_type}"
@@ -29,22 +78,13 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
         return
     
     try:
-        import apprise
-        
-        apprise_urls = get_setting('apprise_urls', '')
-        if not apprise_urls:
-            return
-        
         base_url = get_setting('base_url', 'http://localhost:8080')
         
-        # Create Apprise instance
-        apobj = apprise.Apprise()
+        # Create Apprise instance with all configured URLs and emails
+        apobj = get_apprise_instance()
         
-        # Add URLs
-        for url in apprise_urls.strip().split('\n'):
-            url = url.strip()
-            if url:
-                apobj.add(url)
+        if not apobj:
+            return
         
         # Build notification message
         archive_name = archive_config['name']
@@ -97,20 +137,11 @@ def send_retention_notification(archive_name, deleted_count, reclaimed_bytes):
         return
     
     try:
-        import apprise
+        # Create Apprise instance with all configured URLs and emails
+        apobj = get_apprise_instance()
         
-        apprise_urls = get_setting('apprise_urls', '')
-        if not apprise_urls:
+        if not apobj:
             return
-        
-        # Create Apprise instance
-        apobj = apprise.Apprise()
-        
-        # Add URLs
-        for url in apprise_urls.strip().split('\n'):
-            url = url.strip()
-            if url:
-                apobj.add(url)
         
         # Build message
         reclaimed_gb = reclaimed_bytes / (1024 * 1024 * 1024)
@@ -140,20 +171,11 @@ def send_error_notification(archive_name, error_message):
         return
     
     try:
-        import apprise
+        # Create Apprise instance with all configured URLs and emails
+        apobj = get_apprise_instance()
         
-        apprise_urls = get_setting('apprise_urls', '')
-        if not apprise_urls:
+        if not apobj:
             return
-        
-        # Create Apprise instance
-        apobj = apprise.Apprise()
-        
-        # Add URLs
-        for url in apprise_urls.strip().split('\n'):
-            url = url.strip()
-            if url:
-                apobj.add(url)
         
         title = f"❌ Archive Failed: {archive_name}"
         body = f"""Archive job failed for: {archive_name}

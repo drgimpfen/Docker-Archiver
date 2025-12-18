@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   db:
     image: postgres:16-alpine
@@ -26,18 +24,24 @@ services:
       DATABASE_URL: postgresql://archiver:${DB_PASSWORD:-changeme123}@db:5432/docker_archiver
       SECRET_KEY: ${SECRET_KEY:-change-this-secret-key-in-production}
       FLASK_ENV: production
+      # SMTP/Email Configuration (optional)
+      SMTP_SERVER: ${SMTP_SERVER:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
     volumes:
       # Docker socket for container management
       - /var/run/docker.sock:/var/run/docker.sock
-      # Archive output directory
-      - ${ARCHIVE_DIR:-./archives}:/archives
-      # Stack directories (examples - adjust to your setup)
-      - ${STACKS_DIR_1:-./stacks}:/local/stacks
-      # Add more stack directories as needed:
-      # - /opt/dockge:/local/dockge
-      # - /srv/more-stacks:/local/moreStacks
+      # Archive output directory (bind mount - adjust to your setup)
+      - ./archives:/archives
+      # Stack directories - add your stack locations here:
+      # Example: If your stacks are in /opt/stacks, add:
+      # - /opt/stacks:/local/stacks
+      # Example: If you use Dockge in /opt/dockge/stacks:
+      # - /opt/dockge/stacks:/local/dockge
     ports:
-      - "${APP_PORT:-8080}:8080"
+      - "8080:8080"
     depends_on:
       db:
         condition: service_healthy
