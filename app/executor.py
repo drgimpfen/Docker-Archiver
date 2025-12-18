@@ -32,7 +32,16 @@ class ArchiveExecutor:
         self.job_id = None
         self.log_buffer = []
         # Use unix socket directly to avoid http+docker scheme issues
-        self.docker_client = docker.DockerClient(base_url='unix://var/run/docker.sock')
+        # Clear DOCKER_HOST env var that might cause issues
+        old_docker_host = os.environ.get('DOCKER_HOST')
+        if old_docker_host:
+            del os.environ['DOCKER_HOST']
+        try:
+            self.docker_client = docker.DockerClient(base_url='unix://var/run/docker.sock')
+        finally:
+            # Restore DOCKER_HOST if it was set
+            if old_docker_host:
+                os.environ['DOCKER_HOST'] = old_docker_host
     
     def log(self, level, message):
         """Add log entry with timestamp."""
