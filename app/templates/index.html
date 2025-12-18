@@ -14,391 +14,263 @@
 </div>
 {% endif %}
 
-<!-- System Info -->
-<div class="row mb-4">
-    <div class="col-md-6">
-        <div class="card">
+<!-- System Info Cards -->
+<div class="row g-3 mb-4">
+    <!-- Storage Card -->
+    <div class="col-md-4">
+        <div class="card h-100">
             <div class="card-body">
-                <h5 class="card-title">
-                    <i class="bi bi-hdd-fill text-primary me-2"></i> Archive Storage
-                </h5>
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h3 class="mb-0">{{ format_bytes(disk.used) }}</h3>
-                        <small class="text-muted">Used</small>
-                    </div>
-                    <div class="text-end">
-                        <h3 class="mb-0">{{ format_bytes(disk.free) }}</h3>
-                        <small class="text-muted">Free</small>
-                    </div>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="card-subtitle text-muted mb-0">Archive Storage</h6>
+                    <i class="bi bi-hdd-fill fs-4 text-{{ disk_status }}"></i>
                 </div>
-                <div class="progress mt-3" style="height: 8px;">
-                    <div class="progress-bar {% if disk.percent > 90 %}bg-danger{% elif disk.percent > 75 %}bg-warning{% else %}bg-success{% endif %}" 
+                <h3 class="mb-2">{{ format_bytes(total_archives_size) }}</h3>
+                <div class="progress mb-2" style="height: 10px;">
+                    <div class="progress-bar bg-{{ disk_status }}" 
                          role="progressbar" 
-                         style="width: {{ disk.percent }}%">
+                         style="width: {{ disk.percent }}%"
+                         aria-valuenow="{{ disk.percent }}" 
+                         aria-valuemin="0" 
+                         aria-valuemax="100">
                     </div>
                 </div>
-                <small class="text-muted">{{ "%.1f"|format(disk.percent) }}% used of {{ format_bytes(disk.total) }}</small>
+                <small class="text-muted">
+                    {{ format_bytes(disk.used) }} / {{ format_bytes(disk.total) }} 
+                    ({{ "%.1f"|format(disk.percent) }}%)
+                </small>
             </div>
         </div>
     </div>
-    
-    <div class="col-md-6">
+
+    <!-- Stacks Card -->
+    <div class="col-md-2">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="card-subtitle text-muted mb-0">Total Stacks</h6>
+                    <i class="bi bi-stack fs-4 text-primary"></i>
+                </div>
+                <h3 class="mb-2">{{ total_stacks_configured }}</h3>
+                <small class="text-muted">{{ active_schedules }} scheduled</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Last 24h Card -->
+    <div class="col-md-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="card-subtitle text-muted mb-0">Last 24h</h6>
+                    <i class="bi bi-clock-history fs-4 text-info"></i>
+                </div>
+                <h3 class="mb-2">{{ jobs_last_24h }}</h3>
+                <small class="text-muted">successful backups</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Next Scheduled Card -->
+    <div class="col-md-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="card-subtitle text-muted mb-0">Next Scheduled</h6>
+                    <i class="bi bi-calendar-check fs-4 text-success"></i>
+                </div>
+                {% if next_scheduled %}
+                    <h6 class="mb-2">{{ next_scheduled.strftime('%H:%M') }}</h6>
+                    <small class="text-muted">{{ next_scheduled.strftime('%Y-%m-%d') }}</small>
+                {% else %}
+                    <h6 class="mb-2 text-muted">None</h6>
+                    <small class="text-muted">No schedules active</small>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Archives Section -->
+<div class="row mb-4">
+    <div class="col-12">
         <div class="card">
-            <div class="card-body">
-                <h5 class="card-title">
-                    <i class="bi bi-box-seam text-primary me-2"></i> Archives Overview
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bi bi-archive me-2"></i>Archives
                 </h5>
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h3 class="mb-0">{{ archives|length }}</h3>
-                        <small class="text-muted">Configured</small>
-                    </div>
-                    <div>
-                        <h3 class="mb-0">{{ archives|selectattr('schedule_enabled')|list|length }}</h3>
-                        <small class="text-muted">Scheduled</small>
-                    </div>
-                    <div>
-                        <h3 class="mb-0">{{ recent_jobs|length }}</h3>
-                        <small class="text-muted">Recent Jobs</small>
-                    </div>
-                </div>
+                <a href="{{ url_for('archives.list_archives') }}" class="btn btn-primary btn-sm">
+                    <i class="bi bi-plus-lg me-1"></i>Manage Archives
+                </a>
             </div>
-        </div>
-    </div>
-</div>
-
-<!-- Archives -->
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h4><i class="bi bi-box-seam me-2"></i> Archives</h4>
-    <a href="{{ url_for('archives.list_archives') }}" class="btn btn-primary">
-        <i class="bi bi-plus-lg me-1"></i> New Archive
-    </a>
-</div>
-
-{% if archives %}
-<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
-    {% for archive in archives %}
-    <div class="col">
-        <div class="card archive-card h-100">
             <div class="card-body">
-                <div class="d-flex justify-content-between align-items-start mb-2">
-                    <h5 class="card-title mb-0">
-                        {% if archive.schedule_enabled %}
-                        <i class="bi bi-clock text-primary" title="Scheduled"></i>
-                        {% else %}
-                        <i class="bi bi-hand-index text-muted" title="Manual"></i>
-                        {% endif %}
-                        {{ archive.name }}
-                    </h5>
-                    {% if archive.last_status %}
-                    <span class="badge {% if archive.last_status == 'success' %}bg-success{% elif archive.last_status == 'running' %}bg-info{% else %}bg-danger{% endif %}">
-                        {{ archive.last_status }}
-                    </span>
-                    {% endif %}
-                </div>
-                
-                <div class="mb-3">
-                    <small class="text-muted d-block">
-                        <i class="bi bi-stack me-1"></i> {{ archive.stacks|length }} stack(s)
-                    </small>
-                    <small class="text-muted d-block">
-                        <i class="bi bi-archive me-1"></i> {{ archive.job_count }} archive(s)
-                    </small>
-                    <small class="text-muted d-block">
-                        <i class="bi bi-hdd me-1"></i> {{ format_bytes(archive.total_size) }}
-                    </small>
-                </div>
-                
-                {% if archive.last_run %}
-                <div class="mb-2">
-                    <small class="text-muted">
-                        <strong>Last run:</strong> {{ archive.last_run.strftime('%Y-%m-%d %H:%M') }}
-                    </small>
-                </div>
-                {% endif %}
-                
-                {% if archive.next_run %}
-                <div class="mb-3">
-                    <small class="text-muted">
-                        <strong>Next run:</strong> {{ archive.next_run.strftime('%Y-%m-%d %H:%M') }}
-                    </small>
-                </div>
-                {% endif %}
-                
-                <div class="btn-group w-100" role="group">
-                    <button type="button" class="btn btn-sm btn-success" onclick="runArchive({{ archive.id }}, '{{ archive.name }}')">
-                        <i class="bi bi-play-fill"></i> Run
-                    </button>
-                    <button type="button" class="btn btn-sm btn-info" onclick="showDryRunModal({{ archive.id }}, '{{ archive.name }}')">
-                        <i class="bi bi-eye"></i> Dry Run
-                    </button>
-                    <a href="{{ url_for('archives.list_archives') }}" class="btn btn-sm btn-outline-primary">
-                        <i class="bi bi-pencil"></i> Edit
-                    </a>
-                </div>
-            </div>
-        </div>
-    </div>
-    {% endfor %}
-</div>
-{% else %}
-<div class="alert alert-info">
-    <i class="bi bi-info-circle me-2"></i> No archives configured yet. <a href="{{ url_for('archives.list_archives') }}" class="alert-link">Create your first archive</a>.
-</div>
-{% endif %}
+                {% if archives %}
+                    <div class="row g-3">
+                        {% for archive in archives %}
+                        <div class="col-md-6 col-lg-4">
+                            <div class="card archive-card h-100">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-start mb-2">
+                                        <h6 class="card-title mb-0">{{ archive.name }}</h6>
+                                        <span class="badge bg-{{ 'success' if archive.schedule_enabled else 'secondary' }}">
+                                            {{ 'Scheduled' if archive.schedule_enabled else 'Manual' }}
+                                        </span>
+                                    </div>
+                                    
+                                    <div class="mb-2">
+                                        <small class="text-muted d-block">
+                                            <i class="bi bi-stack me-1"></i>{{ archive.stacks|length }} stack(s)
+                                        </small>
+                                        <small class="text-muted d-block">
+                                            <i class="bi bi-hdd me-1"></i>{{ format_bytes(archive.total_size) }}
+                                        </small>
+                                    </div>
 
-<!-- Recent Jobs -->
-<div class="d-flex justify-content-between align-items-center mb-3 mt-5">
-    <h4><i class="bi bi-clock-history me-2"></i> Recent Jobs</h4>
-    <a href="{{ url_for('history.list_history') }}" class="btn btn-outline-primary btn-sm">View All</a>
-</div>
+                                    {% if archive.last_run %}
+                                    <div class="mb-2">
+                                        <small class="text-muted">Last run:</small><br>
+                                        <small>
+                                            <span class="badge bg-{{ 'success' if archive.last_status == 'success' else 'danger' }}">
+                                                {{ archive.last_status }}
+                                            </span>
+                                            {{ archive.last_run.strftime('%Y-%m-%d %H:%M') }}
+                                        </small>
+                                    </div>
+                                    {% endif %}
 
-{% if recent_jobs %}
-<div class="table-responsive">
-    <table class="table table-hover">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Type</th>
-                <th>Archive</th>
-                <th>Status</th>
-                <th>Start Time</th>
-                <th>Duration</th>
-                <th>Size</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for job in recent_jobs %}
-            <tr onclick="showJobDetails({{ job.id }})" style="cursor: pointer;">
-                <td><strong>#{{ job.id }}</strong></td>
-                <td>
-                    {% if job.job_type == 'archive' %}
-                    <i class="bi bi-box-seam text-primary"></i> Archive
-                    {% else %}
-                    <i class="bi bi-trash text-warning"></i> Retention
-                    {% endif %}
-                    {% if job.is_dry_run %}
-                    <span class="badge bg-secondary">DRY RUN</span>
-                    {% endif %}
-                </td>
-                <td>{{ job.archive_name or 'N/A' }}</td>
-                <td>
-                    <span class="badge status-badge {% if job.status == 'success' %}bg-success{% elif job.status == 'running' %}bg-info{% else %}bg-danger{% endif %}">
-                        {{ job.status }}
-                    </span>
-                </td>
-                <td>{{ job.start_time.strftime('%Y-%m-%d %H:%M:%S') if job.start_time else 'N/A' }}</td>
-                <td>{{ format_duration(job.duration_seconds) }}</td>
-                <td>
-                    {% if job.job_type == 'archive' %}
-                    <span class="text-success">+{{ format_bytes(job.total_size_bytes) }}</span>
-                    {% elif job.reclaimed_bytes %}
-                    <span class="text-danger">-{{ format_bytes(job.reclaimed_bytes) }}</span>
-                    {% else %}
-                    N/A
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% else %}
-<div class="alert alert-info">
-    <i class="bi bi-info-circle me-2"></i> No jobs run yet.
-</div>
-{% endif %}
+                                    {% if archive.next_run %}
+                                    <div class="mb-2">
+                                        <small class="text-muted">Next run:</small><br>
+                                        <small>{{ archive.next_run.strftime('%Y-%m-%d %H:%M') }}</small>
+                                    </div>
+                                    {% endif %}
 
-<!-- Dry Run Modal -->
-<div class="modal fade" id="dryRunModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">
-                    <i class="bi bi-eye me-2"></i> Dry Run: <span id="dryRunArchiveName"></span>
-                </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <form id="dryRunForm" method="POST">
-                <div class="modal-body">
-                    <p class="text-muted">Select what to simulate in this dry run:</p>
-                    
-                    <div class="form-check mb-3">
-                        <input class="form-check-input" type="checkbox" id="dryStopContainers" name="dry_stop_containers" checked>
-                        <label class="form-check-label" for="dryStopContainers">
-                            <strong>Stop/Start Containers</strong><br>
-                            <small class="text-muted">Simulate stopping and starting containers</small>
-                        </label>
-                    </div>
-                    
-                    <div class="form-check mb-3">
-                        <input class="form-check-input" type="checkbox" id="dryCreateArchive" name="dry_create_archive" checked>
-                        <label class="form-check-label" for="dryCreateArchive">
-                            <strong>Create Archive</strong><br>
-                            <small class="text-muted">Simulate archive creation</small>
-                        </label>
-                    </div>
-                    
-                    <div class="alert alert-warning" id="noStopWarning" style="display: none;">
-                        <i class="bi bi-exclamation-triangle me-2"></i>
-                        <strong>Warning:</strong> Creating archives without stopping containers may result in inconsistent backups.
-                    </div>
-                    
-                    <div class="form-check mb-3">
-                        <input class="form-check-input" type="checkbox" id="dryRunRetention" name="dry_run_retention" checked>
-                        <label class="form-check-label" for="dryRunRetention">
-                            <strong>Run Retention</strong><br>
-                            <small class="text-muted">Simulate retention cleanup</small>
-                        </label>
-                    </div>
-                    
-                    <div class="alert alert-info">
-                        <i class="bi bi-info-circle me-2"></i>
-                        All actions will be simulated and logged. No actual changes will be made.
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-play-fill me-1"></i> Start Dry Run
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- Job Details Modal -->
-<div class="modal fade" id="jobDetailsModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Job Details</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body" id="jobDetailsContent">
-                <div class="text-center">
-                    <div class="spinner-border" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-{% endblock %}
-
-{% block extra_js %}
-<script>
-function runArchive(archiveId, archiveName) {
-    if (confirm(`Start archive job for "${archiveName}"?`)) {
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = `/archives/${archiveId}/run`;
-        document.body.appendChild(form);
-        form.submit();
-    }
-}
-
-function showDryRunModal(archiveId, archiveName) {
-    document.getElementById('dryRunArchiveName').textContent = archiveName;
-    document.getElementById('dryRunForm').action = `/archives/${archiveId}/dry-run`;
-    
-    const modal = new bootstrap.Modal(document.getElementById('dryRunModal'));
-    modal.show();
-    
-    // Show warning when archive creation is enabled but stopping is disabled
-    const stopCheckbox = document.getElementById('dryStopContainers');
-    const createCheckbox = document.getElementById('dryCreateArchive');
-    const warning = document.getElementById('noStopWarning');
-    
-    function updateWarning() {
-        if (createCheckbox.checked && !stopCheckbox.checked) {
-            warning.style.display = 'block';
-        } else {
-            warning.style.display = 'none';
-        }
-    }
-    
-    stopCheckbox.addEventListener('change', updateWarning);
-    createCheckbox.addEventListener('change', updateWarning);
-}
-
-async function showJobDetails(jobId) {
-    const modal = new bootstrap.Modal(document.getElementById('jobDetailsModal'));
-    const content = document.getElementById('jobDetailsContent');
-    
-    modal.show();
-    
-    try {
-        const response = await fetch(`/api/job/${jobId}`);
-        const data = await response.json();
-        
-        if (data.error) {
-            content.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
-            return;
-        }
-        
-        const job = data.job;
-        const metrics = data.metrics;
-        
-        let html = `
-            <div class="mb-3">
-                <h6>Job #${job.id}</h6>
-                <p class="mb-1"><strong>Archive:</strong> ${job.archive_name || 'N/A'}</p>
-                <p class="mb-1"><strong>Type:</strong> ${job.job_type}</p>
-                <p class="mb-1"><strong>Status:</strong> <span class="badge bg-${job.status === 'success' ? 'success' : (job.status === 'running' ? 'info' : 'danger')}">${job.status}</span></p>
-                <p class="mb-1"><strong>Started:</strong> ${job.start_time}</p>
-                <p class="mb-1"><strong>Duration:</strong> ${job.duration_seconds}s</p>
-            </div>
-        `;
-        
-        if (metrics && metrics.length > 0) {
-            html += '<h6>Stack Metrics</h6><div class="accordion" id="stackMetrics">';
-            
-            metrics.forEach((metric, index) => {
-                const size_mb = (metric.archive_size_bytes / (1024 * 1024)).toFixed(1);
-                html += `
-                    <div class="accordion-item">
-                        <h2 class="accordion-header">
-                            <button class="accordion-button ${index > 0 ? 'collapsed' : ''}" type="button" 
-                                    data-bs-toggle="collapse" data-bs-target="#stack${index}">
-                                <span class="badge bg-${metric.status === 'success' ? 'success' : 'danger'} me-2">${metric.status}</span>
-                                ${metric.stack_name} - ${metric.duration_seconds}s - ${size_mb}MB
-                            </button>
-                        </h2>
-                        <div id="stack${index}" class="accordion-collapse collapse ${index === 0 ? 'show' : ''}" 
-                             data-bs-parent="#stackMetrics">
-                            <div class="accordion-body">
-                                <p><strong>Archive Path:</strong> ${metric.archive_path || 'N/A'}</p>
-                                <p><strong>Was Running:</strong> ${metric.was_running ? 'Yes' : 'No'}</p>
-                                ${metric.error ? `<div class="alert alert-danger">${metric.error}</div>` : ''}
+                                    <div class="mt-3 d-flex gap-2">
+                                        <form method="POST" action="{{ url_for('archives.run', archive_id=archive.id) }}" class="flex-fill">
+                                            <button type="submit" class="btn btn-success btn-sm w-100">
+                                                <i class="bi bi-play-fill"></i> Run
+                                            </button>
+                                        </form>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" 
+                                                data-bs-toggle="modal" 
+                                                data-bs-target="#dryRunModal{{ archive.id }}">
+                                            <i class="bi bi-eye"></i>
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
+
+                        <!-- Dry Run Modal -->
+                        <div class="modal fade" id="dryRunModal{{ archive.id }}" tabindex="-1">
+                            <div class="modal-dialog">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title">Dry Run: {{ archive.name }}</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                    </div>
+                                    <form method="POST" action="{{ url_for('archives.dry_run', archive_id=archive.id) }}">
+                                        <div class="modal-body">
+                                            <p class="text-muted">Select which operations to simulate:</p>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="dry_stop_containers" id="dry_stop{{ archive.id }}" checked>
+                                                <label class="form-check-label" for="dry_stop{{ archive.id }}">Stop Containers</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="dry_create_archive" id="dry_archive{{ archive.id }}" checked>
+                                                <label class="form-check-label" for="dry_archive{{ archive.id }}">Create Archive</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="dry_run_retention" id="dry_retention{{ archive.id }}" checked>
+                                                <label class="form-check-label" for="dry_retention{{ archive.id }}">Run Retention</label>
+                                            </div>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                            <button type="submit" class="btn btn-primary">Start Dry Run</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
                     </div>
-                `;
-            });
-            
-            html += '</div>';
-        }
-        
-        if (job.log) {
-            html += `
-                <h6 class="mt-4">Log Output</h6>
-                <pre class="bg-dark text-light p-3 rounded" style="max-height: 300px; overflow-y: auto;">${job.log}</pre>
-            `;
-        }
-        
-        content.innerHTML = html;
-        
-    } catch (error) {
-        content.innerHTML = `<div class="alert alert-danger">Error loading job details: ${error}</div>`;
-    }
-}
-</script>
+                {% else %}
+                    <div class="text-center py-5">
+                        <i class="bi bi-inbox fs-1 text-muted d-block mb-3"></i>
+                        <p class="text-muted mb-3">No archives configured yet</p>
+                        <a href="{{ url_for('archives.list_archives') }}" class="btn btn-primary">
+                            <i class="bi bi-plus-lg me-1"></i>Create First Archive
+                        </a>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Jobs Section -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bi bi-clock-history me-2"></i>Recent Jobs
+                </h5>
+                <a href="{{ url_for('history.list_history') }}" class="btn btn-outline-secondary btn-sm">
+                    View All
+                </a>
+            </div>
+            <div class="card-body">
+                {% if recent_jobs %}
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Archive</th>
+                                    <th>Type</th>
+                                    <th>Started</th>
+                                    <th>Duration</th>
+                                    <th>Size</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for job in recent_jobs %}
+                                <tr>
+                                    <td>{{ job.archive_name or 'N/A' }}</td>
+                                    <td>
+                                        <span class="badge bg-{{ 'info' if job.job_type == 'archive' else 'secondary' }}">
+                                            {{ job.job_type }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <small>{{ job.start_time.strftime('%Y-%m-%d %H:%M') if job.start_time else 'N/A' }}</small>
+                                    </td>
+                                    <td>
+                                        <small>{{ format_duration(job.duration_seconds) if job.duration_seconds else 'N/A' }}</small>
+                                    </td>
+                                    <td>
+                                        <small>{{ format_bytes(job.total_size_bytes) if job.total_size_bytes else 'N/A' }}</small>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-{{ 'success' if job.status == 'success' else ('danger' if job.status == 'failed' else 'warning') }}">
+                                            {{ job.status }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="text-center py-4">
+                        <i class="bi bi-inbox fs-3 text-muted d-block mb-2"></i>
+                        <p class="text-muted mb-0">No jobs yet</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
-
-
-

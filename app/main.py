@@ -39,6 +39,8 @@ def health():
 @login_required
 def index():
     """Dashboard page."""
+    from datetime import datetime, timedelta
+    
     # Check maintenance mode
     maintenance_mode = get_setting('maintenance_mode', 'false').lower() == 'true'
     
@@ -51,7 +53,36 @@ def index():
         cur.execute("SELECT * FROM archives ORDER BY name;")
         archives_list = cur.fetchall()
         
-        # Enrich with stats
+        # Dashboard statistics
+        total_stacks_configured = len(archives_list)
+        active_schedules = sum(1 for a in archives_list if a['schedule_enabled'])
+        
+        # Last 24h jobs
+        cur.execute("""
+            SELECT COUNT(*) as count FROM jobs 
+            WHERE job_type = 'archive' 
+            AND status = 'success' 
+            AND start_time >= NOW() - INTERVAL '24 hours';
+        """)
+        jobs_last_24h = cur.fetchone()['count']
+        
+        # Next scheduled job
+        next_scheduled = None
+        for archive in archives_list:
+            if archive['schedule_enabled']:
+                next_run = get_next_run_time(archive['id'])
+                if next_run and (not next_scheduled or next_run < next_scheduled):
+                    next_scheduled = next_run
+        
+        # Total archives size
+        cur.execute("""
+            SELECT SUM(total_size_bytes) as total FROM jobs 
+            WHERE job_type = 'archive' AND status = 'success';
+        """)
+        result = cur.fetchone()
+        total_archives_size = result['total'] if result and result['total'] else 0
+        
+        # Enrich archives with stats
         archive_list = []
         for archive in archives_list:
             archive_dict = dict(archive)
@@ -99,11 +130,26 @@ def index():
         """)
         recent_jobs = cur.fetchall()
     
+    # Calculate disk health status
+    disk_percent = disk.get('percent', 0)
+    if disk_percent >= 90:
+        disk_status = 'danger'
+    elif disk_percent >= 70:
+        disk_status = 'warning'
+    else:
+        disk_status = 'success'
+    
     return render_template(
         'index.html',
         archives=archive_list,
         recent_jobs=recent_jobs,
         disk=disk,
+        disk_status=disk_status,
+        total_archives_size=total_archives_size,
+        total_stacks_configured=total_stacks_configured,
+        active_schedules=active_schedules,
+        jobs_last_24h=jobs_last_24h,
+        next_scheduled=next_scheduled,
         maintenance_mode=maintenance_mode,
         format_bytes=format_bytes,
         format_duration=format_duration,
