@@ -147,7 +147,7 @@ async function showJobDetails(jobId) {
     modal.show();
     
     try {
-        const response = await fetch(`/api/job/${jobId}`);
+        const response = await fetch(`/api/jobs/${jobId}`);
         const data = await response.json();
         
         if (data.error) {
@@ -281,7 +281,7 @@ function escapeHtml(text) {
 
 async function requestDownload(jobId, stackName, archivePath) {
     try {
-        const response = await fetch(`{{ url_for('history.request_download', job_id=0) }}`.replace('/0/', `/${jobId}/`), {
+        const response = await fetch(`/api/jobs/${jobId}/download`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -311,7 +311,7 @@ async function requestDownload(jobId, stackName, archivePath) {
 }
 
 function downloadLog(jobId) {
-    window.open(`{{ url_for('history.download_log', job_id=0) }}`.replace('/0/', `/${jobId}/`), '_blank');
+    window.open(`/api/jobs/${jobId}/log`, '_blank');
 }
 </script>
 {% endblock %}

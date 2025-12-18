@@ -10,9 +10,10 @@ from app.stacks import discover_stacks
 from app.downloads import get_download_by_token, prepare_archive_for_download
 from app.notifications import get_setting
 from app.utils import format_bytes, format_duration, get_disk_usage
+from pathlib import Path
 
 # Import blueprints
-from app.routes import archives, history, settings, profile
+from app.routes import archives, history, settings, profile, api
 
 
 app = Flask(__name__)
@@ -23,6 +24,7 @@ app.register_blueprint(archives.bp)
 app.register_blueprint(history.bp)
 app.register_blueprint(settings.bp)
 app.register_blueprint(profile.bp)
+app.register_blueprint(api.bp)
 
 # Initialize scheduler on startup
 init_scheduler()

@@ -110,10 +110,24 @@ def init_db():
                 token VARCHAR(64) UNIQUE NOT NULL,
                 job_id INTEGER REFERENCES jobs(id) ON DELETE CASCADE,
                 stack_name VARCHAR(255),
-                file_path TEXT NOT NULL,
+                archive_path TEXT NOT NULL,
+                is_folder BOOLEAN DEFAULT false,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMP NOT NULL,
                 downloads INTEGER DEFAULT 0
+            );
+        """)
+        
+        # API tokens for external access
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS api_tokens (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                token VARCHAR(64) UNIQUE NOT NULL,
+                name VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP,
+                last_used_at TIMESTAMP
             );
         """)
         
@@ -132,6 +146,8 @@ def init_db():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_job_stack_metrics_job_id ON job_stack_metrics(job_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_download_tokens_token ON download_tokens(token);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_download_tokens_expires ON download_tokens(expires_at);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_api_tokens_token ON api_tokens(token);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);")
         
         # Insert default settings if not exist
         cur.execute("""

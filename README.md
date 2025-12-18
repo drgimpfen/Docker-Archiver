@@ -185,7 +185,69 @@ Docker Archiver uses [Apprise](https://github.com/caronc/apprise) for notificati
 
 **Combined:** Both methods can be used simultaneously (Apprise URLs + SMTP emails).
 
-## API Endpoints
+## API Documentation
+
+### External API (for automation/integrations)
+
+All external API endpoints are located under `/api/*` and support **Bearer token authentication**.
+
+#### Authentication
+
+Generate an API token in your user profile (coming soon) or use session-based authentication from the web UI.
+
+**Header Format:**
+```
+Authorization: Bearer <your-api-token>
+```
+
+#### Endpoints
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| **Archives** |
+| `/api/archives` | GET | Token/Session | List all archive configurations |
+| `/api/archives/<id>/run` | POST | Token/Session | Trigger archive execution |
+| `/api/archives/<id>/dry-run` | POST | Token/Session | Run simulation (dry run) |
+| **Jobs** |
+| `/api/jobs` | GET | Token/Session | List jobs (supports filters: `?archive_id=1&type=archive&limit=50`) |
+| `/api/jobs/<id>` | GET | Token/Session | Get job details with stack metrics |
+| `/api/jobs/<id>/download` | POST | Token/Session | Request archive download (generates token) |
+| `/api/jobs/<id>/log` | GET | Token/Session | Download job log file |
+| **Stacks** |
+| `/api/stacks` | GET | Token/Session | List discovered Docker Compose stacks |
+| **Downloads** |
+| `/download/<token>` | GET | **None** | Download archive file (24h expiry) |
+
+#### Example Usage
+
+```bash
+# List all archives
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+  http://your-server:8080/api/archives
+
+# Trigger archive execution
+curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
+  http://your-server:8080/api/archives/1/run
+
+# Get job details
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+  http://your-server:8080/api/jobs/123
+
+# List recent jobs
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+  "http://your-server:8080/api/jobs?type=archive&limit=10"
+
+# Request download
+curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"stack_name":"mystack","archive_path":"/archives/path"}' \
+  http://your-server:8080/api/jobs/123/download
+
+# Download archive (no auth needed)
+curl -O http://your-server:8080/download/abc123token
+```
+
+### Web UI Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -193,19 +255,32 @@ Docker Archiver uses [Apprise](https://github.com/caronc/apprise) for notificati
 | `/login` | GET/POST | Login page |
 | `/logout` | GET | Logout |
 | `/setup` | GET/POST | Initial user setup |
-| `/archives/` | GET | Archive management |
+| `/archives/` | GET | Archive management UI |
 | `/archives/create` | POST | Create archive config |
 | `/archives/<id>/edit` | POST | Edit archive config |
 | `/archives/<id>/delete` | POST | Delete archive config |
 | `/archives/<id>/run` | POST | Run archive job |
 | `/archives/<id>/dry-run` | POST | Run dry run |
-| `/history/` | GET | Job history (with filters) |
-| `/history/api/job/<id>` | GET | Job details (JSON) |
+| `/history/` | GET | Job history UI |
 | `/profile/` | GET/POST | User profile (password, email) |
 | `/settings/` | GET/POST | Settings page |
-| `/api/stacks` | GET | Discovered stacks (JSON) |
-| `/download/<token>` | GET | Download archive (no auth) |
 | `/health` | GET | Health check |
+
+### Reverse Proxy Configuration (Pangolin, Authelia, etc.)
+
+When using an authentication proxy like Pangolin or Authelia, you need to **exclude** the following paths from authentication:
+
+```yaml
+# Paths that should bypass authentication
+exclude_paths:
+  - /download/*         # Archive downloads (token-based, 24h expiry)
+  - /api/*              # External API endpoints (use Bearer token auth)
+  - /health             # Health check endpoint
+  - /login              # Login page must be accessible
+  - /setup              # Initial setup page
+```
+
+**Note:** The `/api/*` endpoints have their own authentication via Bearer tokens. The download endpoint (`/download/<token>`) uses time-limited tokens and doesn't require session authentication.
 
 ## Development
 
