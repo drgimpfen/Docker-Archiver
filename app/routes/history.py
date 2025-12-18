@@ -19,7 +19,7 @@ def list_history():
     job_type = request.args.get('type')
     
     query = """
-        SELECT j.*, a.name as archive_name,
+        SELECT j.*, a.name as archive_name, a.stacks as archive_stacks,
                (SELECT STRING_AGG(stack_name, ',') 
                 FROM job_stack_metrics 
                 WHERE job_id = j.id) as stack_names

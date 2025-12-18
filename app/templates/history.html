@@ -59,9 +59,6 @@
             <tr onclick="showJobDetails({{ job.id }})" style="cursor: pointer;" class="{% if job.is_dry_run %}table-secondary{% endif %}">
                 <td><strong>#{{ job.id }}</strong></td>
                 <td>
-                    {% if job.is_dry_run %}
-                    <span class="badge bg-secondary me-2">DRY RUN</span>
-                    {% endif %}
                     {% if job.job_type == 'archive' %}
                     <i class="bi bi-box-seam text-primary"></i> Archive
                     {% elif job.job_type == 'retention' %}
@@ -70,6 +67,9 @@
                     <i class="bi bi-broom text-info"></i> Cleanup
                     {% else %}
                     <i class="bi bi-question-circle text-muted"></i> {{ job.job_type|title }}
+                    {% endif %}
+                    {% if job.is_dry_run %}
+                    <span class="badge bg-secondary ms-2">DRY RUN</span>
                     {% endif %}
                 </td>
                 <td>
@@ -83,6 +83,13 @@
                         {% endfor %}
                         {% if stacks|length > 3 %}
                             <span class="badge bg-secondary">+{{ stacks|length - 3 }}</span>
+                        {% endif %}
+                    {% elif job.archive_stacks %}
+                        {% for stack in job.archive_stacks[:3] %}
+                            <span class="badge bg-secondary">{{ stack }}</span>
+                        {% endfor %}
+                        {% if job.archive_stacks|length > 3 %}
+                            <span class="badge bg-secondary">+{{ job.archive_stacks|length - 3 }}</span>
                         {% endif %}
                     {% else %}
                         <span class="text-muted small">N/A</span>
@@ -102,8 +109,8 @@
                 <td>
                     {% if job.job_type == 'archive' and job.total_size_bytes %}
                     <span class="text-success">+{{ format_bytes(job.total_size_bytes) }}</span>
-                    {% elif job.job_type == 'retention' and job.reclaimed_bytes %}
-                    <span class="text-danger">-{{ format_bytes(job.reclaimed_bytes) }}</span>
+                    {% elif (job.job_type == 'retention' or job.job_type == 'cleanup') and (job.reclaimed_bytes or job.reclaimed_size_bytes) %}
+                    <span class="text-warning">-{{ format_bytes(job.reclaimed_size_bytes or job.reclaimed_bytes) }}</span>
                     {% else %}
                     <span class="text-muted">N/A</span>
                     {% endif %}
