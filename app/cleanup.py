@@ -144,6 +144,8 @@ def cleanup_orphaned_archives(is_dry_run=False, log_callback=None):
                 log(f"Would delete orphaned archive directory: {archive_dir.name} ({format_bytes(size)})")
             else:
                 log(f"Deleting orphaned archive directory: {archive_dir.name} ({format_bytes(size)})")
+                # Mark all archives in this directory as deleted
+                _mark_archives_as_deleted_by_path(str(archive_dir), 'cleanup')
                 shutil.rmtree(archive_dir)
     
     if orphaned_count > 0:
@@ -301,6 +303,21 @@ def format_bytes(size):
             return f"{size:.2f} {unit}"
         size /= 1024.0
     return f"{size:.2f} PB"
+
+
+def _mark_archives_as_deleted_by_path(path_prefix, deleted_by='cleanup'):
+    """Mark all archives under a path as deleted in database."""
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE job_stack_metrics 
+                SET deleted_at = NOW(), deleted_by = %s
+                WHERE archive_path LIKE %s AND deleted_at IS NULL;
+            """, (deleted_by, f"{path_prefix}%"))
+            conn.commit()
+    except Exception as e:
+        print(f"[Cleanup] Failed to mark archives as deleted in DB: {e}")
 
 
 def send_cleanup_notification(orphaned_stats, log_stats, temp_stats, total_reclaimed, is_dry_run):

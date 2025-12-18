@@ -78,6 +78,13 @@ def get_job_details(job_id):
             ORDER BY start_time;
         """, (job_id,))
         metrics = cur.fetchall()
+        
+        # Set file_exists based on deleted_at timestamp
+        for metric in metrics:
+            if metric.get('archive_path'):
+                metric['file_exists'] = metric.get('deleted_at') is None
+            else:
+                metric['file_exists'] = None
     
     return jsonify({
         'job': dict(job),

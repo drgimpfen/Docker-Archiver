@@ -193,6 +193,28 @@ def init_db():
             END $$;
         """)
         
+        # Migrate job_stack_metrics - add deleted_at column
+        cur.execute("""
+            DO $$ 
+            BEGIN
+                -- Add deleted_at timestamp for retention tracking
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='job_stack_metrics' AND column_name='deleted_at'
+                ) THEN
+                    ALTER TABLE job_stack_metrics ADD COLUMN deleted_at TIMESTAMP;
+                END IF;
+                
+                -- Add deleted_by column to track what deleted it
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='job_stack_metrics' AND column_name='deleted_by'
+                ) THEN
+                    ALTER TABLE job_stack_metrics ADD COLUMN deleted_by VARCHAR(50);
+                END IF;
+            END $$;
+        """)
+        
         # Insert default settings if not exist
         cur.execute("""
             INSERT INTO settings (key, value) VALUES 
@@ -206,9 +228,17 @@ def init_db():
                 ('cleanup_time', '02:30'),
                 ('cleanup_log_retention_days', '90'),
                 ('cleanup_dry_run', 'false'),
-                ('notify_on_cleanup', 'false')
+                ('notify_on_cleanup', 'false'),
+                ('app_version', '0.5.0')
             ON CONFLICT (key) DO NOTHING;
         """)
+        
+        # Update app version if it changed
+        from app.main import __version__
+        cur.execute("""
+            INSERT INTO settings (key, value) VALUES ('app_version', %s)
+            ON CONFLICT (key) DO UPDATE SET value = %s, updated_at = CURRENT_TIMESTAMP;
+        """, (__version__, __version__))
         
         conn.commit()
         print("[DB] Database schema initialized successfully")

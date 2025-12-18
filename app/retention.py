@@ -134,6 +134,9 @@ def run_retention(archive_config, job_id, is_dry_run=False, log_callback=None):
                         path.unlink()
                     total_reclaimed += size
                     total_deleted += 1
+                    
+                    # Mark as deleted in database
+                    _mark_archive_as_deleted(str(path), 'retention')
                 except Exception as e:
                     log('ERROR', f"Failed to delete {path.name}: {e}")
             else:
@@ -252,3 +255,20 @@ def apply_gfs_retention(archives, keep_days, keep_weeks, keep_months, keep_years
                     break
     
     return to_keep
+
+
+def _mark_archive_as_deleted(archive_path, deleted_by='retention'):
+    """Mark archive as deleted in database."""
+    try:
+        from app.db import get_db
+        
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE job_stack_metrics 
+                SET deleted_at = NOW(), deleted_by = %s
+                WHERE archive_path = %s AND deleted_at IS NULL;
+            """, (deleted_by, archive_path))
+            conn.commit()
+    except Exception as e:
+        print(f"[Retention] Failed to mark archive as deleted in DB: {e}")
