@@ -159,7 +159,8 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
         body_format = get_notification_format()
         
         # Convert to plain text if needed
-        if body_format != get_notification_format().HTML:
+        import apprise
+        if body_format == apprise.NotifyFormat.TEXT:
             body = strip_html_tags(body)
         
         # Send notification
