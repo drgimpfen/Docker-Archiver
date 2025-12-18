@@ -10,6 +10,7 @@
                 </div>
                 <div class="card-body">
                     <form method="POST" action="{{ url_for('profile.manage_profile') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <!-- Account Information -->
                         <h5 class="mb-3">Account Information</h5>
                         

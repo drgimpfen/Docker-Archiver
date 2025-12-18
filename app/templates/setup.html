@@ -13,8 +13,7 @@
                     <p class="text-muted">Create your admin account</p>
                 </div>
                 
-                <form method="POST">
-                    <div class="mb-3">
+                <form method="POST">                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>                    <div class="mb-3">
                         <label for="username" class="form-label">Username</label>
                         <input type="text" class="form-control" id="username" name="username" required autofocus>
                         <div class="form-text">This will be your admin username</div>
