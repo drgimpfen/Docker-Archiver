@@ -5,6 +5,7 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from collections import defaultdict
+from app import utils
 
 
 ARCHIVE_BASE = '/archives'
@@ -190,7 +191,7 @@ def apply_gfs_retention(archives, keep_days, keep_weeks, keep_months, keep_years
     
     Returns list of archives to keep.
     """
-    now = datetime.now()
+    now = utils.now()
     to_keep = []
     
     # Sort archives by timestamp (newest first)

@@ -237,8 +237,8 @@ def run_retention_only(archive_id):
             
             # Log function
             def log_message(level, message):
-                import datetime
-                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                from app import utils as u
+                timestamp = u.now().strftime('%Y-%m-%d %H:%M:%S')
                 log_line = f"[{timestamp}] [{level}] {message}\n"
                 
                 with get_db() as conn:

@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from app.db import get_db
 from app.notifications import get_setting
+from app import utils
 
 
 ARCHIVE_BASE = '/archives'
@@ -28,15 +29,14 @@ def run_cleanup():
     notify_cleanup = get_setting('notify_on_cleanup', 'false').lower() == 'true'
     
     mode = "DRY RUN" if is_dry_run else "LIVE"
-    start_time = datetime.now()
+    start_time = utils.now()
     
     # Create job record
     job_id = None
     log_lines = []
     
     def log_message(level, message):
-        import datetime
-        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        timestamp = utils.now().strftime('%Y-%m-%d %H:%M:%S')
         log_line = f"[{timestamp}] [{level}] {message}\n"
         log_lines.append(log_line)
         print(f"[Cleanup] {message}")

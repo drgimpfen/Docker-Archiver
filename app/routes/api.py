@@ -12,6 +12,7 @@ from pathlib import Path
 from flask import Blueprint, request, jsonify, send_file
 from app.auth import login_required, get_current_user
 from app.db import get_db
+from app import utils
 
 
 bp = Blueprint('api', __name__, url_prefix='/api')
@@ -109,7 +110,7 @@ def request_download(job_id):
         
         # Generate download token
         token = secrets.token_urlsafe(32)
-        expires_at = datetime.now() + timedelta(hours=24)
+        expires_at = utils.now() + timedelta(hours=24)
         
         # Store token in database
         with get_db() as conn:

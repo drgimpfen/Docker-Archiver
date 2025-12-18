@@ -6,6 +6,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from app.db import get_db
+from app import utils
 
 
 def generate_download_token(job_id, stack_name, archive_path, is_folder=False, expires_hours=24):
@@ -15,7 +16,7 @@ def generate_download_token(job_id, stack_name, archive_path, is_folder=False, e
     Returns: token string
     """
     token = secrets.token_urlsafe(32)
-    expires_at = datetime.now() + timedelta(hours=expires_hours)
+    expires_at = utils.now() + timedelta(hours=expires_hours)
     
     with get_db() as conn:
         cur = conn.cursor()

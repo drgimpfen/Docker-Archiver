@@ -1,7 +1,20 @@
 """
 Utility functions for the application.
 """
+import os
 import shutil
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+
+def now():
+    """Get current datetime in configured timezone."""
+    tz_name = os.environ.get('TZ', 'UTC')
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo('UTC')
+    return datetime.now(tz)
 
 
 def format_bytes(bytes_val):
