@@ -13,6 +13,7 @@ body {
 /* Sidebar Styles */
 body.has-sidebar .app-main {
     margin-left: 240px;
+    width: calc(100% - 240px);
 }
 
 .app-sidebar {
@@ -63,11 +64,12 @@ body.has-sidebar .app-main {
 
 /* Main content area */
 .app-main {
-    padding-top: 1rem;
-    padding-bottom: 1rem;
+    padding: 1rem;
     flex: 1 0 auto;
     transition: margin-left 0.3s ease-in-out;
     overflow-x: hidden;
+    width: 100%;
+    max-width: 100%;
 }
 
 /* Navbar adjustments */
