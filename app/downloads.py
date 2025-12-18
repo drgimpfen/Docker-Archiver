@@ -33,15 +33,25 @@ def get_download_by_token(token):
     """
     Get download info by token.
     
-    Returns: dict with download info or None if invalid/expired
+    Args:
+        token: Download token
+    
+    Returns: dict with download info or None if invalid/expired/exhausted
     """
     with get_db() as conn:
         cur = conn.cursor()
+        
+        # Get max downloads setting
+        cur.execute("SELECT value FROM settings WHERE key = 'max_token_downloads';")
+        setting = cur.fetchone()
+        max_downloads = int(setting['value']) if setting else 3
+        
         cur.execute("""
             SELECT * FROM download_tokens 
             WHERE token = %s 
-            AND expires_at > CURRENT_TIMESTAMP;
-        """, (token,))
+            AND expires_at > CURRENT_TIMESTAMP
+            AND downloads < %s;
+        """, (token, max_downloads))
         result = cur.fetchone()
         
         if result:
@@ -76,18 +86,18 @@ def prepare_archive_for_download(file_path, output_format='tar.gz'):
         
         if output_format == 'tar.gz':
             temp_file = path.parent / f"{path.name}_download_{timestamp}.tar.gz"
-            cmd = f"tar -czf {temp_file} -C {path.parent} {path.name}"
+            cmd_parts = ['tar', '-czf', str(temp_file), '-C', str(path.parent), path.name]
         elif output_format == 'tar.zst':
             temp_file = path.parent / f"{path.name}_download_{timestamp}.tar.zst"
-            cmd = f"tar --use-compress-program=zstd -cf {temp_file} -C {path.parent} {path.name}"
+            cmd_parts = ['tar', '--use-compress-program=zstd', '-cf', str(temp_file), '-C', str(path.parent), path.name]
         else:  # tar
             temp_file = path.parent / f"{path.name}_download_{timestamp}.tar"
-            cmd = f"tar -cf {temp_file} -C {path.parent} {path.name}"
+            cmd_parts = ['tar', '-cf', str(temp_file), '-C', str(path.parent), path.name]
         
         print(f"[Downloads] Creating archive for download: {temp_file}")
         
         try:
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=600)
+            result = subprocess.run(cmd_parts, capture_output=True, text=True, timeout=600)
             if result.returncode == 0:
                 return str(temp_file), True
             else:

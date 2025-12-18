@@ -178,7 +178,8 @@ def init_db():
                 ('apprise_urls', ''),
                 ('notify_on_success', 'true'),
                 ('notify_on_error', 'true'),
-                ('maintenance_mode', 'false')
+                ('maintenance_mode', 'false'),
+                ('max_token_downloads', '3')
             ON CONFLICT (key) DO NOTHING;
         """)
         

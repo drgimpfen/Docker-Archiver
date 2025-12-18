@@ -3,6 +3,9 @@ Main Flask application with Blueprints.
 """
 import os
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_file
+from flask_wtf.csrf import CSRFProtect
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from app.db import init_db, get_db
 from app.auth import login_required, authenticate_user, create_user, get_user_count, get_current_user
 from app.scheduler import init_scheduler, get_next_run_time
@@ -19,12 +22,39 @@ from app.routes import archives, history, settings, profile, api
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 
+# Security: CSRF Protection
+csrf = CSRFProtect(app)
+# Exempt download endpoint (uses tokens) and health check
+csrf.exempt('download_archive')
+csrf.exempt('health')
+
+# Security: Rate Limiting
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://"
+)
+
+# Security Headers
+@app.after_request
+def set_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; font-src 'self' https://cdn.jsdelivr.net"
+    return response
+
 # Register blueprints
 app.register_blueprint(archives.bp)
 app.register_blueprint(history.bp)
 app.register_blueprint(settings.bp)
 app.register_blueprint(profile.bp)
 app.register_blueprint(api.bp)
+
+# Exempt API blueprint from CSRF (uses Bearer tokens)
+csrf.exempt(api.bp)
 
 # Initialize scheduler on startup
 init_scheduler()
@@ -160,6 +190,7 @@ def index():
 
 
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("10 per minute")
 def login():
     """Login page."""
     # Check if initial setup is needed
@@ -226,12 +257,18 @@ def api_get_stacks():
 @app.route('/download/<token>')
 def download_archive(token):
     """Download archive by token (no auth required)."""
+    from app.security import is_safe_path
+    
     download_info = get_download_by_token(token)
     
     if not download_info:
         return "Invalid or expired download link", 404
     
     archive_path = download_info['archive_path']
+    
+    # Security: Validate path is within archives directory
+    if not is_safe_path('/archives', archive_path):
+        return "Invalid archive path", 403
     
     # Prepare archive (create if folder)
     actual_path, should_cleanup = prepare_archive_for_download(archive_path, output_format='tar.gz')

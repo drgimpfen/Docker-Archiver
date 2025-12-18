@@ -23,6 +23,7 @@ def manage_settings():
             notify_success = request.form.get('notify_success') == 'on'
             notify_error = request.form.get('notify_error') == 'on'
             maintenance_mode = request.form.get('maintenance_mode') == 'on'
+            max_token_downloads = request.form.get('max_token_downloads', '3')
             
             with get_db() as conn:
                 cur = conn.cursor()
@@ -32,6 +33,7 @@ def manage_settings():
                     ('notify_on_success', 'true' if notify_success else 'false'),
                     ('notify_on_error', 'true' if notify_error else 'false'),
                     ('maintenance_mode', 'true' if maintenance_mode else 'false'),
+                    ('max_token_downloads', max_token_downloads),
                 ]
                 
                 for key, value in settings_to_update:

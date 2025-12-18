@@ -40,7 +40,14 @@ def list_archives():
 def create():
     """Create new archive configuration."""
     try:
+        from app.security import validate_archive_name
+        
         name = request.form.get('name')
+        
+        # Validate archive name for security
+        if not validate_archive_name(name):
+            flash('Invalid archive name. Must be alphanumeric, no special characters or path traversal attempts.', 'danger')
+            return redirect(url_for('archives.list_archives'))
         
         # Check if archive name already exists
         with get_db() as conn:

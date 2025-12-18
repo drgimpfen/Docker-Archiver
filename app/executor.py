@@ -226,16 +226,16 @@ class ArchiveExecutor:
         """Stop a docker compose stack."""
         self.log('INFO', f"Stopping stack in {compose_path.parent}...")
         
-        cmd = f"docker compose -f {compose_path} down"
-        self.log('INFO', f"Starting command: Stopping {stack_name} ({cmd})")
+        cmd_parts = ['docker', 'compose', '-f', str(compose_path), 'down']
+        self.log('INFO', f"Starting command: Stopping {stack_name} (docker compose down)")
         
         if self.is_dry_run:
-            self.log('INFO', f"Would execute: {cmd}")
+            self.log('INFO', f"Would execute: docker compose -f {compose_path} down")
             return True
         
         try:
             result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, timeout=120
+                cmd_parts, capture_output=True, text=True, timeout=120
             )
             if result.returncode == 0:
                 self.log('INFO', f"Successfully finished: Stopping {stack_name}")
@@ -251,16 +251,16 @@ class ArchiveExecutor:
         """Start a docker compose stack."""
         self.log('INFO', f"Starting stack in {compose_path.parent}...")
         
-        cmd = f"docker compose -f {compose_path} up -d"
-        self.log('INFO', f"Starting command: Starting {stack_name} ({cmd})")
+        cmd_parts = ['docker', 'compose', '-f', str(compose_path), 'up', '-d']
+        self.log('INFO', f"Starting command: Starting {stack_name} (docker compose up -d)")
         
         if self.is_dry_run:
-            self.log('INFO', f"Would execute: {cmd}")
+            self.log('INFO', f"Would execute: docker compose -f {compose_path} up -d")
             return True
         
         try:
             result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, timeout=120
+                cmd_parts, capture_output=True, text=True, timeout=120
             )
             if result.returncode == 0:
                 self.log('INFO', f"Successfully finished: Starting {stack_name}")
@@ -314,17 +314,22 @@ class ArchiveExecutor:
             
             parent_dir = Path(stack_path).parent
             stack_dirname = Path(stack_path).name
-            cmd = f"tar {tar_opts} {output_file} -C {parent_dir} {stack_dirname}"
             
-            self.log('INFO', f"Starting command: Archiving {stack_name} ({cmd})")
+            # Build tar command as array for security
+            cmd_parts = ['tar']
+            if tar_opts:
+                cmd_parts.extend(tar_opts.split())
+            cmd_parts.extend([str(output_file), '-C', str(parent_dir), stack_dirname])
+            
+            self.log('INFO', f"Starting command: Archiving {stack_name} (tar)")
             
             if self.is_dry_run:
-                self.log('INFO', f"Would execute: {cmd}")
+                self.log('INFO', f"Would execute: tar {tar_opts} {output_file} -C {parent_dir} {stack_dirname}")
                 return str(output_file), 0
             
             try:
                 result = subprocess.run(
-                    cmd, shell=True, capture_output=True, text=True, timeout=600
+                    cmd_parts, capture_output=True, text=True, timeout=600
                 )
                 if result.returncode != 0:
                     self.log('ERROR', f"Failed to create archive: {result.stderr}")
@@ -346,16 +351,16 @@ class ArchiveExecutor:
             # Copy as folder
             self.log('INFO', f"Copying '{stack_name}' as folder to {output_file}...")
             
-            cmd = f"cp -r {stack_path} {output_file}"
-            self.log('INFO', f"Starting command: Copying {stack_name} ({cmd})")
+            cmd_parts = ['cp', '-r', str(stack_path), str(output_file)]
+            self.log('INFO', f"Starting command: Copying {stack_name} (cp -r)")
             
             if self.is_dry_run:
-                self.log('INFO', f"Would execute: {cmd}")
+                self.log('INFO', f"Would execute: cp -r {stack_path} {output_file}")
                 return str(output_file), 0
             
             try:
                 result = subprocess.run(
-                    cmd, shell=True, capture_output=True, text=True, timeout=300
+                    cmd_parts, capture_output=True, text=True, timeout=300
                 )
                 if result.returncode != 0:
                     self.log('ERROR', f"Failed to copy folder: {result.stderr}")
@@ -363,7 +368,7 @@ class ArchiveExecutor:
                 
                 # Calculate folder size
                 result = subprocess.run(
-                    f"du -sb {output_file}", shell=True, capture_output=True, text=True
+                    ['du', '-sb', str(output_file)], capture_output=True, text=True
                 )
                 folder_size = int(result.stdout.split()[0]) if result.returncode == 0 else 0
                 folder_size_mb = folder_size / (1024 * 1024)
@@ -436,11 +441,11 @@ class ArchiveExecutor:
     
     def _log_disk_usage(self):
         """Log disk usage for archives directory."""
-        cmd = f"df -h --output=size,used,avail,pcent,target {ARCHIVE_BASE}"
+        cmd_parts = ['df', '-h', '--output=size,used,avail,pcent,target', ARCHIVE_BASE]
         self.log('INFO', f"Checking disk usage...")
         
         try:
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(cmd_parts, capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
                 output = result.stdout.strip()
                 if output:
