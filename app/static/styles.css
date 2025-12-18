@@ -1,7 +1,13 @@
 /* Docker Archiver Styles */
 
+html, body {
+    height: 100%;
+    overflow-x: hidden;
+}
+
 body {
-    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
 }
 
 /* Sidebar Styles */
@@ -58,8 +64,10 @@ body.has-sidebar .app-main {
 /* Main content area */
 .app-main {
     padding-top: 1rem;
-    min-height: calc(100vh - 57px);
+    padding-bottom: 1rem;
+    flex: 1 0 auto;
     transition: margin-left 0.3s ease-in-out;
+    overflow-x: hidden;
 }
 
 /* Navbar adjustments */
@@ -89,6 +97,12 @@ body.has-sidebar .app-main {
 /* Status badges */
 .badge {
     font-weight: 500;
+}
+
+/* Footer */
+.footer {
+    flex-shrink: 0;
+    background-color: var(--bs-body-bg);
 }
 
 /* Login/Setup page centering */
