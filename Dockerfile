@@ -3,10 +3,13 @@ FROM python:3.12-slim
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     curl \
-    docker.io \
+    ca-certificates \
     postgresql-client \
     zstd \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Docker using official get.docker.com script
+RUN curl -fsSL https://get.docker.com | sh
 
 WORKDIR /app
 
