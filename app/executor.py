@@ -436,14 +436,23 @@ class ArchiveExecutor:
     def _log_disk_usage(self):
         """Log disk usage for archives directory."""
         cmd = f"df -h --output=size,used,avail,pcent,target {ARCHIVE_BASE}"
-        self.log('INFO', f"Starting command: Checking disk usage ({cmd})")
+        self.log('INFO', f"Checking disk usage...")
         
         try:
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
-                self.log('INFO', f"Successfully finished: Checking disk usage")
-                for line in result.stdout.strip().split('\n'):
-                    self.log('INFO', f"  {line}")
+                output = result.stdout.strip()
+                if output:
+                    # Format as single line for cleaner log
+                    lines = output.split('\n')
+                    if len(lines) >= 2:
+                        # Parse header and data
+                        header = lines[0].split()
+                        data = lines[1].split()
+                        # Create readable single line
+                        self.log('INFO', f"Disk usage: {data[0]} total, {data[1]} used, {data[2]} available ({data[3]} used) on {data[4]}")
+                    else:
+                        self.log('INFO', output)
             else:
                 self.log('WARNING', f"Could not get disk usage: {result.stderr}")
         except Exception as e:

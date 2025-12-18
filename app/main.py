@@ -231,10 +231,10 @@ def download_archive(token):
     if not download_info:
         return "Invalid or expired download link", 404
     
-    file_path = download_info['file_path']
+    archive_path = download_info['archive_path']
     
     # Prepare archive (create if folder)
-    actual_path, should_cleanup = prepare_archive_for_download(file_path, output_format='tar.gz')
+    actual_path, should_cleanup = prepare_archive_for_download(archive_path, output_format='tar.gz')
     
     if not actual_path:
         return "Archive file not found or could not be created", 404
