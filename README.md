@@ -300,6 +300,7 @@ Contributions welcome! Please:
 
 ## Support
 
-- 🐛 **Issues**: https://github.com/yourusername/docker-archiver/issues
-- 📚 **Documentation**: https://github.com/yourusername/docker-archiver/wiki
-- 💬 **Discussions**: https://github.com/yourusername/docker-archiver/discussions
+- 🐛 **Issues**: https://github.com/drgimpfen/Docker-Archiver/issues
+- 📚 **Documentation**: https://github.com/drgimpfen/Docker-Archiver/wiki
+- 💬 **Discussions**: https://github.com/drgimpfen/Docker-Archiver/discussions
+- 💬 **Discord**: https://discord.gg/Tq84tczrR2
