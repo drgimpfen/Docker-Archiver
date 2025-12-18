@@ -92,6 +92,71 @@
         </div>
     </div>
     
+    <!-- Cleanup Settings -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-trash me-2"></i> Automated Cleanup</h5>
+        </div>
+        <div class="card-body">
+            <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" role="switch" 
+                       id="cleanupEnabled" name="cleanup_enabled"
+                       {% if settings.get('cleanup_enabled', 'true') == 'true' %}checked{% endif %}>
+                <label class="form-check-label" for="cleanupEnabled">
+                    <strong>Enable Nightly Cleanup</strong><br>
+                    <small class="text-muted">Automatically clean up orphaned files, old logs, and temp files</small>
+                </label>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label for="cleanupTime" class="form-label">Cleanup Time</label>
+                    <input type="time" class="form-control" id="cleanupTime" name="cleanup_time" 
+                           value="{{ settings.get('cleanup_time', '02:30') }}">
+                    <div class="form-text">Daily time to run cleanup (24-hour format)</div>
+                </div>
+                
+                <div class="col-md-6 mb-3">
+                    <label for="logRetentionDays" class="form-label">Log Retention (Days)</label>
+                    <input type="number" class="form-control" id="logRetentionDays" name="cleanup_log_retention_days" 
+                           value="{{ settings.get('cleanup_log_retention_days', '90') }}" min="0" max="3650">
+                    <div class="form-text">Keep job logs for this many days (0 = never delete)</div>
+                </div>
+            </div>
+            
+            <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" role="switch" 
+                       id="cleanupDryRun" name="cleanup_dry_run"
+                       {% if settings.get('cleanup_dry_run', 'false') == 'true' %}checked{% endif %}>
+                <label class="form-check-label" for="cleanupDryRun">
+                    <strong>Dry Run Mode</strong><br>
+                    <small class="text-muted">Only log what would be deleted (don't actually delete anything)</small>
+                </label>
+            </div>
+            
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" role="switch" 
+                       id="notifyCleanup" name="notify_cleanup"
+                       {% if settings.get('notify_on_cleanup', 'false') == 'true' %}checked{% endif %}>
+                <label class="form-check-label" for="notifyCleanup">
+                    <strong>Send Notification</strong><br>
+                    <small class="text-muted">Send notification after cleanup task completes</small>
+                </label>
+            </div>
+            
+            <div class="alert alert-info mt-3 mb-0">
+                <i class="bi bi-info-circle me-2"></i>
+                <strong>Cleanup Tasks:</strong>
+                <ul class="mb-0 mt-2">
+                    <li>Orphaned archive directories (archives without database entry)</li>
+                    <li>Old job logs (older than retention period)</li>
+                    <li>Temporary files (*.tmp) from failed jobs</li>
+                    <li>Empty stack directories</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
     <!-- User Management (Placeholder) -->
     <div class="card mb-4">
         <div class="card-header">

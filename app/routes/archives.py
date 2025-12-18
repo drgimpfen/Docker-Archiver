@@ -210,24 +210,43 @@ def run_retention_only(archive_id):
             return redirect(url_for('index'))
         
         # Run retention in background
-        def run_retention():
+        def run_retention_job():
             from app.retention import run_retention
             from app.db import get_db
             
-            # Create a job record
+            # Create a job record with empty log
             with get_db() as conn:
                 cur = conn.cursor()
                 cur.execute("""
-                    INSERT INTO jobs (archive_id, job_type, status, start_time, triggered_by)
-                    VALUES (%s, 'retention', 'running', NOW(), 'manual')
+                    INSERT INTO jobs (archive_id, job_type, status, start_time, triggered_by, log)
+                    VALUES (%s, 'retention', 'running', NOW(), 'manual', '')
                     RETURNING id;
                 """, (archive_id,))
                 job_id = cur.fetchone()['id']
                 conn.commit()
             
+            # Log function
+            def log_message(level, message):
+                import datetime
+                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                log_line = f"[{timestamp}] [{level}] {message}\n"
+                
+                with get_db() as conn:
+                    cur = conn.cursor()
+                    cur.execute("""
+                        UPDATE jobs 
+                        SET log = log || %s
+                        WHERE id = %s;
+                    """, (log_line, job_id))
+                    conn.commit()
+            
             try:
-                # Run retention
-                reclaimed = run_retention(dict(archive), job_id, is_dry_run=False)
+                log_message('INFO', f"Starting retention cleanup for '{archive['name']}'")
+                
+                # Run retention with log callback
+                reclaimed = run_retention(dict(archive), job_id, is_dry_run=False, log_callback=log_message)
+                
+                log_message('INFO', f"Retention completed, reclaimed {reclaimed} bytes")
                 
                 # Update job status
                 with get_db() as conn:
@@ -243,6 +262,8 @@ def run_retention_only(archive_id):
                 send_retention_notification(archive['name'], 0, reclaimed)  # deleted_count not tracked
                 
             except Exception as e:
+                log_message('ERROR', f"Retention failed: {str(e)}")
+                
                 with get_db() as conn:
                     cur = conn.cursor()
                     cur.execute("""
@@ -252,7 +273,7 @@ def run_retention_only(archive_id):
                     """, (str(e), job_id))
                     conn.commit()
         
-        thread = threading.Thread(target=run_retention)
+        thread = threading.Thread(target=run_retention_job)
         thread.daemon = True
         thread.start()
         

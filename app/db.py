@@ -179,7 +179,12 @@ def init_db():
                 ('notify_on_success', 'true'),
                 ('notify_on_error', 'true'),
                 ('maintenance_mode', 'false'),
-                ('max_token_downloads', '3')
+                ('max_token_downloads', '3'),
+                ('cleanup_enabled', 'true'),
+                ('cleanup_time', '02:30'),
+                ('cleanup_log_retention_days', '90'),
+                ('cleanup_dry_run', 'false'),
+                ('notify_on_cleanup', 'false')
             ON CONFLICT (key) DO NOTHING;
         """)
         

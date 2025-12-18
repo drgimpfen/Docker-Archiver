@@ -35,8 +35,49 @@ def init_scheduler():
         replace_existing=True
     )
     
+    # Schedule main cleanup task
+    schedule_cleanup_task()
+    
     print("[Scheduler] Initialized and started")
     return scheduler
+
+
+def schedule_cleanup_task():
+    """Schedule or reschedule the cleanup task based on settings."""
+    global scheduler
+    
+    if scheduler is None:
+        return
+    
+    enabled = get_setting('cleanup_enabled', 'true').lower() == 'true'
+    
+    if not enabled:
+        # Remove job if it exists
+        if scheduler.get_job('cleanup_task'):
+            scheduler.remove_job('cleanup_task')
+            print("[Scheduler] Cleanup task disabled")
+        return
+    
+    # Get cleanup time from settings (format: HH:MM)
+    cleanup_time = get_setting('cleanup_time', '02:30')
+    try:
+        hour, minute = map(int, cleanup_time.split(':'))
+    except (ValueError, AttributeError):
+        hour, minute = 2, 30  # Default fallback
+        print(f"[Scheduler] Invalid cleanup_time format '{cleanup_time}', using default 02:30")
+    
+    from app.cleanup import run_cleanup
+    
+    scheduler.add_job(
+        run_cleanup,
+        'cron',
+        hour=hour,
+        minute=minute,
+        id='cleanup_task',
+        replace_existing=True
+    )
+    
+    print(f"[Scheduler] Cleanup task scheduled for {hour:02d}:{minute:02d}")
 
 
 def reload_schedules():

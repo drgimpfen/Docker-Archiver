@@ -44,14 +44,14 @@
     <table class="table table-hover">
         <thead>
             <tr>
-                <th width="80">ID</th>
-                <th width="100">Type</th>
+                <th style="width: 80px;">ID</th>
+                <th style="white-space: nowrap;">Type</th>
                 <th>Archive</th>
-                <th width="200">Stacks</th>
-                <th width="100">Status</th>
-                <th width="160">Start Time</th>
-                <th width="160">End Time</th>
-                <th width="120">Size</th>
+                <th style="width: 200px;">Stacks</th>
+                <th style="width: 100px;">Status</th>
+                <th style="width: 160px;">Start Time</th>
+                <th style="width: 160px;">End Time</th>
+                <th style="width: 120px;">Size</th>
             </tr>
         </thead>
         <tbody>
@@ -64,8 +64,12 @@
                     {% endif %}
                     {% if job.job_type == 'archive' %}
                     <i class="bi bi-box-seam text-primary"></i> Archive
-                    {% else %}
+                    {% elif job.job_type == 'retention' %}
                     <i class="bi bi-trash text-warning"></i> Retention
+                    {% elif job.job_type == 'cleanup' %}
+                    <i class="bi bi-broom text-info"></i> Cleanup
+                    {% else %}
+                    <i class="bi bi-question-circle text-muted"></i> {{ job.job_type|title }}
                     {% endif %}
                 </td>
                 <td>
