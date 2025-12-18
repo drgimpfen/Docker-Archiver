@@ -44,14 +44,14 @@
     <table class="table table-hover">
         <thead>
             <tr>
-                <th style="width: 80px;">ID</th>
-                <th style="white-space: nowrap;">Type</th>
-                <th>Archive</th>
-                <th style="width: 200px;">Stacks</th>
-                <th style="width: 100px;">Status</th>
-                <th style="width: 160px;">Start Time</th>
-                <th style="width: 160px;">End Time</th>
-                <th style="width: 120px;">Size</th>
+                <th style="width: 60px;">ID</th>
+                <th style="width: 140px; white-space: nowrap;">Type</th>
+                <th style="width: 150px;">Archive</th>
+                <th>Stacks</th>
+                <th style="width: 90px;">Status</th>
+                <th style="width: 140px;">Start Time</th>
+                <th style="width: 140px;">End Time</th>
+                <th style="width: 100px; text-align: right;">Size</th>
             </tr>
         </thead>
         <tbody>
@@ -101,12 +101,12 @@
                     </span>
                 </td>
                 <td>
-                    <small>{{ job.start_time.strftime('%Y-%m-%d %H:%M:%S') if job.start_time else 'N/A' }}</small>
+                    <small style="white-space: nowrap;">{{ job.start_time.strftime('%Y-%m-%d %H:%M:%S') if job.start_time else 'N/A' }}</small>
                 </td>
                 <td>
-                    <small>{{ job.end_time.strftime('%Y-%m-%d %H:%M:%S') if job.end_time else '-' }}</small>
+                    <small style="white-space: nowrap;">{{ job.end_time.strftime('%Y-%m-%d %H:%M:%S') if job.end_time else '-' }}</small>
                 </td>
-                <td>
+                <td style="text-align: right;">
                     {% if job.job_type == 'archive' and job.total_size_bytes %}
                     <span class="text-success">+{{ format_bytes(job.total_size_bytes) }}</span>
                     {% elif (job.job_type == 'retention' or job.job_type == 'cleanup') and (job.reclaimed_bytes or job.reclaimed_size_bytes) %}
@@ -242,9 +242,13 @@ async function showJobDetails(jobId) {
                                 
                                 <div class="mt-2 d-flex gap-2">
                                     ${metric.archive_path && !metric.archive_path.includes('_download_') ? 
-                                        `<button class="btn btn-sm btn-outline-primary" onclick="requestDownload(${job.id}, '${metric.stack_name}', '${metric.archive_path}')">
-                                            <i class="bi bi-download me-1"></i> Download Archive
-                                        </button>` : ''}
+                                        (metric.file_exists !== false ? 
+                                            `<button class="btn btn-sm btn-outline-primary" onclick="requestDownload(${job.id}, '${metric.stack_name}', '${metric.archive_path}')">
+                                                <i class="bi bi-download me-1"></i> Download Archive
+                                            </button>` :
+                                            `<button class="btn btn-sm btn-outline-secondary" disabled title="Archive deleted by retention">
+                                                <i class="bi bi-trash me-1"></i> Archive Deleted
+                                            </button>`) : ''}
                                     <button class="btn btn-sm btn-outline-secondary" onclick="downloadLog(${job.id})">
                                         <i class="bi bi-file-text me-1"></i> Download Log
                                     </button>
