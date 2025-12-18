@@ -45,9 +45,13 @@
                     {% endif %}
                 </td>
                 <td>
-                    {% if archive.schedule_enabled %}
+                    {% if archive.schedule_enabled and archive.schedule_cron %}
                     <span class="badge bg-primary">
                         <i class="bi bi-clock me-1"></i> {{ archive.schedule_cron }}
+                    </span>
+                    {% elif archive.schedule_enabled %}
+                    <span class="badge bg-warning">
+                        <i class="bi bi-exclamation-triangle me-1"></i> No schedule set
                     </span>
                     {% else %}
                     <span class="badge bg-secondary">Manual</span>
@@ -145,7 +149,13 @@
                     <div class="mb-3">
                         <label for="scheduleCron" class="form-label">Cron Expression</label>
                         <input type="text" class="form-control" id="scheduleCron" name="schedule_cron" placeholder="0 3 * * *">
-                        <small class="text-muted">Format: minute hour day month day_of_week (e.g., "0 3 * * *" = daily at 3 AM)</small>
+                        <small class="text-muted d-block mb-2">Format: minute hour day month day_of_week</small>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-secondary" onclick="setCron('0 3 * * *')">Daily 3AM</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setCron('0 0 * * 0')">Weekly Sunday</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setCron('0 0 1 * *')">Monthly 1st</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setCron('*/15 * * * *')">Every 15min</button>
+                        </div>
                     </div>
                     
                     <hr>
@@ -253,6 +263,13 @@
                     <div class="mb-3">
                         <label for="editScheduleCron" class="form-label">Cron Expression</label>
                         <input type="text" class="form-control" id="editScheduleCron" name="schedule_cron" placeholder="0 3 * * *">
+                        <small class="text-muted d-block mb-2">Format: minute hour day month day_of_week</small>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-secondary" onclick="setEditCron('0 3 * * *')">Daily 3AM</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setEditCron('0 0 * * 0')">Weekly Sunday</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setEditCron('0 0 1 * *')">Monthly 1st</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setEditCron('*/15 * * * *')">Every 15min</button>
+                        </div>
                     </div>
                     
                     <hr>
@@ -328,6 +345,14 @@ function editArchive(archiveId) {
     
     // Show modal
     new bootstrap.Modal(document.getElementById('editArchiveModal')).show();
+}
+
+function setCron(cron) {
+    document.getElementById('scheduleCron').value = cron;
+}
+
+function setEditCron(cron) {
+    document.getElementById('editScheduleCron').value = cron;
 }
 
 function deleteArchive(archiveId, archiveName) {

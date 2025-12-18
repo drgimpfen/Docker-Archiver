@@ -41,6 +41,7 @@ def create():
     """Create new archive configuration."""
     try:
         from app.security import validate_archive_name
+        from croniter import croniter
         
         name = request.form.get('name')
         
@@ -60,7 +61,16 @@ def create():
         stacks = request.form.getlist('stacks')
         stop_containers = request.form.get('stop_containers') == 'on'
         schedule_enabled = request.form.get('schedule_enabled') == 'on'
-        schedule_cron = request.form.get('schedule_cron', '')
+        schedule_cron = request.form.get('schedule_cron', '').strip()
+        
+        # Validate cron expression if scheduling is enabled
+        if schedule_enabled and schedule_cron:
+            if not croniter.is_valid(schedule_cron):
+                flash('Invalid cron expression. Please use a valid cron format (e.g., "0 3 * * *").', 'danger')
+                return redirect(url_for('archives.list_archives'))
+        elif schedule_enabled and not schedule_cron:
+            flash('Schedule is enabled but no cron expression provided.', 'danger')
+            return redirect(url_for('archives.list_archives'))
         output_format = request.form.get('output_format', 'tar')
         
         # Retention settings
@@ -102,11 +112,22 @@ def create():
 def edit(archive_id):
     """Edit archive configuration."""
     try:
+        from croniter import croniter
+        
         # Note: name field is ignored - archives cannot be renamed
         stacks = request.form.getlist('stacks')
         stop_containers = request.form.get('stop_containers') == 'on'
         schedule_enabled = request.form.get('schedule_enabled') == 'on'
-        schedule_cron = request.form.get('schedule_cron', '')
+        schedule_cron = request.form.get('schedule_cron', '').strip()
+        
+        # Validate cron expression if scheduling is enabled
+        if schedule_enabled and schedule_cron:
+            if not croniter.is_valid(schedule_cron):
+                flash('Invalid cron expression. Please use a valid cron format (e.g., "0 3 * * *").', 'danger')
+                return redirect(url_for('archives.list_archives'))
+        elif schedule_enabled and not schedule_cron:
+            flash('Schedule is enabled but no cron expression provided.', 'danger')
+            return redirect(url_for('archives.list_archives'))
         output_format = request.form.get('output_format', 'tar')
         
         keep_days = int(request.form.get('keep_days', 7))

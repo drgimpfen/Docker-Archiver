@@ -57,13 +57,11 @@
         <tbody>
             {% for job in jobs %}
             <tr onclick="showJobDetails({{ job.id }})" style="cursor: pointer;" class="{% if job.is_dry_run %}table-secondary{% endif %}">
+                <td><strong>#{{ job.id }}</strong></td>
                 <td>
-                    <strong>#{{ job.id }}</strong>
                     {% if job.is_dry_run %}
-                    <br><span class="badge bg-secondary small">DRY RUN</span>
+                    <span class="badge bg-secondary me-2">DRY RUN</span>
                     {% endif %}
-                </td>
-                <td>
                     {% if job.job_type == 'archive' %}
                     <i class="bi bi-box-seam text-primary"></i> Archive
                     {% else %}
