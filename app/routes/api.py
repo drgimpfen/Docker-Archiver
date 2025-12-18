@@ -147,7 +147,7 @@ def download_log(job_id):
     """Download job log as text file."""
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT log, archive_name FROM jobs j LEFT JOIN archives a ON j.archive_id = a.id WHERE j.id = %s;", (job_id,))
+        cur.execute("SELECT j.log, a.name as archive_name FROM jobs j LEFT JOIN archives a ON j.archive_id = a.id WHERE j.id = %s;", (job_id,))
         result = cur.fetchone()
     
     if not result or not result['log']:

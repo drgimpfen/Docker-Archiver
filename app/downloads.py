@@ -8,7 +8,7 @@ from pathlib import Path
 from app.db import get_db
 
 
-def generate_download_token(job_id, stack_name, file_path, expires_hours=24):
+def generate_download_token(job_id, stack_name, archive_path, is_folder=False, expires_hours=24):
     """
     Generate a secure download token for an archive file.
     
@@ -20,10 +20,10 @@ def generate_download_token(job_id, stack_name, file_path, expires_hours=24):
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO download_tokens (token, job_id, stack_name, file_path, expires_at)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO download_tokens (token, job_id, stack_name, archive_path, is_folder, expires_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING id;
-        """, (token, job_id, stack_name, file_path, expires_at))
+        """, (token, job_id, stack_name, archive_path, is_folder, expires_at))
         conn.commit()
     
     return token

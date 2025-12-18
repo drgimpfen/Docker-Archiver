@@ -149,6 +149,28 @@ def init_db():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_api_tokens_token ON api_tokens(token);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);")
         
+        # Migrate download_tokens table if needed (rename file_path to archive_path, add is_folder)
+        cur.execute("""
+            DO $$ 
+            BEGIN
+                -- Check if old column exists and rename it
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='download_tokens' AND column_name='file_path'
+                ) THEN
+                    ALTER TABLE download_tokens RENAME COLUMN file_path TO archive_path;
+                END IF;
+                
+                -- Add is_folder column if it doesn't exist
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='download_tokens' AND column_name='is_folder'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN is_folder BOOLEAN DEFAULT false;
+                END IF;
+            END $$;
+        """)
+        
         # Insert default settings if not exist
         cur.execute("""
             INSERT INTO settings (key, value) VALUES 
