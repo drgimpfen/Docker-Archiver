@@ -282,7 +282,7 @@
 
             content.innerHTML = html;
 
-            // --- Live log polling ---
+            // --- Live log polling & job refresh ---
             // Clear existing poller if present
             if (window._jobLogPoller) {
                 clearTimeout(window._jobLogPoller);
@@ -291,6 +291,78 @@
 
             const logPre = document.getElementById('job-log');
             let lastLine = 0;
+            let refreshInterval = 0; // counter to reduce metadata fetch frequency
+
+            async function refreshJobInfo() {
+                try {
+                    const resp = await fetch(`/api/jobs/${job.id}`);
+                    if (!resp.ok) return;
+                    const data = await resp.json();
+                    if (!data || !data.job) return;
+
+                    // Update local job object
+                    job = data.job;
+
+                    // Update status badge
+                    const statusBadge = document.getElementById('job-status-badge');
+                    if (statusBadge) {
+                        const cls = job.status === 'success' ? 'success' : (job.status === 'running' ? 'info' : 'danger');
+                        statusBadge.className = `badge bg-${cls}`;
+                        statusBadge.textContent = job.status;
+                    }
+
+                    // Update timing & size fields
+                    const elStart = document.getElementById('job-start-time');
+                    const elEnd = document.getElementById('job-end-time');
+                    const elDuration = document.getElementById('job-duration');
+                    const elTotal = document.getElementById('job-total-size');
+                    const elReclaimed = document.getElementById('job-reclaimed');
+
+                    if (elStart) elStart.textContent = job.start_time || 'N/A';
+                    if (elEnd) elEnd.textContent = job.end_time || 'N/A';
+                    if (elDuration) elDuration.textContent = (job.duration_seconds !== null && job.duration_seconds !== undefined) ? job.duration_seconds + 's' : 'N/A';
+                    if (elTotal) elTotal.textContent = job.total_size_bytes ? formatBytes(job.total_size_bytes) : 'N/A';
+                    if (elReclaimed) elReclaimed.textContent = job.reclaimed_bytes ? formatBytes(job.reclaimed_bytes) : 'N/A';
+
+                    // Update metrics table if present
+                    if (Array.isArray(data.metrics)) {
+                        const tbody = document.getElementById('job-metrics-body');
+                        if (tbody) {
+                            tbody.innerHTML = '';
+                            data.metrics.forEach(m => {
+                                const hasArchive = m.archive_path && !m.archive_path.includes('_download_');
+                                const row = document.createElement('tr');
+                                row.innerHTML = `
+                                    <td>${m.stack_name}</td>
+                                    <td><span class="badge bg-${m.status === 'success' ? 'success' : 'danger'}">${m.status}</span></td>
+                                    <td>${m.was_running ? '<i class="bi bi-check-circle text-success"></i>' : '<i class="bi bi-x-circle text-muted"></i>'}</td>
+                                    <td>${m.duration_seconds !== null && m.duration_seconds !== undefined ? m.duration_seconds + 's' : 'N/A'}</td>
+                                    <td>${m.archive_size_bytes ? formatBytes(m.archive_size_bytes) : 'N/A'}</td>
+                                    <td><small>${m.archive_path || 'N/A'}</small></td>
+                                    <td class="text-nowrap">${hasArchive ? `<button class="btn btn-sm btn-outline-primary me-1" onclick="requestDownload(${job.id}, '${m.stack_name}', '${m.archive_path}')" title="Download Archive"><i class="bi bi-download"></i></button>` : ''}<button class="btn btn-sm btn-outline-secondary" onclick="downloadStackLog(${job.id}, '${m.stack_name}')" title="Download Stack Log"><i class="bi bi-file-text"></i></button></td>
+                                `;
+                                tbody.appendChild(row);
+                            });
+                        }
+                    }
+
+                    // If job finished, fetch final log snapshot and stop polling
+                    if (job.status !== 'running') {
+                        // Get final log if available and display
+                        if (job.log) {
+                            logPre.textContent = job.log;
+                            logPre.scrollTop = logPre.scrollHeight;
+                        }
+
+                        if (window._jobLogPoller) {
+                            clearTimeout(window._jobLogPoller);
+                            window._jobLogPoller = null;
+                        }
+                    }
+                } catch (err) {
+                    console.error('Failed to refresh job info:', err);
+                }
+            }
 
             async function fetchTail() {
                 try {
@@ -310,9 +382,18 @@
                     }
                     lastLine = data.last_line || lastLine;
 
+                    // Refresh metadata every 3 poll iterations (approx every 4.5s)
+                    refreshInterval = (refreshInterval + 1) % 3;
+                    if (refreshInterval === 0) {
+                        refreshJobInfo();
+                    }
+
                     if (!data.complete) {
                         // Schedule next poll
                         window._jobLogPoller = setTimeout(fetchTail, 1500);
+                    } else {
+                        // Final fetch to ensure latest metadata and complete log are shown
+                        await refreshJobInfo();
                     }
                 } catch (err) {
                     console.error('Failed to fetch log tail:', err);
@@ -322,9 +403,13 @@
             if (job.status === 'running') {
                 // Start polling live log
                 fetchTail();
+                // Also refresh initial metadata periodically
+                refreshJobInfo();
             } else if (job.log) {
                 // Show final log snapshot
                 logPre.textContent = job.log;
+                // Also ensure metadata is up to date
+                refreshJobInfo();
             }
             
         } catch (error) {
