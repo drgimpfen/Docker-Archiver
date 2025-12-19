@@ -15,7 +15,7 @@ ARCHIVE_BASE = '/archives'
 
 def run_cleanup():
     """Run all cleanup tasks."""
-    from app.notifications import get_setting, send_notification
+    from app.notifications import get_setting
     from datetime import datetime
     
     # Check if cleanup is enabled
