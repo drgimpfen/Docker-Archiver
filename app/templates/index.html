@@ -282,36 +282,70 @@
                         <table class="table table-hover table-sm">
                             <thead>
                                 <tr>
-                                    <th style="width: 150px;">Archive</th>
-                                    <th style="width: 80px;">Type</th>
-                                    <th style="width: 110px;">Started</th>
-                                    <th style="width: 80px;">Duration</th>
-                                    <th style="width: 80px;">Size</th>
-                                    <th style="width: 80px;">Status</th>
+                                    <th style="width:50px;">ID</th>
+                                    <th style="width:110px;">Type</th>
+                                    <th>Archive</th>
+                                    <th>Stacks</th>
+                                    <th style="width:90px;">Status</th>
+                                    <th style="width:120px;">Start</th>
+                                    <th style="width:120px;">End</th>
+                                    <th style="width:90px; text-align: right;">Size</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for job in recent_jobs %}
-                                <tr style="cursor: pointer;" onclick="showJobDetails({{ job.id }})">
+                                <tr style="cursor: pointer;" onclick="showJobDetails({{ job.id }})" class="{% if job.is_dry_run %}table-secondary{% endif %}">
+                                    <td><strong>#{{ job.id }}</strong></td>
+                                    <td style="white-space: nowrap;">
+                                        {% if job.job_type == 'archive' %}
+                                        <i class="bi bi-box-seam text-primary"></i> Archive
+                                        {% elif job.job_type == 'retention' %}
+                                        <i class="bi bi-trash text-warning"></i> Retention
+                                        {% elif job.job_type == 'cleanup' %}
+                                        <i class="bi bi-recycle text-info"></i> Cleanup
+                                        {% else %}
+                                        <i class="bi bi-question-circle text-muted"></i> {{ job.job_type|title }}
+                                        {% endif %}
+                                        {% if job.is_dry_run %}
+                                        <span class="badge bg-secondary ms-1">DRY</span>
+                                        {% endif %}
+                                    </td>
                                     <td>{{ job.archive_name or 'N/A' }}</td>
                                     <td>
-                                        <span class="badge bg-{{ 'info' if job.job_type == 'archive' else 'secondary' }}">
-                                            {{ job.job_type }}
-                                        </span>
+                                        {% if job.stack_names %}
+                                            {% set stacks = job.stack_names.split(',') if job.stack_names else [] %}
+                                            {% for stack in stacks[:3] %}
+                                                <span class="badge" style="background-color: {{ stack|stack_color }}; color: white;">{{ stack }}</span>
+                                            {% endfor %}
+                                            {% if stacks|length > 3 %}
+                                                <span class="badge bg-secondary">+{{ stacks|length - 3 }}</span>
+                                            {% endif %}
+                                        {% elif job.archive_stacks %}
+                                            {% for stack in job.archive_stacks[:3] %}
+                                                <span class="badge" style="background-color: {{ stack|stack_color }}; color: white;">{{ stack }}</span>
+                                            {% endfor %}
+                                            {% if job.archive_stacks|length > 3 %}
+                                                <span class="badge bg-secondary">+{{ job.archive_stacks|length - 3 }}</span>
+                                            {% endif %}
+                                        {% else %}
+                                            <span class="text-muted small">N/A</span>
+                                        {% endif %}
                                     </td>
                                     <td>
-                                        <small>{{ job.start_time|datetime('%Y-%m-%d %H:%M') }}</small>
-                                    </td>
-                                    <td>
-                                        <small>{{ format_duration(job.duration_seconds) }}</small>
-                                    </td>
-                                    <td>
-                                        <small>{{ format_bytes(job.total_size_bytes) if job.total_size_bytes else 'N/A' }}</small>
-                                    </td>
-                                    <td>
-                                        <span class="badge bg-{{ 'success' if job.status == 'success' else ('danger' if job.status == 'failed' else 'warning') }}">
+                                        <span class="badge {% if job.status == 'success' %}bg-success{% elif job.status == 'running' %}bg-info{% elif job.status == 'failed' %}bg-danger{% else %}bg-secondary{% endif %}">
                                             {{ job.status }}
                                         </span>
+                                    </td>
+                                    <td><small style="white-space: nowrap;">{{ job.start_time|datetime('%Y-%m-%d %H:%M') }}</small></td>
+                                    <td><small style="white-space: nowrap;">{{ job.end_time|datetime('%Y-%m-%d %H:%M') }}</small></td>
+                                    <td style="text-align: right;">
+                                        {% if job.job_type == 'archive' and job.total_size_bytes %}
+                                        <span class="text-success">+{{ format_bytes(job.total_size_bytes) }}</span>
+                                        {% elif (job.job_type == 'retention' or job.job_type == 'cleanup') and (job.reclaimed_bytes or job.reclaimed_size_bytes) %}
+                                        <span class="text-warning">-{{ format_bytes(job.reclaimed_size_bytes or job.reclaimed_bytes) }}</span>
+                                        {% else %}
+                                        <span class="text-muted">N/A</span>
+                                        {% endif %}
                                     </td>
                                 </tr>
                                 {% endfor %}
