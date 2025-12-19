@@ -400,18 +400,22 @@ class ArchiveExecutor:
                 self.stack_volumes = {}
             self.stack_volumes[stack_name] = named_volumes
         
-        # For stopping, we don't need --project-directory since docker compose
-        # finds containers by project label. Just use -f to specify compose file.
-        cmd_parts = ['docker', 'compose', '-f', str(compose_path), 'down']
+        # Execute docker compose in the host stack directory (like Dockge does)
+        # This way .env and compose.yml are automatically found
+        cmd_parts = ['docker', 'compose', 'down']
         self.log('INFO', f"Starting command: Stopping {stack_name} (docker compose down)")
         
         if self.is_dry_run:
-            self.log('INFO', f"Would execute: {' '.join(cmd_parts)}")
+            self.log('INFO', f"Would execute in {host_stack_dir}: {' '.join(cmd_parts)}")
             return True
         
         try:
             result = subprocess.run(
-                cmd_parts, capture_output=True, text=True, timeout=120
+                cmd_parts, 
+                cwd=str(host_stack_dir),  # Execute in host stack directory
+                capture_output=True, 
+                text=True, 
+                timeout=120
             )
             if result.returncode == 0:
                 self.log('INFO', f"Successfully finished: Stopping {stack_name}")
@@ -432,38 +436,25 @@ class ArchiveExecutor:
         # If not cached (e.g., stack wasn't running), use container path
         host_stack_dir = self.stack_host_paths.get(stack_name, stack_dir)
         
-        # Build docker compose command with --project-directory
-        # Docker Compose will automatically load .env from the project directory
-        # and any env_file: entries defined in the compose.yml
-        cmd_parts = ['docker', 'compose', '--project-directory', str(host_stack_dir), '-f', str(compose_path)]
-        
-        # Check for override files and add them
-        # Docker Compose loads these automatically, but only if we don't use -f
-        # Since we use -f, we need to add them explicitly
-        compose_name = compose_path.name.replace('.yaml', '').replace('.yml', '')
-        override_names = [
-            f'{compose_name}.override.yml',
-            f'{compose_name}.override.yaml'
-        ]
-        
-        for override_name in override_names:
-            container_override = Path(stack_dir) / override_name
-            if container_override.exists():
-                host_override = Path(host_stack_dir) / override_name
-                cmd_parts.extend(['-f', str(host_override)])
-                self.log('DEBUG', f"Found override file: {override_name}")
-        
-        cmd_parts.extend(['up', '-d'])
+        # Execute docker compose in the host stack directory (like Dockge does)
+        # Docker Compose will automatically:
+        # - Load .env file from current directory
+        # - Find compose.yml/docker-compose.yml in current directory
+        # - Load compose.override.yml if it exists
+        cmd_parts = ['docker', 'compose', 'up', '-d']
         self.log('INFO', f"Starting command: Starting {stack_name} (docker compose up -d)")
         
         if self.is_dry_run:
-            # Show actual command with all parameters
-            self.log('INFO', f"Would execute: {' '.join(cmd_parts)}")
+            self.log('INFO', f"Would execute in {host_stack_dir}: {' '.join(cmd_parts)}")
             return True
         
         try:
             result = subprocess.run(
-                cmd_parts, capture_output=True, text=True, timeout=120
+                cmd_parts,
+                cwd=str(host_stack_dir),  # Execute in host stack directory
+                capture_output=True,
+                text=True,
+                timeout=120
             )
             if result.returncode == 0:
                 self.log('INFO', f"Successfully finished: Starting {stack_name}")
