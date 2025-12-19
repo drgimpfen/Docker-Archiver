@@ -253,7 +253,8 @@ def index():
         
         # Get recent jobs (last 10)
         cur.execute("""
-            SELECT j.*, a.name as archive_name,
+            SELECT j.*, a.name as archive_name, a.stacks as archive_stacks,
+                   (SELECT STRING_AGG(stack_name, ',') FROM job_stack_metrics WHERE job_id = j.id) as stack_names,
                    EXTRACT(EPOCH FROM (j.end_time - j.start_time))::integer as duration_seconds
             FROM jobs j
             LEFT JOIN archives a ON j.archive_id = a.id
