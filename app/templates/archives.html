@@ -363,6 +363,17 @@ function deleteArchive(archiveId, archiveName) {
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = `/archives/${archiveId}/delete`;
+        
+        // Add CSRF token
+        const csrfToken = document.querySelector('meta[name="csrf-token"]');
+        if (csrfToken) {
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrf_token';
+            csrfInput.value = csrfToken.content;
+            form.appendChild(csrfInput);
+        }
+        
         document.body.appendChild(form);
         form.submit();
     }

@@ -14,61 +14,110 @@ def get_own_container_mounts():
     These are potential stack directories.
     """
     try:
+        # Method 1: Try to get container ID and inspect
+        container_id = None
+        
         # Get our own container ID from /proc/self/cgroup
-        with open('/proc/self/cgroup', 'r') as f:
-            for line in f:
-                if 'docker' in line or 'containerd' in line:
-                    # Extract container ID from cgroup path
-                    parts = line.strip().split('/')
-                    for part in reversed(parts):
-                        if len(part) >= 12:  # Docker container IDs are at least 12 chars
-                            container_id = part
-                            break
-                    break
+        try:
+            with open('/proc/self/cgroup', 'r') as f:
+                for line in f:
+                    if 'docker' in line or 'containerd' in line:
+                        # Extract container ID from cgroup path
+                        parts = line.strip().split('/')
+                        for part in reversed(parts):
+                            if len(part) >= 12:  # Docker container IDs are at least 12 chars
+                                container_id = part
+                                break
+                        break
+        except (FileNotFoundError, OSError):
+            pass
         
         if not container_id:
             # Fallback: try to get from hostname
-            with open('/proc/sys/kernel/hostname', 'r') as f:
-                hostname = f.read().strip()
-                if len(hostname) >= 12:
-                    container_id = hostname
+            try:
+                with open('/proc/sys/kernel/hostname', 'r') as f:
+                    hostname = f.read().strip()
+                    if len(hostname) >= 12:
+                        container_id = hostname
+            except (FileNotFoundError, OSError):
+                pass
         
-        if not container_id:
-            return []
+        if container_id:
+            # Inspect our own container
+            result = subprocess.run(
+                ['docker', 'inspect', container_id],
+                capture_output=True, text=True, timeout=10
+            )
             
-        # Inspect our own container
-        result = subprocess.run(
-            ['docker', 'inspect', container_id],
-            capture_output=True, text=True, timeout=10
-        )
+            if result.returncode == 0:
+                inspect_data = json.loads(result.stdout)
+                if inspect_data:
+                    container_data = inspect_data[0]
+                    mounts = container_data.get('Mounts', [])
+                    
+                    bind_mounts = []
+                    for mount in mounts:
+                        mount_type = mount.get('Type', '')
+                        if mount_type == 'bind':
+                            destination = mount.get('Destination', '')
+                            # Skip system mounts and our own archives mount
+                            if (destination and 
+                                not destination.startswith('/var/') and
+                                not destination.startswith('/etc/') and
+                                not destination.startswith('/usr/') and
+                                not destination.startswith('/proc/') and
+                                not destination.startswith('/sys/') and
+                                destination != '/archives' and
+                                destination != '/var/run/docker.sock'):
+                                bind_mounts.append(destination)
+                    
+                if bind_mounts:
+                    return bind_mounts
         
-        if result.returncode != 0:
-            return []
+        # Method 2: Fallback to /proc/self/mountinfo
+        # This works even when docker inspect fails
+        try:
+            with open('/proc/self/mountinfo', 'r') as f:
+                mounts = []
+                for line in f:
+                    parts = line.split()
+                    if len(parts) < 10:
+                        continue
+                    
+                    # Skip special filesystems
+                    fs_type = parts[8] if len(parts) > 8 else ''
+                    if fs_type in ['overlay', 'tmpfs', 'proc', 'sysfs', 'devpts', 'devtmpfs', 'cgroup', 'cgroup2']:
+                        continue
+                    
+                    mount_point = parts[4]  # Where it's mounted in container
+                    
+                    # Find the source field (after the '-' separator)
+                    separator_idx = parts.index('-') if '-' in parts else -1
+                    if separator_idx > 0 and len(parts) > separator_idx + 2:
+                        source = parts[separator_idx + 2]
+                        mounts.append((mount_point, source))
+                
+                # Filter for bind mounts (source is not empty and not system paths)
+                bind_mounts = []
+                for mount_point, source in mounts:
+                    if (source and 
+                        not mount_point.startswith('/var/') and
+                        not mount_point.startswith('/etc/') and
+                        not mount_point.startswith('/usr/') and
+                        not mount_point.startswith('/proc/') and
+                        not mount_point.startswith('/sys/') and
+                        mount_point != '/archives' and
+                        mount_point != '/var/run/docker.sock' and
+                        mount_point != '/' and  # Skip root mount
+                        source != 'overlay'):   # Skip overlay mounts
+                        bind_mounts.append(mount_point)
+                
+                return bind_mounts
+                
+        except (FileNotFoundError, OSError, ValueError):
+            pass
         
-        inspect_data = json.loads(result.stdout)
-        if not inspect_data:
-            return []
-        
-        container_data = inspect_data[0]
-        mounts = container_data.get('Mounts', [])
-        
-        bind_mounts = []
-        for mount in mounts:
-            mount_type = mount.get('Type', '')
-            if mount_type == 'bind':
-                destination = mount.get('Destination', '')
-                # Skip system mounts and our own archives mount
-                if (destination and 
-                    not destination.startswith('/var/') and
-                    not destination.startswith('/etc/') and
-                    not destination.startswith('/usr/') and
-                    not destination.startswith('/proc/') and
-                    not destination.startswith('/sys/') and
-                    destination != '/archives' and
-                    destination != '/var/run/docker.sock'):
-                    bind_mounts.append(destination)
-        
-        return bind_mounts
+        return []
         
     except Exception as e:
         # Silently fail - we'll use default paths
