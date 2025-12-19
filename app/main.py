@@ -96,7 +96,9 @@ def run_startup_discovery():
                 bind_warnings = list(dict.fromkeys(bind_warnings)) if bind_warnings else []
                 if bind_warnings:
                     for w in bind_warnings:
-                        print(f"[WARNING] {w}")
+                        # Ensure multiline warnings are clearly prefixed in logs
+                        for line in str(w).splitlines():
+                            print(f"[WARNING] {line}")
                 app.config['BIND_MISMATCH_WARNINGS'] = bind_warnings
                 # Also persist the exact container destinations that are mismatched so we can ignore them
                 ignored = list(dict.fromkeys(get_mismatched_destinations()))
