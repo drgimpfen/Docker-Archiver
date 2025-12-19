@@ -221,10 +221,6 @@ def discover_stacks():
                         })
     
     return sorted(stacks, key=lambda x: x['name'])
-                        'mount_source': mount_name
-                    })
-    
-    return sorted(stacks, key=lambda x: x['name'])
 
 
 def find_compose_file(directory):
