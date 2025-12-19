@@ -41,18 +41,16 @@ class ArchiveExecutor:
         Get the host path for a stack directory by inspecting running containers.
         
         This finds containers from the stack and checks their bind mounts to determine
-        where the stack directory is located on the host. Also detects named volumes
-        and reads environment variables.
+        where the stack directory is located on the host. Also detects named volumes.
         
         Args:
             stack_name: Name of the stack
             stack_dir: Path to stack directory inside this container
             
         Returns:
-            Tuple of (host_path, volume_names, env_vars) where:
+            Tuple of (host_path, volume_names) where:
             - host_path: Host path for the stack directory
             - volume_names: List of named volumes found
-            - env_vars: Dict of environment variables from containers
         """
         try:
             # Get list of containers for this stack
@@ -69,9 +67,8 @@ class ArchiveExecutor:
             stack_dir_str = str(stack_dir)
             found_host_path = None
             named_volumes = []
-            env_vars = {}
             
-            # Inspect containers to find bind mounts, named volumes, and environment variables
+            # Inspect containers to find bind mounts and named volumes
             for container_id in container_ids:
                 inspect_result = subprocess.run(
                     ['docker', 'inspect', container_id],
@@ -87,14 +84,6 @@ class ArchiveExecutor:
                 
                 container_data = inspect_data[0]
                 mounts = container_data.get('Mounts', [])
-                
-                # Read environment variables (only from first container to avoid duplicates)
-                if not env_vars:
-                    env_list = container_data.get('Config', {}).get('Env', [])
-                    for env_entry in env_list:
-                        if '=' in env_entry:
-                            key, value = env_entry.split('=', 1)
-                            env_vars[key] = value
                 
                 # Check all mounts
                 for mount in mounts:
@@ -142,14 +131,11 @@ class ArchiveExecutor:
                 self.log('WARNING', f"    Named volumes are NOT included in the backup archive!")
                 self.log('WARNING', f"    Consider using 'docker volume backup' or similar tools for volume data.")
             
-            if env_vars:
-                self.log('DEBUG', f"Found {len(env_vars)} environment variables from container")
-            
-            return found_host_path, named_volumes, env_vars
+            return found_host_path, named_volumes
             
         except Exception as e:
             self.log('WARNING', f"Error inspecting containers for host path: {e}")
-            return stack_dir, [], {}
+            return stack_dir, []
     
     def _get_host_path_from_proc(self, container_path):
         """
@@ -405,19 +391,14 @@ class ArchiveExecutor:
         # Inspect containers before stopping to:
         # 1. Detect named volumes for warnings
         # 2. Find host path for later restart
-        # 3. Read environment variables for restart
-        host_stack_dir, named_volumes, env_vars = self._get_host_path_from_container(stack_name, stack_dir)
+        host_stack_dir, named_volumes = self._get_host_path_from_container(stack_name, stack_dir)
         
-        # Cache the host path, volumes, and env vars for use when restarting and reporting
+        # Cache the host path and volumes for use when restarting and reporting
         self.stack_host_paths[stack_name] = host_stack_dir
         if named_volumes:
             if not hasattr(self, 'stack_volumes'):
                 self.stack_volumes = {}
             self.stack_volumes[stack_name] = named_volumes
-        if env_vars:
-            if not hasattr(self, 'stack_env_vars'):
-                self.stack_env_vars = {}
-            self.stack_env_vars[stack_name] = env_vars
         
         # For stopping, we don't need --project-directory since docker compose
         # finds containers by project label. Just use -f to specify compose file.
@@ -425,7 +406,7 @@ class ArchiveExecutor:
         self.log('INFO', f"Starting command: Stopping {stack_name} (docker compose down)")
         
         if self.is_dry_run:
-            self.log('INFO', f"Would execute: docker compose --project-directory {stack_dir} -f {compose_path} down")
+            self.log('INFO', f"Would execute: {' '.join(cmd_parts)}")
             return True
         
         try:
