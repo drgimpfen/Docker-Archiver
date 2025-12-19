@@ -17,45 +17,6 @@ from app import utils
 ARCHIVE_BASE = '/archives'
 
 
-def get_host_path_from_mounts(container_path):
-    """
-    Get the host path for a container path by inspecting our own container's mounts.
-    
-    This reads /proc/self/mountinfo to find bind mounts and determine the mapping
-    between container paths and host paths.
-    """
-    container_path = str(container_path)
-    
-    try:
-        # Read mount information
-        with open('/proc/self/mountinfo', 'r') as f:
-            for line in f:
-                parts = line.split()
-                if len(parts) < 10:
-                    continue
-                
-                # Format: ... mount_point ... - fstype source options
-                # Find the separator '-'
-                try:
-                    sep_index = parts.index('-')
-                    mount_point = parts[4]  # Container mount point
-                    source = parts[sep_index + 2]  # Host source path
-                    
-                    # Check if our path is under this mount
-                    if container_path.startswith(mount_point):
-                        # Replace container prefix with host prefix
-                        relative = container_path[len(mount_point):].lstrip('/')
-                        host_path = os.path.join(source, relative) if relative else source
-                        return host_path
-                except (ValueError, IndexError):
-                    continue
-    except Exception as e:
-        print(f"Warning: Could not read mount info: {e}")
-    
-    # Fallback: return container path (might work if docker socket gives access)
-    return container_path
-
-
 class ArchiveExecutor:
     """Handles archive job execution with phased processing."""
     
@@ -266,21 +227,21 @@ class ArchiveExecutor:
     
     def _stop_stack(self, stack_name, compose_path):
         """Stop a docker compose stack."""
-        # Convert container path to host path for docker compose execution
-        host_cwd = get_host_path_from_mounts(compose_path.parent)
-        self.log('INFO', f"Stopping stack in {host_cwd}...")
+        stack_dir = compose_path.parent
+        self.log('INFO', f"Stopping stack in {stack_dir}...")
         
-        # Use 'down' without --volumes to cleanly stop and remove containers while preserving volumes
-        cmd_parts = ['docker', 'compose', '-f', str(compose_path), 'down']
+        # Use --project-directory to set working directory for relative paths
+        # This ensures relative bind mounts (like ./library) are resolved correctly
+        cmd_parts = ['docker', 'compose', '--project-directory', str(stack_dir), '-f', str(compose_path), 'down']
         self.log('INFO', f"Starting command: Stopping {stack_name} (docker compose down)")
         
         if self.is_dry_run:
-            self.log('INFO', f"Would execute: docker compose -f {compose_path} down in {host_cwd}")
+            self.log('INFO', f"Would execute: docker compose --project-directory {stack_dir} -f {compose_path} down")
             return True
         
         try:
             result = subprocess.run(
-                cmd_parts, capture_output=True, text=True, timeout=120, cwd=host_cwd
+                cmd_parts, capture_output=True, text=True, timeout=120
             )
             if result.returncode == 0:
                 self.log('INFO', f"Successfully finished: Stopping {stack_name}")
@@ -294,20 +255,21 @@ class ArchiveExecutor:
     
     def _start_stack(self, stack_name, compose_path):
         """Start a docker compose stack."""
-        # Convert container path to host path for docker compose execution
-        host_cwd = get_host_path_from_mounts(compose_path.parent)
-        self.log('INFO', f"Starting stack in {host_cwd}...")
+        stack_dir = compose_path.parent
+        self.log('INFO', f"Starting stack in {stack_dir}...")
         
-        cmd_parts = ['docker', 'compose', '-f', str(compose_path), 'up', '-d']
+        # Use --project-directory to set working directory for relative paths
+        # This ensures relative bind mounts (like ./library) are resolved correctly
+        cmd_parts = ['docker', 'compose', '--project-directory', str(stack_dir), '-f', str(compose_path), 'up', '-d']
         self.log('INFO', f"Starting command: Starting {stack_name} (docker compose up -d)")
         
         if self.is_dry_run:
-            self.log('INFO', f"Would execute: docker compose -f {compose_path} up -d in {host_cwd}")
+            self.log('INFO', f"Would execute: docker compose --project-directory {stack_dir} -f {compose_path} up -d")
             return True
         
         try:
             result = subprocess.run(
-                cmd_parts, capture_output=True, text=True, timeout=120, cwd=host_cwd
+                cmd_parts, capture_output=True, text=True, timeout=120
             )
             if result.returncode == 0:
                 self.log('INFO', f"Successfully finished: Starting {stack_name}")
