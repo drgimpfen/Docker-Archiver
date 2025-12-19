@@ -131,6 +131,141 @@ def get_own_container_mounts():
         return []
 
 
+def get_bind_mounts():
+    """
+    Return a list of bind mounts as dicts: { 'destination': '<path in container>', 'source': '<host source>' }.
+    Tries docker inspect first, falls back to parsing /proc/self/mountinfo.
+    """
+    binds = []
+    try:
+        # Try docker inspect method (get container id then inspect)
+        container_id = None
+        try:
+            with open('/proc/self/cgroup', 'r') as f:
+                for line in f:
+                    if 'docker' in line or 'containerd' in line:
+                        parts = line.strip().split('/')
+                        for part in reversed(parts):
+                            if len(part) >= 12:
+                                container_id = part
+                                break
+                        break
+        except Exception:
+            pass
+
+        if not container_id:
+            try:
+                with open('/proc/sys/kernel/hostname', 'r') as f:
+                    hostname = f.read().strip()
+                    if len(hostname) >= 12:
+                        container_id = hostname
+            except Exception:
+                pass
+
+        if container_id:
+            try:
+                result = subprocess.run(['docker', 'inspect', container_id], capture_output=True, text=True, timeout=10)
+                if result.returncode == 0:
+                    inspect_data = json.loads(result.stdout) if result.stdout else None
+                    if inspect_data:
+                        mounts = inspect_data[0].get('Mounts', [])
+                        for m in mounts:
+                            if m.get('Type') == 'bind':
+                                dest = m.get('Destination')
+                                src = m.get('Source')
+                                if dest and src:
+                                    # Skip system paths similar to get_own_container_mounts
+                                    if (not dest.startswith('/var/') and not dest.startswith('/etc/') and not dest.startswith('/usr/') and
+                                            not dest.startswith('/proc/') and not dest.startswith('/sys/') and dest != '/archives' and dest != '/var/run/docker.sock'):
+                                        binds.append({'destination': dest, 'source': src})
+                        return binds
+            except Exception:
+                pass
+
+        # Fallback: parse /proc/self/mountinfo
+        try:
+            with open('/proc/self/mountinfo', 'r') as f:
+                mounts = []
+                for line in f:
+                    parts = line.split()
+                    if len(parts) < 10:
+                        continue
+                    fs_type = parts[8] if len(parts) > 8 else ''
+                    if fs_type in ['overlay', 'tmpfs', 'proc', 'sysfs', 'devpts', 'devtmpfs', 'cgroup', 'cgroup2']:
+                        continue
+                    mount_point = parts[4]
+                    separator_idx = parts.index('-') if '-' in parts else -1
+                    if separator_idx > 0 and len(parts) > separator_idx + 2:
+                        source = parts[separator_idx + 2]
+                        mounts.append((mount_point, source))
+
+                for mount_point, source in mounts:
+                    if (source and not mount_point.startswith('/var/') and not mount_point.startswith('/etc/') and not mount_point.startswith('/usr/') and
+                            not mount_point.startswith('/proc/') and not mount_point.startswith('/sys/') and mount_point != '/archives' and
+                            mount_point != '/var/run/docker.sock' and mount_point != '/' and source != 'overlay'):
+                        binds.append({'destination': mount_point, 'source': source})
+                return binds
+        except Exception:
+            pass
+
+    except Exception:
+        pass
+
+    return binds
+
+
+def detect_bind_mismatches():
+    """Return list of warning messages for binds where host/source != container/destination."""
+    warnings = []
+    try:
+        binds = get_bind_mounts()
+        for b in binds:
+            src = str(b.get('source') or '')
+            dst = str(b.get('destination') or '')
+            if not src or not dst:
+                continue
+            # Normalize paths
+            try:
+                from pathlib import Path
+                src_norm = str(Path(src))
+                dst_norm = str(Path(dst))
+            except Exception:
+                src_norm = src
+                dst_norm = dst
+
+            if src_norm != dst_norm:
+                warnings.append(f"⚠️ Bind mount mismatch: host path '{src_norm}' is mounted as container path '{dst_norm}'. Recommended: use identical paths (e.g., /opt/stacks:/opt/stacks).")
+    except Exception:
+        pass
+
+    return warnings
+
+
+def get_mismatched_destinations():
+    """Return a list of container destination paths where bind source != destination."""
+    mismatches = []
+    try:
+        binds = get_bind_mounts()
+        for b in binds:
+            src = str(b.get('source') or '')
+            dst = str(b.get('destination') or '')
+            if not src or not dst:
+                continue
+            try:
+                from pathlib import Path
+                src_norm = str(Path(src))
+                dst_norm = str(Path(dst))
+            except Exception:
+                src_norm = src
+                dst_norm = dst
+
+            if src_norm != dst_norm and dst_norm not in mismatches:
+                mismatches.append(dst_norm)
+    except Exception:
+        pass
+    return mismatches
+
+
 def get_stack_mount_paths():
     """
     Get container paths where stacks should be searched.
@@ -160,7 +295,20 @@ def discover_stacks():
     # Get configured mount paths
     mount_paths = get_stack_mount_paths()
     
+    # Determine destinations to ignore (mismatched bind destinations)
+    ignore_dests = set(get_mismatched_destinations())
+
     for mount_base in mount_paths:
+        # Skip any mount that is an ignored destination or is under one
+        skip_mount = False
+        for ignored in ignore_dests:
+            if str(mount_base) == str(ignored) or str(mount_base).startswith(str(ignored) + '/'):
+                skip_mount = True
+                break
+        if skip_mount:
+            # Do not scan this mount path at all
+            continue
+
         mount_path = Path(mount_base)
         if not mount_path.exists():
             continue

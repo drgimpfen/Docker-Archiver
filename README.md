@@ -172,6 +172,25 @@ services:
 
 **Note:** Named volumes *within* your stack's compose.yml (like `postgres_data:`) work perfectly fine - this requirement only applies to mounting the stack directories into the archiver container.
 
+---
+
+<a name="bind-mounts"></a>
+### Bind mounts — recommended configuration
+
+For reliable discovery and correct `docker compose` execution, the host path and container path of your stack directory bind mounts should be identical (for example: `- /opt/stacks:/opt/stacks`).
+
+Why this matters:
+
+- Docker Archiver runs `docker compose` commands inside the container and expects to find the stack's compose files at the same path it discovered. If the host and container paths differ, the app tries to infer the host path from mounts, but this can lead to ambiguities or failures when running `docker compose` (e.g., when the host path is not accessible inside the container).
+- Using identical paths avoids edge cases and ensures that archive and docker-compose commands run from the correct working directory.
+
+Examples:
+
+- Recommended: `- /opt/stacks:/opt/stacks` (host and container paths match)
+- Not recommended: `- /home/stacks:/opt/stacks` or `- /opt/stacks:/local/stacks` (host and container paths differ)
+
+For more details and troubleshooting tips, see the dashboard warning messages or open an issue in the project repository.
+
 ## Configuration
 
 ### Environment Variables

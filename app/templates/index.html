@@ -14,6 +14,26 @@
 </div>
 {% endif %}
 
+{% if bind_warnings %}
+<div class="alert alert-warning border-warning mb-4" role="alert">
+    <div class="d-flex gap-3">
+        <div class="flex-shrink-0"><i class="bi bi-exclamation-triangle-fill fs-4"></i></div>
+        <div>
+            <strong>Bind mount mismatches detected</strong>
+            <div class="mt-2">
+                {% for w in bind_warnings %}
+                    <div>{{ w }}</div>
+                {% endfor %}
+            </div>
+            <div class="mt-2"><small class="text-muted">Correct format (recommended): <code>/opt/stacks:/opt/stacks</code> — host path equals container path. Examples not recommended: <code>/home/stacks:/opt/stacks</code>, <code>/opt/stacks:/local/stacks</code>. <a href="https://github.com/drgimpfen/Docker-Archiver#bind-mounts" target="_blank" rel="noopener">Learn more</a></small></div>
+            {% if ignored_bind_destinations %}
+            <div class="mt-2"><small class="text-muted">Ignored mount paths: {% for d in ignored_bind_destinations %}<code>{{ d }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</small></div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <!-- System Info Cards -->
 <div class="row g-3 mb-4">
     <!-- Storage Card -->

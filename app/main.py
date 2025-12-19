@@ -75,8 +75,37 @@ try:
     print(f"[INFO] Discovered {len(stacks)} stacks:")
     for s in stacks:
         print(f"  - {s['name']} (at {s['path']}, compose: {s.get('compose_file')})")
+
+    # Detect bind mount mismatches and persist warnings to app config for UI
+    try:
+        from app.stacks import detect_bind_mismatches, get_mismatched_destinations
+        bind_warnings = detect_bind_mismatches()
+        if bind_warnings:
+            for w in bind_warnings:
+                print(f"[WARNING] {w}")
+        app.config['BIND_MISMATCH_WARNINGS'] = bind_warnings
+        # Also persist the exact container destinations that are mismatched so we can ignore them
+        ignored = get_mismatched_destinations()
+        app.config['IGNORED_BIND_DESTINATIONS'] = ignored
+        if ignored:
+            print(f"[INFO] Ignoring stacks under destinations: {ignored}")
+    except Exception as e:
+        print(f"[DEBUG] Could not detect bind mismatches: {e}")
+
 except Exception as e:
     print(f"[ERROR] Startup mount/stack detection failed: {e}")
+
+
+@app.context_processor
+def inject_bind_warnings():
+    """Inject bind mount mismatch warnings and ignored destinations into templates."""
+    try:
+        return {
+            'bind_warnings': app.config.get('BIND_MISMATCH_WARNINGS', []),
+            'ignored_bind_destinations': app.config.get('IGNORED_BIND_DESTINATIONS', [])
+        }
+    except Exception:
+        return {'bind_warnings': [], 'ignored_bind_destinations': []}
 
 # Initialize scheduler on startup
 init_scheduler()
