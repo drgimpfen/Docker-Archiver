@@ -2,6 +2,7 @@
 Main Flask application with Blueprints.
 """
 import os
+import threading
 
 __version__ = '0.6.5'
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_file
@@ -67,37 +68,52 @@ app.register_blueprint(api.bp)
 # Exempt API blueprint from CSRF (uses Bearer tokens)
 csrf.exempt(api.bp)
 
-@app.before_first_request
-def perform_startup_discovery():
-    """Run stack/mount detection once when the app starts (per worker).
-    Using before_first_request avoids repeating these logs on every request."""
-    try:
-        mount_paths = get_stack_mount_paths()
-        print(f"[DEBUG] Auto-detected mount paths: {mount_paths}")
-        stacks = discover_stacks()
-        print(f"[INFO] Discovered {len(stacks)} stacks:")
-        for s in stacks:
-            print(f"  - {s['name']} (at {s['path']}, compose: {s.get('compose_file')})")
+# Run startup discovery once, safely, on first request using a guarded before_request handler.
+startup_discovery_done = False
+startup_discovery_lock = threading.Lock()
 
-        # Detect bind mount mismatches and persist warnings to app config for UI
+def run_startup_discovery():
+    """Run stack/mount detection once per process (guarded by a lock)."""
+    global startup_discovery_done
+    if startup_discovery_done:
+        return
+    with startup_discovery_lock:
+        if startup_discovery_done:
+            return
         try:
-            from app.stacks import detect_bind_mismatches, get_mismatched_destinations
-            bind_warnings = detect_bind_mismatches()
-            if bind_warnings:
-                for w in bind_warnings:
-                    print(f"[WARNING] {w}")
-            app.config['BIND_MISMATCH_WARNINGS'] = bind_warnings
-            # Also persist the exact container destinations that are mismatched so we can ignore them
-            ignored = get_mismatched_destinations()
-            app.config['IGNORED_BIND_DESTINATIONS'] = ignored
-            if ignored:
-                print(f"[INFO] Ignoring stacks under destinations: {ignored}")
+            mount_paths = get_stack_mount_paths()
+            print(f"[DEBUG] Auto-detected mount paths: {mount_paths}")
+            stacks = discover_stacks()
+            print(f"[INFO] Discovered {len(stacks)} stacks:")
+            for s in stacks:
+                print(f"  - {s['name']} (at {s['path']}, compose: {s.get('compose_file')})")
+
+            # Detect bind mount mismatches and persist warnings to app config for UI
+            try:
+                from app.stacks import detect_bind_mismatches, get_mismatched_destinations
+                bind_warnings = detect_bind_mismatches()
+                if bind_warnings:
+                    for w in bind_warnings:
+                        print(f"[WARNING] {w}")
+                app.config['BIND_MISMATCH_WARNINGS'] = bind_warnings
+                # Also persist the exact container destinations that are mismatched so we can ignore them
+                ignored = get_mismatched_destinations()
+                app.config['IGNORED_BIND_DESTINATIONS'] = ignored
+                if ignored:
+                    print(f"[INFO] Ignoring stacks under destinations: {ignored}")
+            except Exception as e:
+                print(f"[DEBUG] Could not detect bind mismatches: {e}")
+
         except Exception as e:
-            print(f"[DEBUG] Could not detect bind mismatches: {e}")
+            print(f"[ERROR] Startup mount/stack detection failed: {e}")
+        finally:
+            startup_discovery_done = True
 
-    except Exception as e:
-        print(f"[ERROR] Startup mount/stack detection failed: {e}")
 
+@app.before_request
+def _ensure_startup_discovery():
+    """Ensure the startup discovery has run (runs only once per process)."""
+    run_startup_discovery()
 
 @app.context_processor
 def inject_bind_warnings():
