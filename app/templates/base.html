@@ -271,17 +271,60 @@
                 `;
             }
             
-            if (job.log) {
-                html += `
-                    <h6 class="mt-4">Log Output</h6>
-                    <pre class="bg-dark text-light p-3 mb-2" style="max-height: 400px; overflow-y: auto;">${job.log}</pre>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="downloadLog(${job.id})" title="Download Log">
-                        <i class="bi bi-download"></i> Download Log
-                    </button>
-                `;
-            }
-            
+            html += `
+                <h6 class="mt-4">Log Output</h6>
+                <pre id="job-log" class="bg-dark text-light p-3 mb-2" style="max-height: 400px; overflow-y: auto; white-space: pre-wrap;">` + `` + `</pre>
+                <button class="btn btn-sm btn-outline-secondary" onclick="downloadLog(${job.id})" title="Download Log">
+                    <i class="bi bi-download"></i> Download Log
+                </button>
+            `;
+
             content.innerHTML = html;
+
+            // --- Live log polling ---
+            // Clear existing poller if present
+            if (window._jobLogPoller) {
+                clearTimeout(window._jobLogPoller);
+                window._jobLogPoller = null;
+            }
+
+            const logPre = document.getElementById('job-log');
+            let lastLine = 0;
+
+            async function fetchTail() {
+                try {
+                    const resp = await fetch(`/api/jobs/${job.id}/log/tail?last_line=${lastLine}`);
+                    if (!resp.ok) {
+                        // If not found or error, stop polling
+                        return;
+                    }
+                    const data = await resp.json();
+                    if (data.lines && data.lines.length) {
+                        data.lines.forEach(l => {
+                            // Append safely as text
+                            logPre.textContent += (logPre.textContent && !logPre.textContent.endsWith('\n') ? '\n' : '') + l;
+                        });
+                        // Auto-scroll to bottom
+                        logPre.scrollTop = logPre.scrollHeight;
+                    }
+                    lastLine = data.last_line || lastLine;
+
+                    if (!data.complete) {
+                        // Schedule next poll
+                        window._jobLogPoller = setTimeout(fetchTail, 1500);
+                    }
+                } catch (err) {
+                    console.error('Failed to fetch log tail:', err);
+                }
+            }
+
+            if (job.status === 'running') {
+                // Start polling live log
+                fetchTail();
+            } else if (job.log) {
+                // Show final log snapshot
+                logPre.textContent = job.log;
+            }
             
         } catch (error) {
             content.innerHTML = `<div class="alert alert-danger">Failed to load job details: ${error.message}</div>`;

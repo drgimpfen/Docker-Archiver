@@ -17,6 +17,10 @@ from app import utils
 ARCHIVE_BASE = '/archives'
 
 
+# Registry of running executors (job_id -> executor instance)
+RUNNING_EXECUTORS = {}
+
+
 class ArchiveExecutor:
     """Handles archive job execution with phased processing."""
     
@@ -55,6 +59,16 @@ class ArchiveExecutor:
         # First try: Use mount configuration
         host_path = self._get_host_path_from_mount_config(stack_dir)
         if host_path != stack_dir:
+            # If mount config resolved to a different (host) path, ensure it's accessible in container
+            try:
+                if not Path(str(host_path)).exists():
+                    self.log('DEBUG', f"Mount config returned host path {host_path} which is not accessible in container; falling back to container inspection")
+                    # Fall back to container inspection
+                    return self._get_host_path_from_container_inspect(stack_name, stack_dir)
+            except Exception:
+                # If any error checking path, fallback to container inspection
+                return self._get_host_path_from_container_inspect(stack_name, stack_dir)
+
             self.log('INFO', f"Found host path from mount config: {host_path}")
             # Still need to check for named volumes from containers
             named_volumes = self._get_named_volumes_from_container(stack_name)
@@ -179,6 +193,14 @@ class ArchiveExecutor:
                 # Fallback: Try to determine host path from /proc/self/mountinfo
                 self.log('DEBUG', f"No bind mounts found in containers, checking /proc/self/mountinfo")
                 found_host_path = self._get_host_path_from_proc(stack_dir)
+
+            # Ensure the found host path is accessible within the container; if not, fall back to container path
+            try:
+                if found_host_path and str(found_host_path) != str(stack_dir) and not Path(str(found_host_path)).exists():
+                    self.log('DEBUG', f"Host path {found_host_path} is not accessible inside container; using container path {stack_dir}")
+                    found_host_path = stack_dir
+            except Exception:
+                found_host_path = stack_dir
             
             if named_volumes:
                 self.log('WARNING', f"⚠️  Stack {stack_name} uses named volumes: {', '.join(named_volumes)}")
@@ -308,6 +330,11 @@ class ArchiveExecutor:
         log_line = f"[{timestamp}] [{level}] {prefix}{message}"
         self.log_buffer.append(log_line)
         print(log_line)
+
+
+def get_running_executor(job_id):
+    """Return a running ArchiveExecutor instance for a job id, if available."""
+    return RUNNING_EXECUTORS.get(job_id)
     
     def run(self, triggered_by='manual'):
         """Execute archive job with all phases."""
@@ -316,7 +343,12 @@ class ArchiveExecutor:
         
         # Create job record
         self.job_id = self._create_job_record(start_time, triggered_by)
-        
+        # Register executor for live log access
+        try:
+            RUNNING_EXECUTORS[self.job_id] = self
+        except Exception:
+            pass
+
         try:
             # Phase 0: Initialize directories
             self._phase_0_init()
@@ -337,6 +369,13 @@ class ArchiveExecutor:
             self.log('ERROR', f"Archive job failed: {str(e)}")
             self._update_job_status('failed', error=str(e))
             raise
+        finally:
+            # Ensure we deregister executor when finished so API stops pulling live logs
+            try:
+                if self.job_id and self.job_id in RUNNING_EXECUTORS:
+                    del RUNNING_EXECUTORS[self.job_id]
+            except Exception:
+                pass
     
     def _create_job_record(self, start_time, triggered_by):
         """Create initial job record in database."""

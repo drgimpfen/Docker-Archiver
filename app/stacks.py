@@ -50,21 +50,16 @@ def get_own_container_mounts():
                     ['docker', 'inspect', container_id],
                     capture_output=True, text=True, timeout=10
                 )
-                print(f"[DEBUG] docker inspect returncode={result.returncode}")
+
                 if result.returncode == 0:
                     try:
                         inspect_data = json.loads(result.stdout)
                     except Exception as e:
-                        print(f"[DEBUG] failed to parse docker inspect JSON: {e}")
                         inspect_data = None
 
                     if inspect_data:
                         container_data = inspect_data[0]
                         mounts = container_data.get('Mounts', [])
-                        print(f"[DEBUG] docker inspect found {len(mounts)} mounts")
-                        for m in mounts:
-                            print(f"[DEBUG] - mount: Type={m.get('Type')} Source={m.get('Source')} Dest={m.get('Destination')}")
-
                         bind_mounts = []
                         for mount in mounts:
                             mount_type = mount.get('Type', '')
@@ -81,10 +76,10 @@ def get_own_container_mounts():
                                     destination != '/var/run/docker.sock'):
                                     bind_mounts.append(destination)
                         if bind_mounts:
-                            print(f"[DEBUG] bind mounts from docker inspect: {bind_mounts}")
                             return bind_mounts
-            except Exception as e:
-                print(f"[DEBUG] docker inspect failed: {e}")
+            except Exception:
+                # docker inspect failed or not available; fallback to mountinfo
+                pass
         
         # Method 2: Fallback to /proc/self/mountinfo
         # This works even when docker inspect fails

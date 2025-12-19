@@ -224,10 +224,14 @@ function testNotification() {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sending...';
     
+    const _csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    const _csrfValue = _csrfMeta ? _csrfMeta.content : '';
+
     fetch('{{ url_for("settings.test_notification") }}', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
+            'X-CSRFToken': _csrfValue
         }
     })
     .then(response => response.json())

@@ -82,10 +82,28 @@ def create():
         output_format = request.form.get('output_format', 'tar')
         
         # Retention settings
-        keep_days = int(request.form.get('keep_days', 7))
-        keep_weeks = int(request.form.get('keep_weeks', 4))
-        keep_months = int(request.form.get('keep_months', 6))
-        keep_years = int(request.form.get('keep_years', 2))
+        def parse_retention_field(name, default):
+            raw = request.form.get(name)
+            if raw is None:
+                return default
+            raw = str(raw).strip()
+            if raw == '':
+                return 0
+            try:
+                val = int(raw)
+                return val if val >= 0 else 0
+            except ValueError:
+                raise ValueError(f"Invalid integer for {name}: '{raw}'")
+
+        try:
+            keep_days = parse_retention_field('keep_days', 7)
+            keep_weeks = parse_retention_field('keep_weeks', 4)
+            keep_months = parse_retention_field('keep_months', 6)
+            keep_years = parse_retention_field('keep_years', 2)
+        except ValueError as ve:
+            flash(str(ve), 'danger')
+            return redirect(url_for('archives.list_archives'))
+
         one_per_day = request.form.get('one_per_day') == 'on'
         
         with get_db() as conn:
@@ -138,10 +156,28 @@ def edit(archive_id):
             return redirect(url_for('archives.list_archives'))
         output_format = request.form.get('output_format', 'tar')
         
-        keep_days = int(request.form.get('keep_days', 7))
-        keep_weeks = int(request.form.get('keep_weeks', 4))
-        keep_months = int(request.form.get('keep_months', 6))
-        keep_years = int(request.form.get('keep_years', 2))
+        def parse_retention_field(name, default):
+            raw = request.form.get(name)
+            if raw is None:
+                return default
+            raw = str(raw).strip()
+            if raw == '':
+                return 0
+            try:
+                val = int(raw)
+                return val if val >= 0 else 0
+            except ValueError:
+                raise ValueError(f"Invalid integer for {name}: '{raw}'")
+
+        try:
+            keep_days = parse_retention_field('keep_days', 7)
+            keep_weeks = parse_retention_field('keep_weeks', 4)
+            keep_months = parse_retention_field('keep_months', 6)
+            keep_years = parse_retention_field('keep_years', 2)
+        except ValueError as ve:
+            flash(str(ve), 'danger')
+            return redirect(url_for('archives.list_archives'))
+
         one_per_day = request.form.get('one_per_day') == 'on'
         
         with get_db() as conn:

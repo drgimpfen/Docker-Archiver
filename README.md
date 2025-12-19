@@ -92,25 +92,30 @@ On first visit, you'll be prompted to create an admin account.
 
 ### Automatic Detection (Recommended)
 
-The application automatically detects stack directories from your volume mounts:
+Docker Archiver auto-detects stack directories from bind mounts that are mounted into the archiver container. Detection is performed using (in order): `docker inspect` on the running container, and `/proc/self/mountinfo` as a robust fallback.
+
+Key behavior:
+- Only **bind mounts** are considered. Named Docker volumes are ignored.
+- The scanner checks the **mount root** and **one level of subdirectories** (fixed behavior; this is not configurable).
+- Hidden directories (starting with `.`) and special names like `archives` or `tmp` are excluded.
+- Results are **deduplicated** by resolved path.
+- Each discovered stack is annotated as **direct** (compose found at mount root) or **nested** (compose found in a subdirectory).
+- If no mounts are detected the legacy `/local` path is scanned as a final fallback.
+
+### Volume Mounts (how to configure)
+
+Add bind mounts for your stack directories in `docker-compose.yml`. Examples:
 
 ```yaml
 services:
   app:
     volumes:
-      # These will be auto-detected as stack directories:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./archives:/archives
       - /opt/stacks:/opt/stacks
+      - /srv/docker/stacks:/srv/docker/stacks
       - /home/user/docker:/home/user/docker
 ```
-
-**What gets detected:**
-- ✅ Bind mounts (host directories mounted into container)
-- ❌ Named volumes (ignored)
-- ❌ System mounts like `/var/run/docker.sock`, `/archives` (ignored)
-
-### Volume Mounts
-
-Edit `docker-compose.yml` and add volume mounts for your stack directories:
 
 ```yaml
 services:
@@ -130,16 +135,19 @@ services:
 
 ### How Stack Discovery Works
 
-The application scans all configured stack directories:
-- **Auto-detected mounts:** All bind-mounted directories (except system paths)
-- **Manual configuration:** Directories specified in `STACKS_DIR`
-- **Discovery logic:**
-  - Direct compose file: `/opt/stacks/mystack/compose.yml` → Stack: `mystack`
-  - Subdirectories: `/opt/stacks/apps/app1/compose.yml` → Stack: `app1`
-  - Multiple directories: Each configured path is scanned independently
-  - Max depth: 2 levels (configurable directory + stack directory)
+Discovery follows these rules:
+- The app first **auto-detects** candidate mount points from bind mounts inside the archiver container.
+- For each mount point the app checks the **mount root** and **one level of subdirectories** for compose files:
+  - If a compose file is present at the mount root, the stack is marked as **direct**.
+  - If a compose file is present in a subdirectory, the stack is marked as **nested** (the subdirectory becomes the stack path).
+- The scanner **ignores** hidden directories (names that start with `.`) and obvious non-stack names like `archives` or `tmp` to reduce false positives.
+- Results are deduplicated by resolved path so the same stack mounted multiple ways is only listed once.
 
-**Note:** Host and container paths must be identical. The archiver assumes `/opt/stacks` on host maps to `/opt/stacks` in container.
+**Behavior for non-mounted stacks:** If a stack directory is not available via a bind mount, the archiver will use the path as it appears inside the container (the container-side path) when running compose commands; it will not attempt to use host-only paths that are not mounted into the container.
+
+**Fallback & compatibility**: If no bind mounts are detected the legacy `/local` path will be scanned to maintain compatibility with older deployments.
+
+**Important:** Host and container paths must match for bind mounts (e.g. `- /opt/stacks:/opt/stacks`). The archiver uses the container-side path it detects as the working directory for `docker compose` commands.
 
 ### ⚠️ Important: Bind Mounts Required
 

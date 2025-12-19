@@ -186,3 +186,34 @@ body.has-sidebar .app-main {
     height: 1rem;
     border-width: 0.2em;
 }
+
+/* Stack badges layout in archives table */
+.stack-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+}
+
+.stack-badges .badge {
+    font-size: 0.82rem;
+    padding: 0.25rem 0.45rem;
+    line-height: 1;
+}
+
+/* Table column sizing */
+th.stacks-col, td.stacks-col {
+    width: 340px; /* allow more room for stacks */
+    max-width: 340px;
+}
+
+th.schedule-col, td.schedule-col {
+    width: 140px; /* narrower schedule column */
+    white-space: nowrap;
+}
+
+/* Small tweak to keep format cell centered */
+td.format-col {
+    white-space: nowrap;
+}
+
