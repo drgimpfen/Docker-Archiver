@@ -181,7 +181,8 @@ def index():
         
         # Get recent jobs (last 10)
         cur.execute("""
-            SELECT j.*, a.name as archive_name 
+            SELECT j.*, a.name as archive_name,
+                   EXTRACT(EPOCH FROM (j.end_time - j.start_time))::integer as duration_seconds
             FROM jobs j
             LEFT JOIN archives a ON j.archive_id = a.id
             ORDER BY j.start_time DESC
