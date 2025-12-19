@@ -241,12 +241,14 @@
                                 <th>Duration</th>
                                 <th>Archive Size</th>
                                 <th>Archive Path</th>
+                                <th style="width: 80px;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                 `;
                 
                 metrics.forEach(m => {
+                    const hasArchive = m.archive_path && !m.archive_path.includes('_download_');
                     html += `
                         <tr>
                             <td>${m.stack_name}</td>
@@ -255,6 +257,10 @@
                             <td>${m.duration_seconds !== null && m.duration_seconds !== undefined ? m.duration_seconds + 's' : 'N/A'}</td>
                             <td>${m.archive_size_bytes ? formatBytes(m.archive_size_bytes) : 'N/A'}</td>
                             <td><small>${m.archive_path || 'N/A'}</small></td>
+                            <td>
+                                ${hasArchive ? `<button class="btn btn-sm btn-outline-primary me-1" onclick="requestDownload(${job.id}, '${m.stack_name}', '${m.archive_path}')" title="Download Archive"><i class="bi bi-download"></i></button>` : ''}
+                                <button class="btn btn-sm btn-outline-secondary" onclick="downloadStackLog(${job.id}, '${m.stack_name}')" title="Download Stack Log"><i class="bi bi-file-text"></i></button>
+                            </td>
                         </tr>
                     `;
                 });
@@ -267,7 +273,12 @@
             
             if (job.log) {
                 html += `
-                    <h6 class="mt-4">Log Output</h6>
+                    <h6 class="mt-4">
+                        Log Output
+                        <button class="btn btn-sm btn-outline-secondary float-end" onclick="downloadLog(${job.id})" title="Download Log">
+                            <i class="bi bi-download"></i> Download
+                        </button>
+                    </h6>
                     <pre class="bg-dark text-light p-3" style="max-height: 400px; overflow-y: auto;">${job.log}</pre>
                 `;
             }
@@ -277,6 +288,43 @@
         } catch (error) {
             content.innerHTML = `<div class="alert alert-danger">Failed to load job details: ${error.message}</div>`;
         }
+    }
+
+    async function requestDownload(jobId, stackName, archivePath) {
+        try {
+            const response = await fetch(`/api/jobs/${jobId}/download`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    stack_name: stackName,
+                    archive_path: archivePath
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                if (data.is_folder) {
+                    alert(data.message);
+                } else {
+                    window.open(data.download_url, '_blank');
+                }
+            } else {
+                alert('Error: ' + (data.error || 'Unknown error'));
+            }
+        } catch (error) {
+            alert('Error requesting download: ' + error.message);
+        }
+    }
+
+    function downloadLog(jobId) {
+        window.open(`/api/jobs/${jobId}/log`, '_blank');
+    }
+
+    function downloadStackLog(jobId, stackName) {
+        window.open(`/api/jobs/${jobId}/log?stack=${encodeURIComponent(stackName)}`, '_blank');
     }
 
     function formatBytes(bytes) {

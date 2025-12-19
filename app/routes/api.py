@@ -152,7 +152,9 @@ def request_download(job_id):
 @bp.route('/jobs/<int:job_id>/log')
 @api_auth_required
 def download_log(job_id):
-    """Download job log as text file."""
+    """Download job log as text file. Optionally filter by stack name using ?stack=stackname query parameter."""
+    stack_name = request.args.get('stack')
+    
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute("SELECT j.log, a.name as archive_name FROM jobs j LEFT JOIN archives a ON j.archive_id = a.id WHERE j.id = %s;", (job_id,))
@@ -161,12 +163,36 @@ def download_log(job_id):
     if not result or not result['log']:
         return "No log available", 404
     
+    log_content = result['log']
+    
+    # Filter log by stack if requested
+    if stack_name:
+        lines = log_content.split('\n')
+        filtered_lines = []
+        in_stack_section = False
+        
+        for line in lines:
+            # Check if we're entering the requested stack section
+            if f"Processing stack: {stack_name}" in line or f"Stack: {stack_name}" in line:
+                in_stack_section = True
+            # Check if we're entering a different stack section
+            elif "Processing stack:" in line or (line.startswith("Stack:") and stack_name not in line):
+                in_stack_section = False
+            
+            if in_stack_section:
+                filtered_lines.append(line)
+        
+        log_content = '\n'.join(filtered_lines)
+        if not log_content.strip():
+            return f"No log entries found for stack '{stack_name}'", 404
+    
     # Create temporary log file
-    log_filename = f"job_{job_id}_{result['archive_name'] or 'unknown'}.log"
+    filename_suffix = f"_{stack_name}" if stack_name else ""
+    log_filename = f"job_{job_id}_{result['archive_name'] or 'unknown'}{filename_suffix}.log"
     log_path = f"/tmp/{log_filename}"
     
     with open(log_path, 'w') as f:
-        f.write(result['log'])
+        f.write(log_content)
     
     return send_file(log_path, as_attachment=True, download_name=log_filename)
 
