@@ -229,6 +229,7 @@ class ArchiveExecutor:
         """Stop a docker compose stack."""
         self.log('INFO', f"Stopping stack in {compose_path.parent}...")
         
+        # Use 'down' without --volumes to cleanly stop and remove containers while preserving volumes
         cmd_parts = ['docker', 'compose', '-f', str(compose_path), 'down']
         self.log('INFO', f"Starting command: Stopping {stack_name} (docker compose down)")
         
@@ -238,7 +239,7 @@ class ArchiveExecutor:
         
         try:
             result = subprocess.run(
-                cmd_parts, capture_output=True, text=True, timeout=120
+                cmd_parts, capture_output=True, text=True, timeout=120, cwd=str(compose_path.parent)
             )
             if result.returncode == 0:
                 self.log('INFO', f"Successfully finished: Stopping {stack_name}")
@@ -263,7 +264,7 @@ class ArchiveExecutor:
         
         try:
             result = subprocess.run(
-                cmd_parts, capture_output=True, text=True, timeout=120
+                cmd_parts, capture_output=True, text=True, timeout=120, cwd=str(compose_path.parent)
             )
             if result.returncode == 0:
                 self.log('INFO', f"Successfully finished: Starting {stack_name}")
