@@ -229,11 +229,11 @@ class ArchiveExecutor:
         """Stop a docker compose stack."""
         self.log('INFO', f"Stopping stack in {compose_path.parent}...")
         
-        cmd_parts = ['docker', 'compose', '-f', str(compose_path), 'down']
-        self.log('INFO', f"Starting command: Stopping {stack_name} (docker compose down)")
+        cmd_parts = ['docker', 'compose', '-f', str(compose_path), 'stop']
+        self.log('INFO', f"Starting command: Stopping {stack_name} (docker compose stop)")
         
         if self.is_dry_run:
-            self.log('INFO', f"Would execute: docker compose -f {compose_path} down")
+            self.log('INFO', f"Would execute: docker compose -f {compose_path} stop")
             return True
         
         try:
