@@ -469,7 +469,8 @@ class ArchiveExecutor:
         self.log('INFO', f"Starting command: Starting {stack_name} (docker compose up -d)")
         
         if self.is_dry_run:
-            self.log('INFO', f"Would execute: docker compose --project-directory {stack_dir} -f {compose_path} up -d")
+            # Show actual command with all parameters
+            self.log('INFO', f"Would execute: {' '.join(cmd_parts)}")
             return True
         
         try:
