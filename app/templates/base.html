@@ -154,6 +154,145 @@
         })();
     </script>
     
+    <!-- Job Details Modal (shared across pages) -->
+    <div class="modal fade" id="jobDetailsModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-info-circle"></i> Job Details
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="jobDetailsContent">
+                    <div class="text-center">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+    // Shared job details modal function
+    async function showJobDetails(jobId) {
+        const modal = new bootstrap.Modal(document.getElementById('jobDetailsModal'));
+        const content = document.getElementById('jobDetailsContent');
+        
+        modal.show();
+        
+        try {
+            const response = await fetch(`/api/jobs/${jobId}`);
+            const data = await response.json();
+            
+            if (data.error) {
+                content.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                return;
+            }
+            
+            const job = data.job;
+            const metrics = data.metrics;
+            
+            let html = `
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <h6>Job Information</h6>
+                        <table class="table table-sm">
+                            <tr><th width="150">Job ID:</th><td>#${job.id}</td></tr>
+                            <tr><th>Archive:</th><td>${job.archive_name || 'N/A'}</td></tr>
+                            <tr><th>Type:</th><td>${job.job_type} ${job.is_dry_run ? '<span class="badge bg-secondary">DRY RUN</span>' : ''}</td></tr>
+                            <tr><th>Status:</th><td><span class="badge bg-${job.status === 'success' ? 'success' : (job.status === 'running' ? 'info' : 'danger')}">${job.status}</span></td></tr>
+                            <tr><th>Triggered By:</th><td>${job.triggered_by}</td></tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Timing & Size</h6>
+                        <table class="table table-sm">
+                            <tr><th width="150">Start Time:</th><td>${job.start_time || 'N/A'}</td></tr>
+                            <tr><th>End Time:</th><td>${job.end_time || 'N/A'}</td></tr>
+                            <tr><th>Duration:</th><td>${job.duration_seconds ? job.duration_seconds + 's' : 'N/A'}</td></tr>
+                            <tr><th>Total Size:</th><td>${job.total_size_bytes ? formatBytes(job.total_size_bytes) : 'N/A'}</td></tr>
+                            <tr><th>Reclaimed:</th><td>${job.reclaimed_bytes ? formatBytes(job.reclaimed_bytes) : 'N/A'}</td></tr>
+                        </table>
+                    </div>
+                </div>
+            `;
+            
+            if (job.error_message) {
+                html += `
+                    <div class="alert alert-danger">
+                        <h6>Error</h6>
+                        <pre>${job.error_message}</pre>
+                    </div>
+                `;
+            }
+            
+            if (metrics && metrics.length > 0) {
+                html += `
+                    <h6 class="mt-4">Stack Metrics</h6>
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Stack</th>
+                                <th>Status</th>
+                                <th>Was Running</th>
+                                <th>Duration</th>
+                                <th>Archive Size</th>
+                                <th>Archive Path</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                
+                metrics.forEach(m => {
+                    html += `
+                        <tr>
+                            <td>${m.stack_name}</td>
+                            <td><span class="badge bg-${m.status === 'success' ? 'success' : 'danger'}">${m.status}</span></td>
+                            <td>${m.was_running ? '<i class="bi bi-check-circle text-success"></i>' : '<i class="bi bi-x-circle text-muted"></i>'}</td>
+                            <td>${m.duration_seconds ? m.duration_seconds + 's' : 'N/A'}</td>
+                            <td>${m.archive_size_bytes ? formatBytes(m.archive_size_bytes) : 'N/A'}</td>
+                            <td><small>${m.archive_path || 'N/A'}</small></td>
+                        </tr>
+                    `;
+                });
+                
+                html += `
+                        </tbody>
+                    </table>
+                `;
+            }
+            
+            if (job.log) {
+                html += `
+                    <h6 class="mt-4">Log Output</h6>
+                    <pre class="bg-dark text-light p-3" style="max-height: 400px; overflow-y: auto;">${job.log}</pre>
+                `;
+            }
+            
+            content.innerHTML = html;
+            
+        } catch (error) {
+            content.innerHTML = `<div class="alert alert-danger">Failed to load job details: ${error.message}</div>`;
+        }
+    }
+
+    function formatBytes(bytes) {
+        if (!bytes) return 'N/A';
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        if (bytes === 0) return '0 B';
+        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+        return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+    }
+    
+    // Edit Archive Modal - Navigate to archives page
+    function editArchive(archiveId) {
+        window.location.href = `/archives#edit-${archiveId}`;
+    }
+    </script>
+    
     {% block extra_js %}{% endblock %}
 </body>
 </html>
