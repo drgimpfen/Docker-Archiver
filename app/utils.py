@@ -8,13 +8,14 @@ from zoneinfo import ZoneInfo
 
 
 def now():
-    """Get current datetime in configured timezone."""
+    """Get current datetime in configured timezone (naive)."""
     tz_name = os.environ.get('TZ', 'UTC')
     try:
         tz = ZoneInfo(tz_name)
     except Exception:
         tz = ZoneInfo('UTC')
-    return datetime.now(tz)
+    # Return naive datetime in local timezone for DB compatibility
+    return datetime.now(tz).replace(tzinfo=None)
 
 
 def format_bytes(bytes_val):
