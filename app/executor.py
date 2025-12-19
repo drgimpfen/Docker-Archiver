@@ -452,20 +452,9 @@ class ArchiveExecutor:
         host_stack_dir = self.stack_host_paths.get(stack_name, stack_dir)
         
         # Build docker compose command with --project-directory
-        cmd_parts = ['docker', 'compose', '--project-directory', str(host_stack_dir), '-f', str(compose_path)]
-        
-        # Add environment variables from inspected containers
-        # This ensures the stack restarts with the same configuration
-        if hasattr(self, 'stack_env_vars') and stack_name in self.stack_env_vars:
-            env_vars = self.stack_env_vars[stack_name]
-            # Only pass compose-relevant variables, skip system vars
-            compose_vars = {k: v for k, v in env_vars.items() 
-                          if not k.startswith(('PATH', 'HOME', 'HOSTNAME', 'TERM', 'LANG'))}
-            for key, value in compose_vars.items():
-                cmd_parts.insert(2, f'{key}={value}')
-                cmd_parts.insert(2, '-e')
-        
-        cmd_parts.extend(['up', '-d'])
+        # Docker Compose will automatically load .env from the project directory
+        # and any env_file: entries defined in the compose.yml
+        cmd_parts = ['docker', 'compose', '--project-directory', str(host_stack_dir), '-f', str(compose_path), 'up', '-d']
         self.log('INFO', f"Starting command: Starting {stack_name} (docker compose up -d)")
         
         if self.is_dry_run:
