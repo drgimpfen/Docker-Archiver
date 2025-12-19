@@ -21,8 +21,8 @@
         <div>
             <strong>Bind mount mismatches detected</strong>
             <div class="mt-2">
-                {# Show a cleaned primary message without the leading emoji and the redundant prefix #}
-                <div>{{ bind_warnings[0] | replace('⚠️ ', '') | replace('Bind mount mismatch: ', '') }}</div>
+                {# Show primary message directly (message is concise and has no redundant prefix) #}
+                <div>{{ bind_warnings[0] }}</div>
                 {% if bind_warnings|length > 1 %}
                 <details class="mt-2" style="color: #ddd;">
                     <summary style="cursor: pointer;">Show all details</summary>
@@ -35,7 +35,8 @@
                 {% endif %}
             </div>
             <div class="mt-2">
-                <small class="text-muted d-block mb-1">Correct format (recommended):</small>
+                <div><small class="text-muted"><strong>Recommended:</strong> use identical paths (e.g., <code>/opt/stacks:/opt/stacks</code>).</small></div>
+                <small class="text-muted d-block mb-1">Correct format:</small>
                 <pre class="bg-dark text-light p-2 rounded" style="white-space: pre-wrap;"><code>volumes:
   - /opt/stacks:/opt/stacks  # Bind mount (host:container - same path)</code></pre>
                 <small class="text-muted">Examples not recommended: <code>/home/stacks:/opt/stacks</code>, <code>/opt/stacks:/local/stacks</code>. <a href="https://github.com/drgimpfen/Docker-Archiver#bind-mounts" target="_blank" rel="noopener">Learn more</a></small>
