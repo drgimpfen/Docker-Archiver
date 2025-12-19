@@ -41,14 +41,18 @@ class ArchiveExecutor:
         Get the host path for a stack directory by inspecting running containers.
         
         This finds containers from the stack and checks their bind mounts to determine
-        where the stack directory is located on the host. Also detects named volumes.
+        where the stack directory is located on the host. Also detects named volumes
+        and reads environment variables.
         
         Args:
             stack_name: Name of the stack
             stack_dir: Path to stack directory inside this container
             
         Returns:
-            Tuple of (host_path, volume_names) where volume_names is a list of named volumes found
+            Tuple of (host_path, volume_names, env_vars) where:
+            - host_path: Host path for the stack directory
+            - volume_names: List of named volumes found
+            - env_vars: Dict of environment variables from containers
         """
         try:
             # Get list of containers for this stack
@@ -65,8 +69,9 @@ class ArchiveExecutor:
             stack_dir_str = str(stack_dir)
             found_host_path = None
             named_volumes = []
+            env_vars = {}
             
-            # Inspect containers to find bind mounts and named volumes
+            # Inspect containers to find bind mounts, named volumes, and environment variables
             for container_id in container_ids:
                 inspect_result = subprocess.run(
                     ['docker', 'inspect', container_id],
@@ -80,7 +85,16 @@ class ArchiveExecutor:
                 if not inspect_data:
                     continue
                 
-                mounts = inspect_data[0].get('Mounts', [])
+                container_data = inspect_data[0]
+                mounts = container_data.get('Mounts', [])
+                
+                # Read environment variables (only from first container to avoid duplicates)
+                if not env_vars:
+                    env_list = container_data.get('Config', {}).get('Env', [])
+                    for env_entry in env_list:
+                        if '=' in env_entry:
+                            key, value = env_entry.split('=', 1)
+                            env_vars[key] = value
                 
                 # Check all mounts
                 for mount in mounts:
@@ -119,19 +133,79 @@ class ArchiveExecutor:
             if found_host_path:
                 self.log('INFO', f"Found host path from container inspect: {found_host_path}")
             else:
-                self.log('DEBUG', f"Could not determine host path from container mounts, using: {stack_dir}")
-                found_host_path = stack_dir
+                # Fallback: Try to determine host path from /proc/self/mountinfo
+                self.log('DEBUG', f"No bind mounts found in containers, checking /proc/self/mountinfo")
+                found_host_path = self._get_host_path_from_proc(stack_dir)
             
             if named_volumes:
                 self.log('WARNING', f"⚠️  Stack {stack_name} uses named volumes: {', '.join(named_volumes)}")
                 self.log('WARNING', f"    Named volumes are NOT included in the backup archive!")
                 self.log('WARNING', f"    Consider using 'docker volume backup' or similar tools for volume data.")
             
-            return found_host_path, named_volumes
+            if env_vars:
+                self.log('DEBUG', f"Found {len(env_vars)} environment variables from container")
+            
+            return found_host_path, named_volumes, env_vars
             
         except Exception as e:
             self.log('WARNING', f"Error inspecting containers for host path: {e}")
-            return stack_dir, []
+            return stack_dir, [], {}
+    
+    def _get_host_path_from_proc(self, container_path):
+        """
+        Fallback method to get host path by reading /proc/self/mountinfo.
+        Used when no bind mounts are found in container inspection.
+        
+        Args:
+            container_path: Path as seen inside this container
+            
+        Returns:
+            Host path if found, otherwise returns container_path unchanged
+        """
+        container_path = Path(container_path).resolve()
+        container_path_str = str(container_path)
+        
+        try:
+            with open('/proc/self/mountinfo', 'r') as f:
+                mounts = []
+                for line in f:
+                    parts = line.split()
+                    if len(parts) < 10:
+                        continue
+                    
+                    # Skip special filesystems
+                    fs_type = parts[8] if len(parts) > 8 else ''
+                    if fs_type in ['overlay', 'tmpfs', 'proc', 'sysfs', 'devpts', 'devtmpfs', 'cgroup', 'cgroup2']:
+                        continue
+                    
+                    mount_point = parts[4]  # Where it's mounted in container
+                    
+                    # Find the source field (after the '-' separator)
+                    separator_idx = parts.index('-') if '-' in parts else -1
+                    if separator_idx > 0 and len(parts) > separator_idx + 2:
+                        source = parts[separator_idx + 2]
+                        mounts.append((mount_point, source))
+                
+                # Sort by mount point length (longest first) to match most specific path
+                mounts.sort(key=lambda x: len(x[0]), reverse=True)
+                
+                # Find matching mount
+                for mount_point, source in mounts:
+                    if container_path_str.startswith(mount_point):
+                        # Calculate relative path from mount point
+                        relative = container_path_str[len(mount_point):].lstrip('/')
+                        # Combine with host source
+                        host_path = Path(source) / relative if relative else Path(source)
+                        self.log('INFO', f"Found host path from /proc/self/mountinfo: {host_path}")
+                        return host_path
+                
+                # No matching mount found
+                self.log('DEBUG', f"No mount mapping found in /proc/self/mountinfo for {container_path}")
+                return container_path
+                
+        except Exception as e:
+            self.log('WARNING', f"Could not read /proc/self/mountinfo: {e}")
+            return container_path
     
     def log(self, level, message):
         """Add log entry with timestamp."""
@@ -328,18 +402,26 @@ class ArchiveExecutor:
         stack_dir = compose_path.parent
         self.log('INFO', f"Stopping stack in {stack_dir}...")
         
-        # Get host path by inspecting running containers before stopping
-        # Also detects any named volumes that won't be backed up
-        host_stack_dir, named_volumes = self._get_host_path_from_container(stack_name, stack_dir)
+        # Inspect containers before stopping to:
+        # 1. Detect named volumes for warnings
+        # 2. Find host path for later restart
+        # 3. Read environment variables for restart
+        host_stack_dir, named_volumes, env_vars = self._get_host_path_from_container(stack_name, stack_dir)
         
-        # Cache the host path and volumes for use when restarting and reporting
+        # Cache the host path, volumes, and env vars for use when restarting and reporting
         self.stack_host_paths[stack_name] = host_stack_dir
         if named_volumes:
             if not hasattr(self, 'stack_volumes'):
                 self.stack_volumes = {}
             self.stack_volumes[stack_name] = named_volumes
+        if env_vars:
+            if not hasattr(self, 'stack_env_vars'):
+                self.stack_env_vars = {}
+            self.stack_env_vars[stack_name] = env_vars
         
-        cmd_parts = ['docker', 'compose', '--project-directory', str(host_stack_dir), '-f', str(compose_path), 'down']
+        # For stopping, we don't need --project-directory since docker compose
+        # finds containers by project label. Just use -f to specify compose file.
+        cmd_parts = ['docker', 'compose', '-f', str(compose_path), 'down']
         self.log('INFO', f"Starting command: Stopping {stack_name} (docker compose down)")
         
         if self.is_dry_run:
@@ -369,7 +451,21 @@ class ArchiveExecutor:
         # If not cached (e.g., stack wasn't running), use container path
         host_stack_dir = self.stack_host_paths.get(stack_name, stack_dir)
         
-        cmd_parts = ['docker', 'compose', '--project-directory', str(host_stack_dir), '-f', str(compose_path), 'up', '-d']
+        # Build docker compose command with --project-directory
+        cmd_parts = ['docker', 'compose', '--project-directory', str(host_stack_dir), '-f', str(compose_path)]
+        
+        # Add environment variables from inspected containers
+        # This ensures the stack restarts with the same configuration
+        if hasattr(self, 'stack_env_vars') and stack_name in self.stack_env_vars:
+            env_vars = self.stack_env_vars[stack_name]
+            # Only pass compose-relevant variables, skip system vars
+            compose_vars = {k: v for k, v in env_vars.items() 
+                          if not k.startswith(('PATH', 'HOME', 'HOSTNAME', 'TERM', 'LANG'))}
+            for key, value in compose_vars.items():
+                cmd_parts.insert(2, f'{key}={value}')
+                cmd_parts.insert(2, '-e')
+        
+        cmd_parts.extend(['up', '-d'])
         self.log('INFO', f"Starting command: Starting {stack_name} (docker compose up -d)")
         
         if self.is_dry_run:
