@@ -6,7 +6,7 @@ import threading
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
 from app.auth import login_required, get_current_user
 from app.db import get_db
-from app.stacks import discover_stacks, get_stack_mount_paths
+from app.stacks import discover_stacks
 from app.executor import ArchiveExecutor
 from app.scheduler import reload_schedules, get_next_run_time
 from app.utils import format_bytes, format_duration, get_disk_usage
@@ -27,36 +27,6 @@ def list_archives():
     
     # Get available stacks
     stacks = discover_stacks()
-    
-    # Debug: Log discovered stacks and mount paths on first load
-    mount_paths = get_stack_mount_paths()
-    print(f"[DEBUG] Auto-detected mount paths: {mount_paths}")
-    
-    if stacks:
-        print(f"[INFO] Discovered {len(stacks)} stacks:")
-        for stack in stacks:
-            print(f"  - {stack['name']} (at {stack['path']}, compose: {stack['compose_file']})")
-    else:
-        print("[WARNING] No stacks discovered! Check your volume mounts.")
-        mount_paths = get_stack_mount_paths()
-        if mount_paths:
-            print(f"[INFO] Searching in mount paths: {', '.join(mount_paths)}")
-            # Check if paths exist
-            for path in mount_paths:
-                if os.path.exists(path):
-                    print(f"  ✓ {path} exists")
-                    try:
-                        contents = os.listdir(path)
-                        if contents:
-                            print(f"    Contents: {contents[:5]}{'...' if len(contents) > 5 else ''}")
-                        else:
-                            print("    Directory is empty")
-                    except (OSError, PermissionError) as e:
-                        print(f"    Cannot read directory: {e}")
-                else:
-                    print(f"  ✗ {path} does not exist")
-        else:
-            print("[WARNING] No mount paths configured!")
     
     # Enrich archives with next run time
     for archive in archive_list:

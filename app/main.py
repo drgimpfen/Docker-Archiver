@@ -11,7 +11,7 @@ from flask_limiter.util import get_remote_address
 from app.db import init_db, get_db
 from app.auth import login_required, authenticate_user, create_user, get_user_count, get_current_user
 from app.scheduler import init_scheduler, get_next_run_time
-from app.stacks import discover_stacks
+from app.stacks import discover_stacks, get_stack_mount_paths
 from app.downloads import get_download_by_token, prepare_archive_for_download
 from app.notifications import get_setting
 from app.utils import format_bytes, format_duration, get_disk_usage
@@ -57,6 +57,17 @@ app.register_blueprint(api.bp)
 
 # Exempt API blueprint from CSRF (uses Bearer tokens)
 csrf.exempt(api.bp)
+
+# Startup debug: log detected mount paths and discovered stacks
+try:
+    mount_paths = get_stack_mount_paths()
+    print(f"[DEBUG] Auto-detected mount paths: {mount_paths}")
+    stacks = discover_stacks()
+    print(f"[INFO] Discovered {len(stacks)} stacks:")
+    for s in stacks:
+        print(f"  - {s['name']} (at {s['path']}, compose: {s.get('compose_file')})")
+except Exception as e:
+    print(f"[ERROR] Startup mount/stack detection failed: {e}")
 
 # Initialize scheduler on startup
 init_scheduler()
