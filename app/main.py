@@ -24,6 +24,15 @@ from app.routes import archives, history, settings, profile, api
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 
+
+@app.context_processor
+def inject_app_version():
+    """Inject application version into all templates as `app_version`."""
+    try:
+        return {'app_version': __version__}
+    except Exception:
+        return {'app_version': 'unknown'}
+
 # Security: CSRF Protection
 csrf = CSRFProtect(app)
 # Exempt download endpoint (uses tokens) and health check
