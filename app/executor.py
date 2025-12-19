@@ -344,6 +344,23 @@ class ArchiveExecutor:
         except Exception:
             pass
 
+        # Quick sanity check: ensure at least one configured stack resolves to a valid path
+        try:
+            valid_stacks = []
+            for s in self.config.get('stacks', []):
+                try:
+                    if self._find_stack_path(s):
+                        valid_stacks.append(s)
+                except Exception:
+                    # Ignore errors while resolving
+                    continue
+            if not valid_stacks:
+                self.log('ERROR', 'No valid stacks found for this archive (possible bind mount mismatches). Aborting job.')
+                self._update_job_status('failed', error='No valid stacks found')
+                return self.job_id
+        except Exception:
+            pass
+
         try:
             # Phase 0: Initialize directories
             self._phase_0_init()
@@ -372,13 +389,8 @@ class ArchiveExecutor:
             except Exception:
                 pass
 
-
-def get_running_executor(job_id):
-    """Return a running ArchiveExecutor instance for a job id, if available."""
-    return RUNNING_EXECUTORS.get(job_id)
-    
     def _create_job_record(self, start_time, triggered_by):
-        """Create initial job record in database."""
+        """Create initial job record in database (inline implementation)."""
         with get_db() as conn:
             cur = conn.cursor()
             cur.execute("""
@@ -395,8 +407,37 @@ def get_running_executor(job_id):
             job_id = cur.fetchone()['id']
             conn.commit()
             return job_id
+
+
+def get_running_executor(job_id):
+    """Return a running ArchiveExecutor instance for a job id, if available."""
+    return RUNNING_EXECUTORS.get(job_id)
+
+
+def _create_job_record_impl(self, start_time, triggered_by):
+    """Module-level implementation of job record creation (bound to class for safety)."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO jobs (
+                archive_id, job_type, status, start_time, 
+                is_dry_run, dry_run_config, triggered_by, log
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) 
+            RETURNING id;
+        """, (
+            self.config['id'], 'archive', 'running', start_time,
+            self.is_dry_run, json.dumps(self.dry_run_config) if self.dry_run_config else None,
+            triggered_by, ''
+        ))
+        job_id = cur.fetchone()['id']
+        conn.commit()
+        return job_id
+
+# Bind implementation to class so instances always have the method
+ArchiveExecutor._create_job_record = _create_job_record_impl
+
     
-    def _phase_0_init(self):
+def _phase_0_init(self):
         """Phase 0: Initialize directories."""
         self.log('INFO', '### Phase 0: Initializing directories ###')
         
@@ -409,7 +450,7 @@ def get_running_executor(job_id):
         else:
             self.log('INFO', f"Would ensure archive directory exists: {base_dir}")
     
-    def _phase_1_process_stacks(self):
+def _phase_1_process_stacks(self):
         """Phase 1: Process each stack sequentially."""
         self.log('INFO', '### Phase 1: Processing stacks sequentially (Stop -> Archive -> Start) ###')
         
@@ -427,7 +468,7 @@ def get_running_executor(job_id):
         
         return stack_metrics
     
-    def _process_single_stack(self, stack_name, stop_containers):
+def _process_single_stack(self, stack_name, stop_containers):
         """Process a single stack: stop -> archive -> start."""
         stack_start = utils.now()
         self.log('INFO', f"--- Starting backup for stack: {stack_name} ---")
@@ -484,7 +525,7 @@ def get_running_executor(job_id):
             archive_path=archive_path, archive_size=archive_size, duration=duration
         )
     
-    def _find_stack_path(self, stack_name):
+def _find_stack_path(self, stack_name):
         """Find the full path for a stack by name."""
         from app.stacks import discover_stacks
         stacks = discover_stacks()
@@ -493,7 +534,7 @@ def get_running_executor(job_id):
                 return stack['path']
         return None
     
-    def _is_stack_running(self, stack_name, stack_path):
+def _is_stack_running(self, stack_name, stack_path):
         """Check if any containers in the stack are running."""
         try:
             compose_file = find_compose_file(stack_path)
@@ -530,7 +571,7 @@ def get_running_executor(job_id):
             self.log('WARNING', f"Could not check running state for {stack_name}: {e}")
             return False
     
-    def _stop_stack(self, stack_name, compose_path):
+def _stop_stack(self, stack_name, compose_path):
         """Stop a docker compose stack."""
         stack_dir = compose_path.parent
         self.log('INFO', f"Stopping stack in {stack_dir}...")
@@ -574,7 +615,7 @@ def get_running_executor(job_id):
             self.log('ERROR', f"Exception stopping {stack_name}: {e}")
             return False
     
-    def _start_stack(self, stack_name, compose_path):
+def _start_stack(self, stack_name, compose_path):
         """Start a docker compose stack."""
         stack_dir = compose_path.parent
         self.log('INFO', f"Starting stack in {stack_dir}...")
@@ -613,7 +654,7 @@ def get_running_executor(job_id):
             self.log('ERROR', f"Exception starting {stack_name}: {e}")
             return False
     
-    def _create_archive(self, stack_name, stack_path):
+def _create_archive(self, stack_name, stack_path):
         """Create archive of stack directory."""
         timestamp = utils.local_now().strftime('%Y%m%d_%H%M%S')
         output_format = self.config.get('output_format', 'tar')
@@ -721,13 +762,13 @@ def get_running_executor(job_id):
                 self.log('ERROR', f"Exception copying folder: {e}")
                 return None, 0
     
-    def _should_run_retention(self):
+def _should_run_retention(self):
         """Check if retention should run."""
         if self.is_dry_run:
             return self.dry_run_config.get('run_retention', True)
         return True
     
-    def _phase_2_retention(self):
+def _phase_2_retention(self):
         """Phase 2: Run retention cleanup."""
         self.log('INFO', '### Phase 2: Running local retention cleanup ###')
         
@@ -753,7 +794,7 @@ def get_running_executor(job_id):
         except Exception as e:
             self.log('ERROR', f"Retention failed: {e}")
     
-    def _phase_3_finalize(self, start_time, stack_metrics):
+def _phase_3_finalize(self, start_time, stack_metrics):
         """Phase 3: Finalize job and send notifications."""
         self.log('INFO', '### Phase 3: Finalizing report and sending notification ###')
         
@@ -779,7 +820,7 @@ def get_running_executor(job_id):
         
         self.log('INFO', f"Archive job completed successfully in {duration}s")
     
-    def _log_disk_usage(self):
+def _log_disk_usage(self):
         """Log disk usage for archives directory."""
         cmd_parts = ['df', '-h', '--output=size,used,avail,pcent,target', ARCHIVE_BASE]
         self.log('INFO', f"Checking disk usage...")
@@ -804,7 +845,7 @@ def get_running_executor(job_id):
         except Exception as e:
             self.log('WARNING', f"Exception checking disk usage: {e}")
     
-    def _create_stack_metric(self, stack_name, status, start_time, was_running=None, 
+def _create_stack_metric(self, stack_name, status, start_time, was_running=None, 
                             archive_path=None, archive_size=0, duration=0, error=None):
         """Create stack metric dict."""
         # Check if stack has named volumes
@@ -824,7 +865,7 @@ def get_running_executor(job_id):
             'named_volumes': named_volumes  # List of volume names or None
         }
     
-    def _save_stack_metrics(self, stack_metrics):
+def _save_stack_metrics(self, stack_metrics):
         """Save stack metrics to database."""
         with get_db() as conn:
             cur = conn.cursor()
@@ -850,7 +891,7 @@ def get_running_executor(job_id):
                 ))
             conn.commit()
     
-    def _update_job_status(self, status, end_time=None, duration=None, total_size=None, error=None):
+def _update_job_status(self, status, end_time=None, duration=None, total_size=None, error=None):
         """Update job status in database."""
         log_text = '\n'.join(self.log_buffer)
         
@@ -868,10 +909,29 @@ def get_running_executor(job_id):
             """, (status, end_time, duration, total_size, error, log_text, self.job_id))
             conn.commit()
     
-    def _send_notification(self, stack_metrics, duration, total_size):
+def _send_notification(self, stack_metrics, duration, total_size):
         """Send notification via Apprise."""
         try:
             from app.notifications import send_archive_notification
             send_archive_notification(self.config, self.job_id, stack_metrics, duration, total_size)
         except Exception as e:
             self.log('WARNING', f"Failed to send notification: {e}")
+
+# Bind module-level implementations to ArchiveExecutor class so instance methods resolve correctly
+ArchiveExecutor._create_job_record = _create_job_record_impl
+ArchiveExecutor._phase_0_init = _phase_0_init
+ArchiveExecutor._phase_1_process_stacks = _phase_1_process_stacks
+ArchiveExecutor._process_single_stack = _process_single_stack
+ArchiveExecutor._find_stack_path = _find_stack_path
+ArchiveExecutor._is_stack_running = _is_stack_running
+ArchiveExecutor._stop_stack = _stop_stack
+ArchiveExecutor._start_stack = _start_stack
+ArchiveExecutor._create_archive = _create_archive
+ArchiveExecutor._should_run_retention = _should_run_retention
+ArchiveExecutor._phase_2_retention = _phase_2_retention
+ArchiveExecutor._phase_3_finalize = _phase_3_finalize
+ArchiveExecutor._log_disk_usage = _log_disk_usage
+ArchiveExecutor._create_stack_metric = _create_stack_metric
+ArchiveExecutor._save_stack_metrics = _save_stack_metrics
+ArchiveExecutor._update_job_status = _update_job_status
+ArchiveExecutor._send_notification = _send_notification

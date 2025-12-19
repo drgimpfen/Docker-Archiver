@@ -92,12 +92,14 @@ def run_startup_discovery():
             try:
                 from app.stacks import detect_bind_mismatches, get_mismatched_destinations
                 bind_warnings = detect_bind_mismatches()
+                # Deduplicate warnings while preserving order
+                bind_warnings = list(dict.fromkeys(bind_warnings)) if bind_warnings else []
                 if bind_warnings:
                     for w in bind_warnings:
                         print(f"[WARNING] {w}")
                 app.config['BIND_MISMATCH_WARNINGS'] = bind_warnings
                 # Also persist the exact container destinations that are mismatched so we can ignore them
-                ignored = get_mismatched_destinations()
+                ignored = list(dict.fromkeys(get_mismatched_destinations()))
                 app.config['IGNORED_BIND_DESTINATIONS'] = ignored
                 if ignored:
                     print(f"[INFO] Ignoring stacks under destinations: {ignored}")
