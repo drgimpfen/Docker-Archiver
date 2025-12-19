@@ -67,33 +67,36 @@ app.register_blueprint(api.bp)
 # Exempt API blueprint from CSRF (uses Bearer tokens)
 csrf.exempt(api.bp)
 
-# Startup debug: log detected mount paths and discovered stacks
-try:
-    mount_paths = get_stack_mount_paths()
-    print(f"[DEBUG] Auto-detected mount paths: {mount_paths}")
-    stacks = discover_stacks()
-    print(f"[INFO] Discovered {len(stacks)} stacks:")
-    for s in stacks:
-        print(f"  - {s['name']} (at {s['path']}, compose: {s.get('compose_file')})")
-
-    # Detect bind mount mismatches and persist warnings to app config for UI
+@app.before_first_request
+def perform_startup_discovery():
+    """Run stack/mount detection once when the app starts (per worker).
+    Using before_first_request avoids repeating these logs on every request."""
     try:
-        from app.stacks import detect_bind_mismatches, get_mismatched_destinations
-        bind_warnings = detect_bind_mismatches()
-        if bind_warnings:
-            for w in bind_warnings:
-                print(f"[WARNING] {w}")
-        app.config['BIND_MISMATCH_WARNINGS'] = bind_warnings
-        # Also persist the exact container destinations that are mismatched so we can ignore them
-        ignored = get_mismatched_destinations()
-        app.config['IGNORED_BIND_DESTINATIONS'] = ignored
-        if ignored:
-            print(f"[INFO] Ignoring stacks under destinations: {ignored}")
-    except Exception as e:
-        print(f"[DEBUG] Could not detect bind mismatches: {e}")
+        mount_paths = get_stack_mount_paths()
+        print(f"[DEBUG] Auto-detected mount paths: {mount_paths}")
+        stacks = discover_stacks()
+        print(f"[INFO] Discovered {len(stacks)} stacks:")
+        for s in stacks:
+            print(f"  - {s['name']} (at {s['path']}, compose: {s.get('compose_file')})")
 
-except Exception as e:
-    print(f"[ERROR] Startup mount/stack detection failed: {e}")
+        # Detect bind mount mismatches and persist warnings to app config for UI
+        try:
+            from app.stacks import detect_bind_mismatches, get_mismatched_destinations
+            bind_warnings = detect_bind_mismatches()
+            if bind_warnings:
+                for w in bind_warnings:
+                    print(f"[WARNING] {w}")
+            app.config['BIND_MISMATCH_WARNINGS'] = bind_warnings
+            # Also persist the exact container destinations that are mismatched so we can ignore them
+            ignored = get_mismatched_destinations()
+            app.config['IGNORED_BIND_DESTINATIONS'] = ignored
+            if ignored:
+                print(f"[INFO] Ignoring stacks under destinations: {ignored}")
+        except Exception as e:
+            print(f"[DEBUG] Could not detect bind mismatches: {e}")
+
+    except Exception as e:
+        print(f"[ERROR] Startup mount/stack detection failed: {e}")
 
 
 @app.context_processor
