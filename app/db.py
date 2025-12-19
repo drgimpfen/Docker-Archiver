@@ -229,6 +229,9 @@ def init_db():
                 ('cleanup_log_retention_days', '90'),
                 ('cleanup_dry_run', 'false'),
                 ('notify_on_cleanup', 'false'),
+                ('notify_report_verbosity', 'full'),
+                ('notify_attach_log', 'false'),
+                ('notify_attach_log_on_failure', 'false'),
                 ('app_version', '0.6.0')
             ON CONFLICT (key) DO NOTHING;
         """)

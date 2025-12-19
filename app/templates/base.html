@@ -202,20 +202,20 @@
                         <h6>Job Information</h6>
                         <table class="table table-sm">
                             <tr><th width="150">Job ID:</th><td>#${job.id}</td></tr>
-                            <tr><th>Archive:</th><td>${job.archive_name || 'N/A'}</td></tr>
-                            <tr><th>Type:</th><td>${job.job_type} ${job.is_dry_run ? '<span class="badge bg-secondary">DRY RUN</span>' : ''}</td></tr>
-                            <tr><th>Status:</th><td><span class="badge bg-${job.status === 'success' ? 'success' : (job.status === 'running' ? 'info' : 'danger')}">${job.status}</span></td></tr>
-                            <tr><th>Triggered By:</th><td>${job.triggered_by}</td></tr>
+                            <tr><th>Archive:</th><td id="job-archive-name">${job.archive_name || 'N/A'}</td></tr>
+                            <tr><th>Type:</th><td id="job-type">${job.job_type} ${job.is_dry_run ? '<span class="badge bg-secondary">DRY RUN</span>' : ''}</td></tr>
+                            <tr><th>Status:</th><td><span id="job-status-badge" class="badge bg-${job.status === 'success' ? 'success' : (job.status === 'running' ? 'info' : 'danger')}">${job.status}</span></td></tr>
+                            <tr><th>Triggered By:</th><td id="job-triggered-by">${job.triggered_by}</td></tr>
                         </table>
                     </div>
                     <div class="col-md-6">
                         <h6>Timing & Size</h6>
                         <table class="table table-sm">
-                            <tr><th width="150">Start Time:</th><td>${job.start_time || 'N/A'}</td></tr>
-                            <tr><th>End Time:</th><td>${job.end_time || 'N/A'}</td></tr>
-                            <tr><th>Duration:</th><td>${job.duration_seconds !== null && job.duration_seconds !== undefined ? job.duration_seconds + 's' : 'N/A'}</td></tr>
-                            <tr><th>Total Size:</th><td>${job.total_size_bytes ? formatBytes(job.total_size_bytes) : 'N/A'}</td></tr>
-                            <tr><th>Reclaimed:</th><td>${job.reclaimed_bytes ? formatBytes(job.reclaimed_bytes) : 'N/A'}</td></tr>
+                            <tr><th width="150">Start Time:</th><td id="job-start-time">${job.start_time || 'N/A'}</td></tr>
+                            <tr><th>End Time:</th><td id="job-end-time">${job.end_time || 'N/A'}</td></tr>
+                            <tr><th>Duration:</th><td id="job-duration">${job.duration_seconds !== null && job.duration_seconds !== undefined ? job.duration_seconds + 's' : 'N/A'}</td></tr>
+                            <tr><th>Total Size:</th><td id="job-total-size">${job.total_size_bytes ? formatBytes(job.total_size_bytes) : 'N/A'}</td></tr>
+                            <tr><th>Reclaimed:</th><td id="job-reclaimed">${job.reclaimed_bytes ? formatBytes(job.reclaimed_bytes) : 'N/A'}</td></tr>
                         </table>
                     </div>
                 </div>
@@ -245,7 +245,7 @@
                                 <th style="width: 80px;">Actions</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody id="job-metrics-body">
                 `;
                 
                 metrics.forEach(m => {
