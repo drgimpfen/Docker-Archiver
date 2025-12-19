@@ -21,7 +21,8 @@
         <div>
             <strong>Bind mount mismatches detected</strong>
             <div class="mt-2">
-                <div>{{ bind_warnings[0] }}</div>
+                {# Show a cleaned primary message without the leading emoji and the redundant prefix #}
+                <div>{{ bind_warnings[0] | replace('⚠️ ', '') | replace('Bind mount mismatch: ', '') }}</div>
                 {% if bind_warnings|length > 1 %}
                 <details class="mt-2" style="color: #ddd;">
                     <summary style="cursor: pointer;">Show all details</summary>

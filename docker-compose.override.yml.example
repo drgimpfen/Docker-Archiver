@@ -2,7 +2,8 @@ services:
   app:
     volumes:
       # Development stack directories (adjust to your setup)
-      - /opt/stacks:/local/stacks
+      # Recommended: use identical host:container paths (e.g., /opt/stacks:/opt/stacks)
+      - /opt/stacks:/opt/stacks
       # Add more as needed:
-      # - /srv/docker/stacks:/local/srvstacks
-      # - /home/user/docker:/local/userdocker
+      # - /srv/docker/stacks:/srv/docker/stacks
+      # - /home/user/docker:/home/user/docker
