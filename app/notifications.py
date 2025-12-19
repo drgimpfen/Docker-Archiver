@@ -150,7 +150,7 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
 
         body = f"""
 {css}
-<div style='font-family: Arial, Helvetica, sans-serif; max-width:800px; margin:0 auto; color:#222;'>
+<div style='font-family: Arial, Helvetica, sans-serif; max-width:800px; margin:0; text-align:left; color:#222;'>
   <h2 style='margin-bottom:6px;'>{status_emoji} Archive job completed: <strong>{archive_name}</strong></h2>
   <p class='da-small'><strong>Stacks:</strong> {success_count}/{stack_count} successful &nbsp;|&nbsp; <strong>Total size:</strong> {size_str} &nbsp;|&nbsp; <strong>Duration:</strong> {duration_str}</p>
 """
