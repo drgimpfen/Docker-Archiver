@@ -118,6 +118,24 @@ The application scans `/local/*` directories (max 1 level deep):
 - Subdirectories: `/local/stacks/app1/compose.yml` → Stack: `app1`
 - Multiple mounts: Each `/local/*` mount point is scanned independently
 
+### ⚠️ Important: Bind Mounts Required
+
+**Stack directories MUST use bind mounts** (not named volumes):
+
+✅ **Correct:**
+```yaml
+- /opt/stacks:/local/stacks  # Bind mount (host:container)
+```
+
+❌ **Incorrect:**
+```yaml
+- my-volume:/local/stacks    # Named volume - will NOT work
+```
+
+**Why?** When Docker Archiver executes `docker compose` commands to stop/start stacks, it needs to resolve relative paths in your stack's compose files (like `./data` or `./config`) correctly. The archiver automatically detects the host path from bind mount configuration. Named volumes cannot be resolved this way.
+
+**Note:** Named volumes *within* your stack's compose.yml (like `postgres_data:`) work perfectly fine - this requirement only applies to mounting the stack directories into the archiver container.
+
 ## Configuration
 
 ### Environment Variables
