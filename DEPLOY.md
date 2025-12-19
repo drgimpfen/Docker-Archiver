@@ -28,19 +28,18 @@ DB_PASSWORD=your-secure-db-password
 SECRET_KEY=your-random-secret-key-here
 APP_PORT=8080
 ARCHIVE_DIR=/mnt/archives
-STACKS_DIR_1=/opt/stacks
 ```
 
 ### 3. Configure Volume Mounts
 
-Edit `docker-compose.yml` to match your stack locations:
+Add your stack directory mounts to `docker-compose.yml`. The application will automatically detect them:
 
 ```yaml
 volumes:
   - /var/run/docker.sock:/var/run/docker.sock
   - /mnt/backups:/archives
-  - /opt/stacks:/local/stacks
-  - /srv/dockge:/local/dockge
+  - /opt/stacks:/opt/stacks        # ← Auto-detected
+  - /home/user/docker:/home/user/docker  # ← Auto-detected
 ```
 
 ### 4. Start Services

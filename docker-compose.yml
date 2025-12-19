@@ -37,11 +37,17 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Archive output directory (bind mount - adjust to your setup)
       - ./archives:/archives
-      # Stack directories - add your stack locations here:
-      # Example: If your stacks are in /opt/stacks, add:
-      # - /opt/stacks:/local/stacks
-      # Example: If you use Dockge in /opt/dockge/stacks:
-      # - /opt/dockge/stacks:/local/dockge
+      # Stack directories - automatically detected from volume mounts
+      # Add bind mounts for your stack directories here
+      # The container will automatically scan these for Docker Compose files
+      # Examples for different setups:
+      # - /opt/stacks:/opt/stacks                    # Default location
+      # - /srv/docker/stacks:/srv/docker/stacks      # Systemd/docker-compose location
+      # - /home/user/docker:/home/user/docker        # User home directory
+      #
+      # Add your stack directory mounts here:
+      - /opt/stacks:/opt/stacks
+      - /home/user/docker:/home/user/docker
     ports:
       - "8080:8080"
     depends_on:

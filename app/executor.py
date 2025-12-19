@@ -38,6 +38,60 @@ class ArchiveExecutor:
     
     def _get_host_path_from_container(self, stack_name, stack_dir):
         """
+        Get the host path for a stack directory.
+        
+        First tries to determine from mount configuration (DOCKER_STACK_PATHS),
+        then falls back to inspecting running containers.
+        
+        Args:
+            stack_name: Name of the stack
+            stack_dir: Path to stack directory inside this container
+            
+        Returns:
+            Tuple of (host_path, volume_names) where:
+            - host_path: Host path for the stack directory
+            - volume_names: List of named volumes found
+        """
+        # First try: Use mount configuration
+        host_path = self._get_host_path_from_mount_config(stack_dir)
+        if host_path != stack_dir:
+            self.log('INFO', f"Found host path from mount config: {host_path}")
+            # Still need to check for named volumes from containers
+            named_volumes = self._get_named_volumes_from_container(stack_name)
+            return host_path, named_volumes
+        
+        # Fallback: Try container inspection (old method)
+        self.log('DEBUG', f"Mount config didn't help, trying container inspection")
+        return self._get_host_path_from_container_inspect(stack_name, stack_dir)
+    
+    def _get_host_path_from_mount_config(self, container_path):
+        """
+        Get the host path by checking if container_path is in STACKS_DIR.
+        Since we assume host and container paths are identical, we just verify
+        the path is configured in STACKS_DIR.
+        """
+        from app.stacks import get_stack_mount_paths
+        
+        stack_paths = get_stack_mount_paths()
+        container_path = Path(container_path)
+        
+        # Check if container_path is under any configured stack directory
+        for stack_dir in stack_paths:
+            stack_dir_path = Path(stack_dir)
+            try:
+                # Check if container_path is under this stack directory
+                container_path.relative_to(stack_dir_path)
+                # If we get here, it's under the stack directory
+                # Since host and container paths are identical, return as-is
+                return container_path
+            except ValueError:
+                continue
+        
+        # Not under any configured stack directory, return as-is (backward compatibility)
+        return container_path
+    
+    def _get_host_path_from_container_inspect(self, stack_name, stack_dir):
+        """
         Get the host path for a stack directory by inspecting running containers.
         
         This finds containers from the stack and checks their bind mounts to determine
@@ -192,6 +246,60 @@ class ArchiveExecutor:
         except Exception as e:
             self.log('WARNING', f"Could not read /proc/self/mountinfo: {e}")
             return container_path
+    
+    def _get_named_volumes_from_container(self, stack_name):
+        """
+        Get named volumes used by containers in a stack.
+        
+        Args:
+            stack_name: Name of the stack
+            
+        Returns:
+            List of named volume names
+        """
+        try:
+            # Get list of containers for this stack
+            result = subprocess.run(
+                ['docker', 'ps', '-q', '-f', f'label=com.docker.compose.project={stack_name}'],
+                capture_output=True, text=True, timeout=10
+            )
+            
+            if result.returncode != 0 or not result.stdout.strip():
+                return []
+            
+            container_ids = result.stdout.strip().split('\n')
+            named_volumes = []
+            
+            # Inspect containers to find named volumes
+            for container_id in container_ids:
+                inspect_result = subprocess.run(
+                    ['docker', 'inspect', container_id],
+                    capture_output=True, text=True, timeout=10
+                )
+                
+                if inspect_result.returncode != 0:
+                    continue
+                
+                inspect_data = json.loads(inspect_result.stdout)
+                if not inspect_data:
+                    continue
+                
+                container_data = inspect_data[0]
+                mounts = container_data.get('Mounts', [])
+                
+                # Collect named volumes
+                for mount in mounts:
+                    mount_type = mount.get('Type', '')
+                    if mount_type == 'volume':
+                        volume_name = mount.get('Name', '')
+                        if volume_name and volume_name not in named_volumes:
+                            named_volumes.append(volume_name)
+            
+            return named_volumes
+            
+        except Exception as e:
+            self.log('WARNING', f"Error inspecting containers for named volumes: {e}")
+            return []
     
     def log(self, level, message):
         """Add log entry with timestamp."""
@@ -400,7 +508,7 @@ class ArchiveExecutor:
                 self.stack_volumes = {}
             self.stack_volumes[stack_name] = named_volumes
         
-        # Execute docker compose in the host stack directory (like Dockge does)
+        # Execute docker compose in the host stack directory
         # This way .env and compose.yml are automatically found
         cmd_parts = ['docker', 'compose', 'down']
         self.log('INFO', f"Starting command: Stopping {stack_name} (docker compose down)")
@@ -412,7 +520,7 @@ class ArchiveExecutor:
         try:
             result = subprocess.run(
                 cmd_parts, 
-                cwd=str(host_stack_dir),  # Execute in host stack directory
+                cwd=str(host_stack_dir),  # Execute in host stack directory (now mounted as /opt/stacks)
                 capture_output=True, 
                 text=True, 
                 timeout=120
@@ -436,7 +544,7 @@ class ArchiveExecutor:
         # If not cached (e.g., stack wasn't running), use container path
         host_stack_dir = self.stack_host_paths.get(stack_name, stack_dir)
         
-        # Execute docker compose in the host stack directory (like Dockge does)
+        # Execute docker compose in the host stack directory
         # Docker Compose will automatically:
         # - Load .env file from current directory
         # - Find compose.yml/docker-compose.yml in current directory
@@ -451,7 +559,7 @@ class ArchiveExecutor:
         try:
             result = subprocess.run(
                 cmd_parts,
-                cwd=str(host_stack_dir),  # Execute in host stack directory
+                cwd=str(host_stack_dir),  # Execute in host stack directory (now mounted as /opt/stacks)
                 capture_output=True,
                 text=True,
                 timeout=120

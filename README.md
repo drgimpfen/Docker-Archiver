@@ -86,13 +86,31 @@ On first visit, you'll be prompted to create an admin account.
 5. Choose output format
 6. Save and run manually or wait for schedule
 
-## Volume Mounts
+## Stack Directory Configuration
 
-**Important:** Stack directories are configured in `docker-compose.yml`, not via environment variables.
+**Easy Setup:** Just add your stack directory mounts to `docker-compose.yml` - the application will automatically detect them!
 
-### Required Configuration
+### Automatic Detection (Recommended)
 
-Edit `docker-compose.yml` and add your stack directories:
+The application automatically detects stack directories from your volume mounts:
+
+```yaml
+services:
+  app:
+    volumes:
+      # These will be auto-detected as stack directories:
+      - /opt/stacks:/opt/stacks
+      - /home/user/docker:/home/user/docker
+```
+
+**What gets detected:**
+- ✅ Bind mounts (host directories mounted into container)
+- ❌ Named volumes (ignored)
+- ❌ System mounts like `/var/run/docker.sock`, `/archives` (ignored)
+
+### Volume Mounts
+
+Edit `docker-compose.yml` and add volume mounts for your stack directories:
 
 ```yaml
 services:
@@ -104,19 +122,24 @@ services:
       # Archive output directory (adjust path as needed)
       - ./archives:/archives
       
-      # Stack directories - ADD YOUR PATHS HERE:
-      # Each mount point under /local/ will be scanned for stacks
-      - /opt/stacks:/local/stacks           # Example: Subdirectories scanned
-      - /opt/dockge/stacks:/local/dockge    # Example: Dockge stacks
-      # - /srv/more-stacks:/local/more      # Add more as needed
+      # Stack directories - ADD YOUR MOUNTS HERE:
+      - /opt/stacks:/opt/stacks
+      - /srv/docker/stacks:/srv/docker/stacks
+      - /home/user/docker:/home/user/docker
 ```
 
 ### How Stack Discovery Works
 
-The application scans `/local/*` directories (max 1 level deep):
-- Direct compose file: `/local/mystack/compose.yml` → Stack: `mystack`
-- Subdirectories: `/local/stacks/app1/compose.yml` → Stack: `app1`
-- Multiple mounts: Each `/local/*` mount point is scanned independently
+The application scans all configured stack directories:
+- **Auto-detected mounts:** All bind-mounted directories (except system paths)
+- **Manual configuration:** Directories specified in `STACKS_DIR`
+- **Discovery logic:**
+  - Direct compose file: `/opt/stacks/mystack/compose.yml` → Stack: `mystack`
+  - Subdirectories: `/opt/stacks/apps/app1/compose.yml` → Stack: `app1`
+  - Multiple directories: Each configured path is scanned independently
+  - Max depth: 2 levels (configurable directory + stack directory)
+
+**Note:** Host and container paths must be identical. The archiver assumes `/opt/stacks` on host maps to `/opt/stacks` in container.
 
 ### ⚠️ Important: Bind Mounts Required
 
@@ -127,15 +150,15 @@ The application scans `/local/*` directories (max 1 level deep):
 services:
   app:
     volumes:
-      - /opt/stacks:/local/stacks  # Bind mount (host:container)
+      - /opt/stacks:/opt/stacks  # Bind mount (host:container - same path)
 ```
 
 ❌ **Incorrect:**
 ```yaml
-- my-volume:/local/stacks    # Named volume - will NOT work
+- my-volume:/opt/stacks    # Named volume - will NOT work
 ```
 
-**Why?** When Docker Archiver executes `docker compose` commands to stop/start stacks, these commands run on the Docker host (not inside the container). Relative paths in your stack's compose files (like `./library` or `./postgres`) must be resolved from the **host's perspective**.
+**How it works:** Docker Archiver uses the configured `STACKS_DIR` paths directly. When it finds a stack at `/opt/stacks/immich`, it uses `/opt/stacks/immich` as the working directory for `docker compose` commands (since host and container paths are identical).
 
 **How it works:** Docker Archiver automatically detects the host path by reading `/proc/self/mountinfo`. When it sees `/local/stacks/immich` inside the container, it looks up the corresponding host path (e.g., `/opt/stacks/immich`) and uses that for `docker compose --project-directory`.
 
