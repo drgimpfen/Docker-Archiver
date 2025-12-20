@@ -256,11 +256,29 @@ def jobs_events():
                 except Exception:
                     yield ': keepalive\n\n'
                     continue
+                # Debug log when JOB_EVENTS_DEBUG enabled
+                try:
+                    import os
+                    if os.environ.get('JOB_EVENTS_DEBUG'):
+                        print(f"[SSE] Sending to client: {msg}")
+                except Exception:
+                    pass
                 yield f"data: {msg}\n\n"
         finally:
             unregister_global_listener(q)
 
     return Response(stream_with_context(gen()), mimetype='text/event-stream')
+
+
+# Debug endpoint for SSE internals (secured by api_auth_required)
+@bp.route('/_debug/sse')
+@api_auth_required
+def debug_sse():
+    try:
+        from app.sse import get_status
+        return jsonify({'sse': get_status()})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @bp.route('/jobs/<int:job_id>/log/tail')

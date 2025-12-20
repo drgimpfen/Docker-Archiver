@@ -282,3 +282,22 @@ def send_global_event(event_type, payload):
     else:
         if JOB_EVENTS_DEBUG:
             print("[SSE] Redis not available - global event was delivered locally but not published to Redis")
+
+
+def get_status():
+    """Return useful debug information about SSE internal state (for diagnostics)."""
+    try:
+        status = {
+            'use_redis': bool(_use_redis),
+            'redis_url_set': bool(REDIS_URL),
+            'global_listeners': len(_global_listeners),
+            'redis_connected': None
+        }
+        if _redis_client:
+            try:
+                status['redis_connected'] = _redis_client.ping()
+            except Exception:
+                status['redis_connected'] = False
+        return status
+    except Exception:
+        return {'error': 'could not retrieve status'}

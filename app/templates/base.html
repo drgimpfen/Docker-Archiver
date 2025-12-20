@@ -777,10 +777,17 @@
                     btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Starting';
                     try {
                         const resp = await fetch(`/api/archives/${archiveId}/run`, { method: 'POST' });
+                        if (resp.status === 409) {
+                            // Archive already running
+                            const d = await resp.json().catch(()=>null);
+                            const msg = d && d.error ? d.error : 'Archive already has a running job';
+                            alert(msg);
+                            return;
+                        }
                         const data = await resp.json();
                         if (data && data.success) {
-                            // We rely on SSE to insert the job row when the server/worker publishes it.
-                            // No UI popup to avoid accidental duplicate starts.
+                            // Reload the page to ensure the new job appears immediately in the list
+                            window.location.reload();
                         } else {
                             alert('Failed to start archive: ' + (data && data.error ? data.error : 'unknown'));
                         }
