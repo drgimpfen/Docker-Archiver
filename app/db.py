@@ -232,7 +232,7 @@ def init_db():
                 ('notify_report_verbosity', 'full'),
                 ('notify_attach_log', 'false'),
                 ('notify_attach_log_on_failure', 'false'),
-                ('app_version', '0.6.0')
+                ('app_version', '0.7.0')
             ON CONFLICT (key) DO NOTHING;
         """)
         

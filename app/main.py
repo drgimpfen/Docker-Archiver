@@ -4,7 +4,7 @@ Main Flask application with Blueprints.
 import os
 import threading
 
-__version__ = '0.6.5'
+__version__ = '0.7.0'
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_file
 from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
