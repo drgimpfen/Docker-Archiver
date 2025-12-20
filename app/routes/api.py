@@ -201,9 +201,6 @@ def download_log(job_id):
     return send_file(log_path, as_attachment=True, download_name=log_filename)
 
 
-@bp.route('/jobs/<int:job_id>/log/tail')
-@api_auth_required
-def tail_log(job_id):
 
 
 @bp.route('/jobs/<int:job_id>/events')
@@ -237,6 +234,8 @@ def job_events(job_id):
     return Response(stream_with_context(gen()), mimetype='text/event-stream')
 
 
+@bp.route('/jobs/<int:job_id>/log/tail')
+@api_auth_required
 def tail_log(job_id):
     """Return incremental log lines for a job. Query params: last_line (int, default=0), stack (optional filter).
 
