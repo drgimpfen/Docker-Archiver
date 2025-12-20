@@ -18,7 +18,7 @@
 - 🔄 **GFS Retention** - Grandfather-Father-Son retention policy (keep X days/weeks/months/years)
 - 🧹 **Automatic Cleanup** - Scheduled cleanup of orphaned archives, old logs, and temp files
 - 🎯 **Dry Run Mode** - Test archive operations without making changes
-- 📊 **Job History & Live Logs** - Detailed logs and metrics for all archive/retention runs; **Job Details** includes live log tailing (polls `/api/jobs/<id>/log/tail`) so you can follow running jobs in real time.
+- 📊 **Job History & Live Logs** - Detailed logs and metrics for all archive/retention runs; **Job Details** includes live log tailing (polls `/api/jobs/<id>/log/tail`) and supports EventSource streaming for near real-time updates. The modal offers terminal-like controls (search, **Pause/Resume**, **Copy**, **Download**, **Line numbers**, **Follow**) for easier log inspection and troubleshooting.
 - 🔔 **Smart Notifications** - Apprise integration with customizable subject tags and HTML/text format
 - 🌓 **Dark/Light Mode** - Modern Bootstrap UI with theme toggle
 - 🔐 **User Authentication** - Secure login system (role-based access coming soon)
@@ -50,6 +50,9 @@ See **How Stack Discovery Works** below for full details on how stack directorie
 git clone https://github.com/drgimpfen/Docker-Archiver.git
 cd Docker-Archiver
 cp .env.example .env
+
+# Optional: copy the override example for local development (bind-mounts / overrides)
+cp docker-compose.override.yml.example docker-compose.override.yml
 ```
 
 Edit `.env` and set:
@@ -75,7 +78,7 @@ The application will be available at **http://localhost:8080**
 >
 > **Note:** `--ff-only` prevents accidental merge commits; `--no-deps` + service target (`app`) limits disruption to other services.
 
-> **Note:** Stack directories must be configured in `docker-compose.yml` as volume mounts (see below).
+> **Note:** Stack directories must be configured as **bind mounts** — typically in `docker-compose.yml` for production, or in `docker-compose.override.yml` for local development (see examples below).
 
 ### 3. Initial Setup
 
@@ -92,9 +95,9 @@ On first visit, you'll be prompted to create an admin account.
 
 ## Stack Directory Configuration
 
-**Easy Setup:** Just add your stack directory mounts to `docker-compose.yml` - the application will automatically detect them!
+**Easy Setup (MANDATORY):** Add your stack directory **bind mounts** to `docker-compose.yml` with **identical host:container paths** (e.g., `- /opt/stacks:/opt/stacks`). This is mandatory — if stacks are not mounted as identical bind mounts the archiver cannot discover them and jobs will fail.
 
-### Automatic Detection (Recommended)
+### Automatic Detection
 
 Docker Archiver auto-detects stack directories from bind mounts that are mounted into the archiver container. Detection is performed using (in order): `docker inspect` on the running container, and `/proc/self/mountinfo` as a robust fallback.
 
@@ -137,6 +140,34 @@ services:
       - /home/user/docker:/home/user/docker
 ```
 
+### Local development (docker-compose.override.yml)
+
+For local or development-specific mounts, put your bind mounts in `docker-compose.override.yml`. Docker Compose automatically merges this file with `docker-compose.yml` when you run `docker compose up`.
+
+If you run Docker Archiver with multiple workers and want real-time SSE events to work across workers, run a Redis service and configure `REDIS_URL` (example using `docker-compose.override.yml` below).
+
+**Required:** Host and container paths for your stack directory bind mounts **must be identical** (e.g., `- /opt/stacks:/opt/stacks`). Example `docker-compose.override.yml`:
+
+```yaml
+services:
+  app:
+    volumes:
+      - /opt/stacks:/opt/stacks    # Host and container paths are the same
+      - ./archives:/archives
+```
+
+Using identical paths (host:container) is **mandatory** to ensure the archiver finds compose files and runs `docker compose` from the expected working directory.
+
+### Redis is included by default
+
+Redis is now included by default in `docker-compose.yml` to enable cross-worker SSE event streaming out of the box. The service is a lightweight `redis:7-alpine` container and stores data in a bind-mounted folder at `./redis-data` so your Redis data is persisted next to the project.
+
+If you need to disable Redis for a particular environment, remove the `redis` service from your compose file and unset `REDIS_URL` (or remove it from the `app` environment). Otherwise the app will automatically use the bundled Redis instance and set `REDIS_URL` to `redis://redis:6379/0` by default.
+
+After changing compose files restart the app: `docker compose up -d --build app`. Verify `REDIS_URL` appears in the app logs on startup; the app automatically uses Redis when available.
+
+**Recommendation:** It's sensible to include and run a lightweight Redis service by default (the override example adds `redis:7-alpine`). Running Redis even on single-node development setups makes the deployment future-proof (enables cross-worker SSE when you scale to multiple Gunicorn workers) and adds minimal resource overhead. If you prefer to omit Redis, remove the `redis` service from your compose file and either unset `REDIS_URL` or remove it from the `app` environment to disable cross-worker streaming.
+
 ### How Stack Discovery Works
 
 Discovery follows these rules:
@@ -152,6 +183,20 @@ Discovery follows these rules:
 **Fallback & compatibility**: If no bind mounts are detected the legacy `/local` path will be scanned to maintain compatibility with older deployments.
 
 **Important:** Host and container paths must match for bind mounts (e.g. `- /opt/stacks:/opt/stacks`). The archiver uses the container-side path it detects as the working directory for `docker compose` commands.
+
+<a name="troubleshooting-bind-mount-warnings"></a>
+### Troubleshooting bind-mount warnings
+
+> Note: The real-time EventSource (SSE) stream is in-memory by default and is only guaranteed to work when the job runs in the same process that serves the SSE request. For multi-worker deployments use a central pub/sub (e.g., Redis) and set `REDIS_URL` in your environment to enable cross-worker event streaming.
+
+If you see a dashboard warning about bind-mount mismatches or a job aborting with a **"No valid stacks found"** message, check the following:
+
+- Inspect container mounts on the host: `docker inspect <container>` or `docker inspect <container> --format '{{json .Mounts}}'`. Verify entries show `"Type": "bind"` and that the **host/source path and container/destination path are identical**.
+- Ensure you defined the bind mounts in `docker-compose.yml` or `docker-compose.override.yml` and that you copied `docker-compose.override.yml.example` to `docker-compose.override.yml` for local development when needed.
+- After changing compose files, restart the app service: `docker compose up -d --build app` and check the Dashboard for the warning to disappear.
+- Check application logs and the job log: the job log will include an explicit message when no valid stacks are found explaining that bind mounts are mandatory.
+
+If the issue persists, open an issue and include your mount output and relevant logs so we can help troubleshoot.
 
 ### ⚠️ Important: Bind Mounts Required
 
@@ -179,21 +224,21 @@ services:
 ---
 
 <a name="bind-mounts"></a>
-### Bind mounts — recommended configuration
+### Bind mounts — required configuration
 
-For reliable discovery and correct `docker compose` execution, the host path and container path of your stack directory bind mounts should be identical (for example: `- /opt/stacks:/opt/stacks`).
+For reliable discovery and correct `docker compose` execution, the host path and container path of your stack directory bind mounts **must be identical** (for example: `- /opt/stacks:/opt/stacks`).
 
 Why this matters:
 
 - Docker Archiver runs `docker compose` commands inside the container and expects to find the stack's compose files at the same path it discovered. If the host and container paths differ, the app tries to infer the host path from mounts, but this can lead to ambiguities or failures when running `docker compose` (e.g., when the host path is not accessible inside the container).
 - Using identical paths avoids edge cases and ensures that archive and docker-compose commands run from the correct working directory.
 
-**Bind-mount mismatch detection:** The archiver will now detect bind-mount mismatches (host path != container path). When mismatches are detected, the dashboard shows a prominent warning and those mounts may be ignored for discovery; if an archive job resolves to no valid stacks because of ignored mounts, the job will abort early and be marked as failed with a clear log message ("No valid stacks found"). To avoid this, prefer identical host:container bind mounts.
+**Bind-mount mismatch detection:** The archiver will now detect bind-mount mismatches (host path != container path). When mismatches are detected, the dashboard shows a prominent warning and those mounts will be ignored for discovery; if an archive job resolves to no valid stacks because of ignored mounts, the job will abort early and be marked as failed with a clear log message ("No valid stacks found"). To avoid this, **host:container bind mounts must be identical**.
 
 Examples:
 
-- Recommended: `- /opt/stacks:/opt/stacks` (host and container paths match)
-- Not recommended: `- /home/stacks:/opt/stacks` or `- /opt/stacks:/local/stacks` (host and container paths differ)
+- Required: `- /opt/stacks:/opt/stacks` (host and container paths match)
+- Not supported: `- /home/stacks:/opt/stacks` or `- /opt/stacks:/local/stacks` (host and container paths differ)
 
 For more details and troubleshooting tips, see the dashboard warning messages or open an issue in the project repository.
 
@@ -211,8 +256,11 @@ For more details and troubleshooting tips, see the dashboard warning messages or
 | `SMTP_USER` | - | No | SMTP username |
 | `SMTP_PASSWORD` | - | No | SMTP password/app-password |
 | `SMTP_FROM` | - | No | Email sender address |
+| `REDIS_URL` | - | No | Optional Redis URL (e.g., `redis://localhost:6379/0`) to enable cross-worker SSE event streaming |
 
 > **Note:** Port (8080) and mount paths are configured in `docker-compose.yml`, not via environment variables.
+
+> **Note:** If you deploy with multiple workers (Gunicorn, etc.) and want real-time SSE events to work across workers, configure `REDIS_URL` and install the `redis` Python package (already optional in `requirements.txt`).
 
 ### Retention Policy
 
@@ -378,6 +426,14 @@ exclude_paths:
 ```
 
 **Note:** The `/api/*` endpoints have their own authentication via Bearer tokens. The download endpoint (`/download/<token>`) uses time-limited tokens and doesn't require session authentication.
+
+### Reverse proxy examples
+
+For readable, centralized reverse proxy guidance and ready-to-copy examples for Traefik, Nginx / Nginx Proxy Manager, and Caddy, see `REVERSE_PROXY.md`.
+
+> See: [REVERSE_PROXY.md](./REVERSE_PROXY.md) — includes SSE/WebSocket tips and recommended auth exclusions.
+
+
 
 ## Development
 

@@ -185,7 +185,7 @@ def index():
         archives_list = cur.fetchall()
         
         # Dashboard statistics
-        total_stacks_configured = len(archives_list)
+        total_archives_configured = len(archives_list)
         active_schedules = sum(1 for a in archives_list if a['schedule_enabled'])
         
         # Last 24h jobs
@@ -279,7 +279,7 @@ def index():
         disk=disk,
         disk_status=disk_status,
         total_archives_size=total_archives_size,
-        total_stacks_configured=total_stacks_configured,
+        total_archives_configured=total_archives_configured,
         active_schedules=active_schedules,
         jobs_last_24h=jobs_last_24h,
         next_scheduled=next_scheduled,

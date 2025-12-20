@@ -34,6 +34,8 @@ instance/
 # Docker Compose Override (for local development)
 docker-compose.override.yml
 
+# Redis data directory (local bind mount)
+redis-data/
 # Database
 *.db
 *.sqlite

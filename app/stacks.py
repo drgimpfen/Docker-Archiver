@@ -234,8 +234,10 @@ def detect_bind_mismatches():
                 dst_norm = dst
 
             if src_norm != dst_norm:
-                # Return a concise message (do not include the 'Recommended' sentence; template shows it)
-                warnings.append(f"Host path '{src_norm}' is mounted as container path '{dst_norm}'.")
+                # Return a concise message with an actionable hint
+                warnings.append(
+                    f"Host path '{src_norm}' is mounted as container path '{dst_norm}'. Host and container paths must be identical; bind mounts are mandatory and mismatched mounts will be ignored for discovery."
+                )
     except Exception:
         pass
 

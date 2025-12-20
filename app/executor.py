@@ -12,6 +12,12 @@ from app.db import get_db
 from app import utils
 from app.stacks import validate_stack, find_compose_file
 from app import utils
+# SSE/event utilities (best-effort import; if missing, provide no-op)
+try:
+    from app.sse import send_event
+except Exception:
+    def send_event(job_id, event_type, payload):
+        pass
 
 
 ARCHIVE_BASE = '/archives'
@@ -337,6 +343,13 @@ class ArchiveExecutor:
         self.log_buffer.append(log_line)
         print(log_line)
 
+        # Emit SSE event for live listeners (best-effort)
+        try:
+            if self.job_id:
+                send_event(self.job_id, 'log', {'line': log_line})
+        except Exception:
+            pass
+
         # Also persist incrementally to the DB (append). Guard against any DB errors.
         try:
             if self.job_id:
@@ -376,8 +389,8 @@ class ArchiveExecutor:
                     # Ignore errors while resolving
                     continue
             if not valid_stacks:
-                self.log('ERROR', 'No valid stacks found for this archive (possible bind mount mismatches). Aborting job.')
-                self._update_job_status('failed', error='No valid stacks found')
+                self.log('ERROR', 'No valid stacks found for this archive — bind mounts are mandatory and host:container paths must be identical. Aborting job. See README "How Stack Discovery Works" and dashboard warnings for troubleshooting.')
+                self._update_job_status('failed', error='No valid stacks found (bind mounts mandatory; host:container paths must match)')
                 return self.job_id
         except Exception:
             pass
@@ -911,6 +924,12 @@ def _save_stack_metrics(self, stack_metrics):
                     metric.get('error')
                 ))
             conn.commit()
+
+        # Emit metrics event for listeners (best-effort)
+        try:
+            send_event(self.job_id, 'metrics', stack_metrics)
+        except Exception:
+            pass
     
 def _update_job_status(self, status, end_time=None, duration=None, total_size=None, error=None):
         """Update job status in database."""
@@ -929,6 +948,21 @@ def _update_job_status(self, status, end_time=None, duration=None, total_size=No
                 WHERE id = %s;
             """, (status, end_time, duration, total_size, error, log_text, self.job_id))
             conn.commit()
+
+        # Emit status/job metadata update for live clients
+        try:
+            job_meta = {
+                'id': self.job_id,
+                'status': status,
+                'start_time': None,
+                'end_time': end_time,
+                'duration_seconds': duration,
+                'total_size_bytes': total_size,
+                'reclaimed_bytes': None,
+            }
+            send_event(self.job_id, 'status', job_meta)
+        except Exception:
+            pass
     
 def _send_notification(self, stack_metrics, duration, total_size):
         """Send notification via Apprise."""

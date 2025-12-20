@@ -9,7 +9,7 @@ import threading
 from functools import wraps
 from datetime import datetime, timedelta
 from pathlib import Path
-from flask import Blueprint, request, jsonify, send_file
+from flask import Blueprint, request, jsonify, send_file, Response, stream_with_context
 from app.auth import login_required, get_current_user
 from app.db import get_db
 from app import utils
@@ -204,6 +204,40 @@ def download_log(job_id):
 @bp.route('/jobs/<int:job_id>/log/tail')
 @api_auth_required
 def tail_log(job_id):
+
+
+@bp.route('/jobs/<int:job_id>/events')
+@api_auth_required
+def job_events(job_id):
+    """SSE endpoint for job events. Streams JSON messages of the form:
+    {"type": "log" | "status" | "metrics", "data": {...}}
+    """
+    try:
+        from app.sse import register_event_listener, unregister_event_listener
+    except Exception:
+        return jsonify({'error': 'SSE not available in this deployment'}), 501
+
+    def gen():
+        q = register_event_listener(job_id)
+        try:
+            # Send initial keep-alive comment
+            yield ': connected\n\n'
+            while True:
+                try:
+                    msg = q.get(timeout=15)
+                except Exception:
+                    # keepalive
+                    yield ': keepalive\n\n'
+                    continue
+                # Send as raw data (client will JSON-parse)
+                yield f"data: {msg}\n\n"
+        finally:
+            unregister_event_listener(job_id, q)
+
+    return Response(stream_with_context(gen()), mimetype='text/event-stream')
+
+
+def tail_log(job_id):
     """Return incremental log lines for a job. Query params: last_line (int, default=0), stack (optional filter).
 
     Uses running ArchiveExecutor's in-memory buffer when available for live logs, otherwise falls back to stored job.log in the DB.
@@ -291,10 +325,20 @@ def tail_log(job_id):
     new_lines = lines[last_line:]
     new_last_line = total_lines
 
+    # Also return minimal job metadata so clients can update UI without an extra request
+    job_meta = {}
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, status, start_time, end_time, duration_seconds, total_size_bytes, reclaimed_bytes FROM jobs WHERE id = %s;", (job_id,))
+        row = cur.fetchone()
+        if row:
+            job_meta = dict(row)
+
     return jsonify({
         'lines': new_lines,
         'last_line': new_last_line,
-        'complete': complete
+        'complete': complete,
+        'job': job_meta
     })
 
 
