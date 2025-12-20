@@ -660,16 +660,20 @@
                             const payload = JSON.parse(e.data);
                             if (!payload || !payload.type) return;
                             if (payload.type === 'job' || payload.type === 'status') {
+                                // Normalize minimal fields
+                                const j = payload.data || {};
+                                if (j.start_time) j.start_time = String(j.start_time);
+
                                 // payload.data is a job summary
                                 // If the job row exists update it, otherwise insert it
-                                if (document.getElementById(`job-row-${payload.data.id}`)) {
-                                    updateJobRowFromJob(payload.data);
+                                if (document.getElementById(`job-row-${j.id}`)) {
+                                    updateJobRowFromJob(j);
                                 } else {
-                                    addOrInsertJobRow(payload.data);
+                                    addOrInsertJobRow(j);
                                 }
                             }
                         } catch (err) {
-                            // ignore
+                            console.error('Error handling jobs SSE message', err);
                         }
                     };
 
@@ -682,6 +686,23 @@
                     console.error('Failed to start Jobs SSE:', err);
                 }
             }
+
+            // Delegate click on job rows to ensure modal opens even if inline handlers fail
+            document.addEventListener('click', function(ev) {
+                try {
+                    const tr = ev.target.closest && ev.target.closest('tr[data-job-id]');
+                    if (!tr) return;
+                    // Avoid handling clicks on controls inside the row (buttons)
+                    if (ev.target.closest('button') || ev.target.closest('a')) return;
+                    const jobId = tr.getAttribute('data-job-id');
+                    if (!jobId) return;
+                    // Stop if a modal is already open for a different job
+                    if (window._currentJobId && String(window._currentJobId) === jobId) return;
+                    showJobDetails(parseInt(jobId, 10));
+                } catch (e) {
+                    console.error('Failed to handle row click delegation:', e);
+                }
+            });
 
             function stopJobsEventSource() {
                 if (window._jobsEventSource) {

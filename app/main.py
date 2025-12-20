@@ -73,20 +73,42 @@ startup_discovery_done = False
 startup_discovery_lock = threading.Lock()
 
 def run_startup_discovery():
-    """Run stack/mount detection once per process (guarded by a lock)."""
+    """Run stack/mount detection once per process (guarded by a lock).
+
+    To avoid noisy duplicate logs across multiple worker processes, we write a
+    container-local sentinel file to indicate that discovery logging has already
+    been performed; discovery still runs per-process but only the first process
+    emits the verbose logs.
+    """
     global startup_discovery_done
     if startup_discovery_done:
         return
     with startup_discovery_lock:
         if startup_discovery_done:
             return
+
+        # Determine whether this process should emit verbose logs
+        verbose = False
+        sentinel_log = '/tmp/da_startup_discovery_logged'
+        try:
+            fd = os.open(sentinel_log, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+            verbose = True
+        except FileExistsError:
+            verbose = False
+        except Exception:
+            verbose = True
+
         try:
             mount_paths = get_stack_mount_paths()
-            print(f"[DEBUG] Auto-detected mount paths: {mount_paths}")
+            if verbose:
+                print(f"[DEBUG] Auto-detected mount paths: {mount_paths}")
             stacks = discover_stacks()
-            print(f"[INFO] Discovered {len(stacks)} stacks:")
-            for s in stacks:
-                print(f"  - {s['name']} (at {s['path']}, compose: {s.get('compose_file')})")
+            if verbose:
+                print(f"[INFO] Discovered {len(stacks)} stacks:")
+                for s in stacks:
+                    print(f"  - {s['name']} (at {s['path']}, compose: {s.get('compose_file')})")
 
             # Detect bind mount mismatches and persist warnings to app config for UI
             try:
@@ -94,40 +116,60 @@ def run_startup_discovery():
                 bind_warnings = detect_bind_mismatches()
                 # Deduplicate warnings while preserving order
                 bind_warnings = list(dict.fromkeys(bind_warnings)) if bind_warnings else []
-                if bind_warnings:
-                    for w in bind_warnings:
-                        # Ensure multiline warnings are clearly prefixed in logs
-                        for line in str(w).splitlines():
-                            print(f"[WARNING] {line}")
                 app.config['BIND_MISMATCH_WARNINGS'] = bind_warnings
                 # Also persist the exact container destinations that are mismatched so we can ignore them
                 ignored = list(dict.fromkeys(get_mismatched_destinations()))
                 app.config['IGNORED_BIND_DESTINATIONS'] = ignored
-                if ignored:
+                if verbose and bind_warnings:
+                    for w in bind_warnings:
+                        # Ensure multiline warnings are clearly prefixed in logs
+                        for line in str(w).splitlines():
+                            print(f"[WARNING] {line}")
+                if verbose and ignored:
                     print(f"[INFO] Ignoring stacks under destinations: {ignored}")
             except Exception as e:
-                print(f"[DEBUG] Could not detect bind mismatches: {e}")
+                if verbose:
+                    print(f"[DEBUG] Could not detect bind mismatches: {e}")
 
         except Exception as e:
-            print(f"[ERROR] Startup mount/stack detection failed: {e}")
+            if verbose:
+                print(f"[ERROR] Startup mount/stack detection failed: {e}")
         finally:
             # Start asynchronous cleanup of stale 'running' jobs to avoid UI confusion.
             try:
-                def _cleanup_stale():
-                    try:
-                        from app.db import mark_stale_running_jobs
-                        # On startup mark any running jobs without end_time as failed to avoid
-                        # stuck running states and UI confusion.
-                        print(f"[Startup] Running stale job cleanup (marking running jobs without end_time as failed)")
-                        marked = mark_stale_running_jobs(None)
-                        if marked and int(marked) > 0:
-                            print(f"[Startup] Marked {marked} running jobs as failed on startup")
-                    except Exception as se:
-                        print(f"[Startup] Stale job cleanup failed: {se}")
-                t = threading.Thread(target=_cleanup_stale, daemon=True)
-                t.start()
+                # Use container-local sentinel so cleanup runs only once
+                sentinel = '/tmp/da_startup_cleanup_started'
+                created = False
+                try:
+                    fd = os.open(sentinel, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                    os.write(fd, str(os.getpid()).encode())
+                    os.close(fd)
+                    created = True
+                except FileExistsError:
+                    created = False
+                except Exception:
+                    created = True
+
+                if not created:
+                    if verbose:
+                        print("[Startup] Skipping stale job cleanup (already started by another process)")
+                else:
+                    def _cleanup_stale():
+                        try:
+                            from app.db import mark_stale_running_jobs
+                            # On startup mark any running jobs without end_time as failed to avoid
+                            # stuck running states and UI confusion.
+                            print(f"[Startup] Running stale job cleanup (marking running jobs without end_time as failed)")
+                            marked = mark_stale_running_jobs(None)
+                            if marked and int(marked) > 0:
+                                print(f"[Startup] Marked {marked} running jobs as failed on startup")
+                        except Exception as se:
+                            print(f"[Startup] Stale job cleanup failed: {se}")
+                    t = threading.Thread(target=_cleanup_stale, daemon=True)
+                    t.start()
             except Exception as e:
-                print(f"[Startup] Failed to start stale job cleanup thread: {e}")
+                if verbose:
+                    print(f"[Startup] Failed to start stale job cleanup thread: {e}")
             startup_discovery_done = True
 
 

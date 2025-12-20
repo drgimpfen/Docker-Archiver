@@ -6,6 +6,7 @@ from apscheduler.triggers.cron import CronTrigger
 from app.db import get_db
 from app.executor import ArchiveExecutor
 from app.notifications import get_setting
+import os
 
 
 scheduler = None
@@ -17,16 +18,34 @@ def init_scheduler():
     
     if scheduler is not None:
         return scheduler
-    
+
+    # Use a container-local sentinel to ensure only one process initializes the scheduler
+    sentinel = '/tmp/da_scheduler_started'
+    created = False
+    try:
+        fd = os.open(sentinel, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        created = True
+    except FileExistsError:
+        created = False
+    except Exception:
+        # If any filesystem error occurs, proceed cautiously and attempt to start scheduler
+        created = True
+
+    if not created:
+        print("[Scheduler] Initialization skipped (scheduler already started by another process)")
+        return None
+
     scheduler = BackgroundScheduler(daemon=True)
     scheduler.start()
-    
+
     # Load all scheduled archives (with error handling for initial setup)
     try:
         reload_schedules()
     except Exception as e:
         print(f"[Scheduler] Could not load schedules during init (database might not be ready yet): {e}")
-    
+
     # Add cleanup job for expired download tokens (runs daily)
     from app.downloads import cleanup_expired_tokens
     scheduler.add_job(
@@ -37,10 +56,10 @@ def init_scheduler():
         id='cleanup_tokens',
         replace_existing=True
     )
-    
+
     # Schedule main cleanup task
     schedule_cleanup_task()
-    
+
     print("[Scheduler] Initialized and started")
     return scheduler
 

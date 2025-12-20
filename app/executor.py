@@ -480,6 +480,12 @@ def _create_job_record_impl(self, start_time, triggered_by):
                 'stack_names': ','.join(self.config.get('stacks', []))
             }
             send_global_event('job', job_meta)
+            try:
+                import os
+                if os.environ.get('JOB_EVENTS_DEBUG'):
+                    print(f"[SSE] Global event SENT (job create) id={job_id} archive_id={self.config['id']} start_time={start_time}")
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -987,6 +993,12 @@ def _update_job_status(self, status, end_time=None, duration=None, total_size=No
                 # Also emit a global summary so the dashboard can update without polling
                 from app.sse import send_global_event
                 send_global_event('job', job_meta)
+                try:
+                    import os
+                    if os.environ.get('JOB_EVENTS_DEBUG'):
+                        print(f"[SSE] Global event SENT (job status) id={self.job_id} status={status} end_time={end_time} duration={duration} total_size={total_size}")
+                except Exception:
+                    pass
             except Exception:
                 pass
         except Exception:
