@@ -693,7 +693,7 @@
             }
 
             // --- Global jobs EventSource (dashboard) ---
-            function startJobsEventSource() {
+            window.startJobsEventSource = function() {
                 if (typeof(EventSource) === 'undefined') return;
                 if (window._jobsEventSource) return;
                 try {
