@@ -38,6 +38,8 @@ docker-compose.override.yml
 redis-data/
 # Postgres data directory (local bind mount)
 postgres-data/
+# Job logs (detached subprocess stdout/stderr)
+job-logs/
 # Database
 *.db
 *.sqlite

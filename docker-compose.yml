@@ -48,6 +48,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Archive output directory (bind mount - adjust to your setup)
       - ./archives:/archives
+      # Job logs (detached subprocess stdout/stderr) - optional host bind mount
+      # Map a host folder into the container so job logs persist outside the container
+      - ./job-logs:/var/log/archiver
       # Stack directories - automatically detected from volume mounts
       # Add bind mounts for your stack directories here
       # The container will automatically scan these for Docker Compose files

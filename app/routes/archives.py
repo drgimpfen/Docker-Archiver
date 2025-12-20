@@ -369,21 +369,18 @@ def run(archive_id):
             flash('Archive not found', 'danger')
             return redirect(url_for('index'))
         
-        # Run in background
-        def run_job():
-            try:
-                executor = ArchiveExecutor(dict(archive), is_dry_run=False)
-                executor.run(triggered_by='manual')
-            except Exception as e:
-                print(f"[ERROR] Manual archive run failed: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        thread = threading.Thread(target=run_job)
-        thread.daemon = True
-        thread.start()
-        
-        flash(f'Archive job for "{archive["name"]}" started!', 'info')
+        # Start archive as detached subprocess and log to file
+        import sys
+        jobs_dir = os.environ.get('ARCHIVE_JOB_LOG_DIR', '/var/log/archiver')
+        os.makedirs(jobs_dir, exist_ok=True)
+        log_path = os.path.join(jobs_dir, f"archive_{archive_id}.log")
+        cmd = [sys.executable, '-m', 'app.run_job', '--archive-id', str(archive_id)]
+        try:
+            with open(log_path, 'ab') as fh:
+                subprocess.Popen(cmd, stdout=fh, stderr=fh, start_new_session=True)
+            flash(f'Archive job for "{archive["name"]}" started (detached)', 'info')
+        except Exception as e:
+            flash(f'Failed to start detached job: {e}', 'danger')
         return redirect(url_for('index'))
         
     except Exception as e:
@@ -415,15 +412,24 @@ def dry_run(archive_id):
             'run_retention': run_retention
         }
         
-        def run_job():
-            executor = ArchiveExecutor(dict(archive), is_dry_run=True, dry_run_config=dry_run_config)
-            executor.run(triggered_by='manual_dry_run')
-        
-        thread = threading.Thread(target=run_job)
-        thread.daemon = True
-        thread.start()
-        
-        flash(f'Dry run for "{archive["name"]}" started!', 'info')
+        cmd = [sys.executable, '-m', 'app.run_job', '--archive-id', str(archive_id), '--dry-run']
+        if not stop_containers:
+            cmd.append('--no-stop-containers')
+        if not create_archive:
+            cmd.append('--no-create-archive')
+        if not run_retention:
+            cmd.append('--no-run-retention')
+
+        jobs_dir = os.environ.get('ARCHIVE_JOB_LOG_DIR', '/var/log/archiver')
+        os.makedirs(jobs_dir, exist_ok=True)
+        log_path = os.path.join(jobs_dir, f"archive_dryrun_{archive_id}.log")
+        try:
+            with open(log_path, 'ab') as fh:
+                subprocess.Popen(cmd, stdout=fh, stderr=fh, start_new_session=True)
+            flash(f'Dry run for "{archive["name"]}" started (detached)', 'info')
+        except Exception as e:
+            flash(f'Failed to start detached dry run: {e}', 'danger')
+
         return redirect(url_for('index'))
         
     except Exception as e:

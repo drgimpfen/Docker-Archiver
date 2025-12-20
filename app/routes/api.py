@@ -430,19 +430,20 @@ def run_archive(archive_id):
         if not archive:
             return jsonify({'error': 'Archive not found'}), 404
         
-        # Start archive job in background
-        from app.executor import ArchiveExecutor
-        
-        def run_job():
-            executor = ArchiveExecutor(dict(archive), is_dry_run=False)
-            executor.run(triggered_by='api')
-        
-        threading.Thread(target=run_job).start()
-        
+        # Start archive job in a detached subprocess and write stdout/stderr to a log
+        import sys
+        jobs_dir = os.environ.get('ARCHIVE_JOB_LOG_DIR', '/var/log/archiver')
+        os.makedirs(jobs_dir, exist_ok=True)
+        log_path = os.path.join(jobs_dir, f"archive_{archive_id}.log")
+        cmd = [sys.executable, '-m', 'app.run_job', '--archive-id', str(archive_id)]
+        with open(log_path, 'ab') as fh:
+            subprocess.Popen(cmd, stdout=fh, stderr=fh, start_new_session=True)
+
         return jsonify({
             'success': True,
-            'message': f"Archive '{archive['name']}' started",
-            'archive_id': archive_id
+            'message': f"Archive '{archive['name']}' started (detached)",
+            'archive_id': archive_id,
+            'log_path': log_path
         })
     
     except Exception as e:
@@ -471,20 +472,29 @@ def dry_run_archive(archive_id):
             'run_retention': data.get('run_retention', True)
         }
         
-        # Start dry run in background
-        from app.executor import ArchiveExecutor
-        
-        def run_job():
-            executor = ArchiveExecutor(dict(archive), is_dry_run=True, dry_run_config=dry_run_config)
-            executor.run(triggered_by='api_dry_run')
-        
-        threading.Thread(target=run_job).start()
-        
+        # Start dry run in a detached subprocess
+        import sys
+        jobs_dir = os.environ.get('ARCHIVE_JOB_LOG_DIR', '/var/log/archiver')
+        os.makedirs(jobs_dir, exist_ok=True)
+        log_path = os.path.join(jobs_dir, f"archive_dryrun_{archive_id}.log")
+        cmd = [sys.executable, '-m', 'app.run_job', '--archive-id', str(archive_id), '--dry-run']
+        # Pass negative flags if config disables the behavior
+        if not dry_run_config.get('stop_containers', True):
+            cmd.append('--no-stop-containers')
+        if not dry_run_config.get('create_archive', True):
+            cmd.append('--no-create-archive')
+        if not dry_run_config.get('run_retention', True):
+            cmd.append('--no-run-retention')
+
+        with open(log_path, 'ab') as fh:
+            subprocess.Popen(cmd, stdout=fh, stderr=fh, start_new_session=True)
+
         return jsonify({
             'success': True,
-            'message': f"Dry run for '{archive['name']}' started",
+            'message': f"Dry run for '{archive['name']}' started (detached)",
             'archive_id': archive_id,
-            'dry_run_config': dry_run_config
+            'dry_run_config': dry_run_config,
+            'log_path': log_path
         })
     
     except Exception as e:

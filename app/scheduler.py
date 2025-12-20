@@ -152,8 +152,15 @@ def run_scheduled_archive(archive_config):
     print(f"[Scheduler] Starting scheduled archive: {archive_config['name']}")
     
     try:
-        executor = ArchiveExecutor(archive_config, is_dry_run=False)
-        executor.run(triggered_by='schedule')
+        # Start the scheduled archive as a detached subprocess to avoid blocking the scheduler
+        import subprocess, sys, os
+        jobs_dir = os.environ.get('ARCHIVE_JOB_LOG_DIR', '/var/log/archiver')
+        os.makedirs(jobs_dir, exist_ok=True)
+        log_path = os.path.join(jobs_dir, f"archive_sched_{archive_config['id']}.log")
+        cmd = [sys.executable, '-m', 'app.run_job', '--archive-id', str(archive_config['id'])]
+        with open(log_path, 'ab') as fh:
+            subprocess.Popen(cmd, stdout=fh, stderr=fh, start_new_session=True)
+        print(f"[Scheduler] Enqueued scheduled archive {archive_config['name']} (detached)")
     except Exception as e:
         print(f"[Scheduler] Archive failed: {e}")
         from app.notifications import send_error_notification
