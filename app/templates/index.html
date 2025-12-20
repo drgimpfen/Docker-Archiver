@@ -299,7 +299,7 @@
                                     <td class="align-middle" style="white-space: nowrap;">
                                         <div class="d-inline-flex align-items-center">
                                             <strong class="me-2">#{{ job.id }}</strong>
-                                            <button class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation(); toggleFollow({{ job.id }});"><i class="bi bi-bullseye"></i></button>
+                                            <button class="btn btn-sm btn-outline-secondary" onclick="(function(e){ (e||window.event||{}).stopPropagation && (e||window.event).stopPropagation(); toggleFollow({{ job.id }}); })(event)"><i class="bi bi-bullseye"></i></button>
                                         </div>
                                     </td>
                                     <td>

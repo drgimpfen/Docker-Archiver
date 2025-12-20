@@ -252,6 +252,11 @@
     </div>
     
     <script>
+    // Safety placeholder: ensure `startJobsEventSource` exists even if rest of the script fails to execute
+    if (!window.startJobsEventSource) {
+        window.startJobsEventSource = function() { console.warn('startJobsEventSource placeholder called (SSE disabled)'); };
+    }
+
     // Shared job details modal function
     async function showJobDetails(jobId) {
         try {
@@ -863,7 +868,7 @@
                         <td class="align-middle" style="white-space: nowrap;">
                             <div class="d-inline-flex align-items-center">
                                 <strong class="me-2">#${job.id}</strong>
-                                <button class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation(); toggleFollow('${job.id}');ye"></i></button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="(function(e){ (e||window.event||{}).stopPropagation && (e||window.event).stopPropagation(); toggleFollow('${job.id}'); })(event)"><i class="bi bi-bullseye"></i></button>
                             </div>
                         </td>
                         <td><span class="badge bg-info">starting</span></td>
