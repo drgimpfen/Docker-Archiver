@@ -297,7 +297,12 @@
                             <tbody>
                                 {% for job in recent_jobs %}
                                 <tr id="job-row-{{ job.id }}" data-job-id="{{ job.id }}" data-job-status="{{ job.status }}" data-follow="false" style="cursor: pointer;" onclick="showJobDetails({{ job.id }})" class="{% if job.is_dry_run %}table-secondary{% endif %}">
-                                    <td><strong>#{{ job.id }}</strong> <button class="btn btn-sm btn-outline-secondary ms-2" onclick="(function(e){ e.stopPropagation(); toggleFollow({{ job.id }}); }).call(this)"><i class="bi bi-bullseye"></i></button></td>
+                                    <td class="align-middle" style="white-space: nowrap;">
+                                        <div class="d-inline-flex align-items-center">
+                                            <strong class="me-2">#{{ job.id }}</strong>
+                                            <button class="btn btn-sm btn-outline-secondary" onclick="(function(e){ e.stopPropagation(); toggleFollow({{ job.id }}); }).call(this)"><i class="bi bi-bullseye"></i></button>
+                                        </div>
+                                    </td>
                                     <td>
                                         <span class="badge {% if job.status == 'success' %}bg-success{% elif job.status == 'running' %}bg-info{% elif job.status == 'failed' %}bg-danger{% else %}bg-secondary{% endif %}">
                                             {{ job.status }}
