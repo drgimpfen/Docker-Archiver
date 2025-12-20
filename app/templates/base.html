@@ -768,6 +768,9 @@
 
             async function runArchiveFromButton(btn) {
                 try {
+                    // expose globally so inline onclick always works
+                    try { window.runArchiveFromButton = runArchiveFromButton; } catch (e) {}
+
                     const archiveId = btn.getAttribute('data-archive-id');
                     const archiveName = btn.getAttribute('data-archive-name') || 'Archive';
 
