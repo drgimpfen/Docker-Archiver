@@ -299,7 +299,7 @@
                                     <td class="align-middle" style="white-space: nowrap;">
                                         <div class="d-inline-flex align-items-center">
                                             <strong class="me-2">#{{ job.id }}</strong>
-                                            <button class="btn btn-sm btn-outline-secondary" onclick="(function(e){ e.stopPropagation(); toggleFollow({{ job.id }}); }).call(this)"><i class="bi bi-bullseye"></i></button>
+                                            <button class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation(); toggleFollow({{ job.id }});"><i class="bi bi-bullseye"></i></button>
                                         </div>
                                     </td>
                                     <td>
@@ -412,6 +412,7 @@ setInterval(updateTimeUntil, 60000);
 
 // --- Dashboard polling for running jobs ---
 let _dashboardPoller = null;
+let _jobsPollInFlight = false;
 
 function updateJobRowFromJob(job) {
     const row = document.getElementById(`job-row-${job.id}`);
@@ -491,8 +492,8 @@ async function pollRunningJobs() {
 
 // Start Jobs SSE on dashboard load to receive new job events
 try {
-    if (typeof startJobsEventSource === 'function') {
-        startJobsEventSource();
+    if (typeof window.startJobsEventSource === 'function') {
+        window.startJobsEventSource();
     } else {
         console.warn('startJobsEventSource is not defined; SSE will be disabled for this page.');
     }
