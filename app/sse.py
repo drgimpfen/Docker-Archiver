@@ -89,6 +89,12 @@ def _start_redis_global_subscriber():
                 msg = pubsub.get_message(timeout=1)
                 if msg and msg.get('data'):
                     data = msg['data']
+                    # Debug log receipt
+                    try:
+                        if os.environ.get('JOB_EVENTS_DEBUG'):
+                            print(f"[SSE] Global event RECEIVED from Redis: {data}")
+                    except Exception:
+                        pass
                     # Forward to global queues
                     with _lock:
                         queues = list(_global_listeners)
@@ -97,7 +103,9 @@ def _start_redis_global_subscriber():
                             q.put_nowait(data)
                         except Exception:
                             pass
-        except Exception:
+        except Exception as e:
+            if os.environ.get('JOB_EVENTS_DEBUG'):
+                print(f"[SSE] Global subscriber failed: {e}")
             # If anything goes wrong, just stop subscriber
             pass
 
@@ -222,5 +230,12 @@ def send_global_event(event_type, payload):
     if _use_redis and _redis_client:
         try:
             _redis_client.publish('jobs-events', data)
-        except Exception:
+            try:
+                if os.environ.get('JOB_EVENTS_DEBUG'):
+                    print(f"[SSE] Global event PUBLISHED to Redis: {data}")
+            except Exception:
+                pass
+        except Exception as e:
+            if os.environ.get('JOB_EVENTS_DEBUG'):
+                print(f"[SSE] Failed to publish global event to Redis: {e}")
             pass

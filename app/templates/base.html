@@ -254,6 +254,9 @@
     <script>
     // Shared job details modal function
     async function showJobDetails(jobId) {
+        try {
+            console.debug('showJobDetails called for', jobId);
+        } catch (e) {}
         // Track currently-open modal job id for dashboard polling
         window._currentJobId = jobId;
         const modalEl = document.getElementById('jobDetailsModal');
@@ -639,6 +642,37 @@
 
                     // Insert at top
                     tbody.insertBefore(tr, tbody.firstChild);
+
+                    // Attach click handler explicitly to ensure modal opens
+                    try {
+                        tr.addEventListener('click', function(e) {
+                            // Ignore clicks on controls
+                            if (e.target.closest('button') || e.target.closest('a')) return;
+                            showJobDetails(job.id);
+                        });
+                    } catch (e) {
+                        console.debug('Failed to attach click handler to job row:', e);
+                    }
+
+                    // Fetch full job data to populate any missing details (best-effort)
+                    (async function() {
+                        try {
+                            const resp = await fetch(`/api/jobs/${job.id}`);
+                            if (!resp.ok) return;
+                            const data = await resp.json();
+                            if (data && data.job) {
+                                updateJobRowFromJob(data.job);
+                            }
+                        } catch (e) {
+                            console.debug('Could not fetch job details for inserted row:', e);
+                        }
+                    })();
+
+                    // Temporary highlight to indicate a new job was added
+                    try {
+                        tr.style.backgroundColor = '#fff3cd';
+                        setTimeout(() => { tr.style.transition = 'background-color 1s ease'; tr.style.backgroundColor = ''; }, 1200);
+                    } catch (e) {}
                 } catch (e) {
                     console.error('Failed to insert job row:', e);
                 }
