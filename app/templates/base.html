@@ -371,7 +371,15 @@
                     <span id="job-sse-status-${job.id}" class="badge bg-secondary ms-2">Polling</span>
                     <span id="job-paused-indicator-${job.id}" class="paused-indicator" style="display:none;">PAUSED</span>
                 </div>
-                <div id="job-log" class="bg-dark text-light p-3 mb-2 log console" style="max-height: 400px; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Courier New", monospace; border-radius:6px; box-shadow: 0 6px 18px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.04); background: linear-gradient(180deg, #0b0f12 0%, #0f1417 100%);">
+                <div id="job-log" class="bg-dark text-light p-0 mb-2 log console" style="max-height: 400px; overflow-y: auto; border-radius:6px; box-shadow: 0 6px 18px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.04); background: linear-gradient(180deg, #0b0f12 0%, #0f1417 100%);">
+                    <div class="console-header">
+                        <div class="console-controls" aria-hidden="true">
+                            <span class="dot dot-red"></span>
+                            <span class="dot dot-yellow"></span>
+                            <span class="dot dot-green"></span>
+                        </div>
+                        <div class="console-title">Terminal</div>
+                    </div>
             `;
 
             content.innerHTML = html;
