@@ -251,5 +251,42 @@ def init_db():
         print("[DB] Database schema initialized successfully")
 
 
+def is_archive_running(archive_id):
+    """Return True if there is a running job for the given archive id."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) AS cnt FROM jobs WHERE archive_id = %s AND status = 'running';", (archive_id,))
+        row = cur.fetchone()
+        return bool(row and row.get('cnt', 0) > 0)
+
+
+def mark_stale_running_jobs(threshold_minutes=30):
+    """Mark jobs that are still 'running' but started before threshold as failed.
+
+    This function is safe to call at startup; it marks jobs with start_time < NOW() - threshold_minutes
+    as failed, sets end_time, duration_seconds, and appends an error/log entry explaining the action.
+    """
+    try:
+        from app import utils
+        with get_db() as conn:
+            cur = conn.cursor()
+            msg = 'Marked failed on server startup (stale running job)'
+            log_line = f"[{utils.local_now().strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] Job marked failed due to server restart\n"
+            cur.execute("""
+                UPDATE jobs
+                SET status = 'failed',
+                    end_time = NOW(),
+                    duration_seconds = EXTRACT(EPOCH FROM (NOW() - start_time))::INTEGER,
+                    error = COALESCE(error, '') || %s,
+                    log = COALESCE(log, '') || %s
+                WHERE status = 'running'
+                  AND start_time < NOW() - INTERVAL %s || ' minutes';
+            """, (msg, log_line, str(threshold_minutes)))
+            conn.commit()
+            print(f"[DB] Marked stale running jobs older than {threshold_minutes} minutes as failed")
+    except Exception as e:
+        print(f"[DB] Failed to mark stale running jobs: {e}")
+
+
 if __name__ == '__main__':
     init_db()

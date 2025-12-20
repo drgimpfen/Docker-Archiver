@@ -111,6 +111,20 @@ def run_startup_discovery():
         except Exception as e:
             print(f"[ERROR] Startup mount/stack detection failed: {e}")
         finally:
+            # Start asynchronous cleanup of stale 'running' jobs to avoid UI confusion.
+            try:
+                def _cleanup_stale():
+                    try:
+                        from app.db import mark_stale_running_jobs
+                        minutes = int(os.environ.get('STALE_JOB_MINUTES', '30'))
+                        print(f"[Startup] Running stale job cleanup (threshold {minutes} minutes)")
+                        mark_stale_running_jobs(minutes)
+                    except Exception as se:
+                        print(f"[Startup] Stale job cleanup failed: {se}")
+                t = threading.Thread(target=_cleanup_stale, daemon=True)
+                t.start()
+            except Exception as e:
+                print(f"[Startup] Failed to start stale job cleanup thread: {e}")
             startup_discovery_done = True
 
 
