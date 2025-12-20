@@ -365,13 +365,21 @@ class ArchiveExecutor:
             # Don't let logging failures interrupt the job
             pass
 
-    def run(self, triggered_by='manual'):
-        """Execute archive job with all phases."""
+    def run(self, triggered_by='manual', job_id=None):
+        """Execute archive job with all phases.
+
+        If ``job_id`` is provided, use the existing job record instead of creating
+        a new one (useful when the API pre-creates the job and spawns a detached subprocess).
+        """
         start_time = utils.now()
         self.log('INFO', f"Starting archive job for: {self.config['name']}")
         
-        # Create job record
-        self.job_id = self._create_job_record(start_time, triggered_by)
+        # Use provided job_id if present, otherwise create a new job record
+        if job_id:
+            self.job_id = job_id
+        else:
+            self.job_id = self._create_job_record(start_time, triggered_by)
+
         # Register executor for live log access
         try:
             RUNNING_EXECUTORS[self.job_id] = self

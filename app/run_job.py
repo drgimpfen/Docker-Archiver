@@ -22,6 +22,7 @@ def parse_args(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument('--archive-id', type=int, required=True)
     parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--job-id', type=int, help='Existing job id to attach to this run (optional)')
     parser.add_argument('--no-stop-containers', action='store_true')
     parser.add_argument('--no-create-archive', action='store_true')
     parser.add_argument('--no-run-retention', action='store_true')
@@ -69,7 +70,7 @@ def main(argv=None):
             # Execute the job
             executor = ArchiveExecutor(dict(archive), is_dry_run=args.dry_run, dry_run_config=dry_run_config)
             # Flush any prints to file
-            executor.run(triggered_by='subprocess')
+            executor.run(triggered_by='subprocess', job_id=args.job_id)
     except Exception as e:
         # Ensure exceptions are visible in the log
         try:

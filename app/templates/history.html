@@ -57,7 +57,7 @@
         </thead>
         <tbody>
             {% for job in jobs %}
-            <tr onclick="showJobDetails({{ job.id }})" style="cursor: pointer;" class="{% if job.is_dry_run %}table-secondary{% endif %}">
+            <tr data-job-id="{{ job.id }}" style="cursor: pointer;" class="{% if job.is_dry_run %}table-secondary{% endif %}">
                 <td><strong>#{{ job.id }}</strong></td>
                 <td>
                     <span class="badge {% if job.status == 'success' %}bg-success{% elif job.status == 'running' %}bg-info{% elif job.status == 'failed' %}bg-danger{% else %}bg-secondary{% endif %}">

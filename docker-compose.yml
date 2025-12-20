@@ -49,6 +49,8 @@ services:
       # GUNICORN_MAX_WORKERS: "8" # max workers when using automatic sizing (default 8)
       # GUNICORN_THREADS: "2" # threads per worker (default 2)
       # GUNICORN_TIMEOUT: "300" # worker timeout in seconds (default 300)
+      # Debugging: enable verbose SSE debug logs (set to "1")
+      # JOB_EVENTS_DEBUG: "1"
     volumes:
       # Docker socket for container management
       - /var/run/docker.sock:/var/run/docker.sock

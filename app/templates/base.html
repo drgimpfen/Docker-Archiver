@@ -599,6 +599,15 @@
                 try {
                     const tbody = document.querySelector('table.table.table-hover.table-sm tbody');
                     if (!tbody) return;
+
+                    // Remove any pending placeholder rows for the same archive_id
+                    try {
+                        if (job.archive_id) {
+                            const pending = tbody.querySelectorAll(`tr[data-pending-archive="${job.archive_id}"]`);
+                            pending.forEach(p => p.remove());
+                        }
+                    } catch (e) {}
+
                     let existing = document.getElementById(`job-row-${job.id}`);
                     if (existing) {
                         updateJobRowFromJob(job);
@@ -650,6 +659,11 @@
                             if (e.target.closest('button') || e.target.closest('a')) return;
                             showJobDetails(job.id);
                         });
+                        // Also allow keyboard navigation (Enter key)
+                        tr.addEventListener('keydown', function(e) {
+                            if (e.key === 'Enter') showJobDetails(job.id);
+                        });
+                        tr.tabIndex = 0;
                     } catch (e) {
                         console.debug('Failed to attach click handler to job row:', e);
                     }
@@ -683,41 +697,50 @@
                 if (typeof(EventSource) === 'undefined') return;
                 if (window._jobsEventSource) return;
                 try {
-                    window._jobsEventSource = new EventSource('/api/jobs/events');
-
-                    window._jobsEventSource.onopen = function() {
-                        try { console.debug('Jobs SSE connected'); } catch (e) {}
-                    };
-
-                    window._jobsEventSource.onmessage = function(e) {
+                    let backoff = 5000;
+                    function open() {
                         try {
-                            const payload = JSON.parse(e.data);
-                            if (!payload || !payload.type) return;
-                            if (payload.type === 'job' || payload.type === 'status') {
-                                // Normalize minimal fields
-                                const j = payload.data || {};
-                                if (j.start_time) j.start_time = String(j.start_time);
+                            window._jobsEventSource = new EventSource('/api/jobs/events');
 
-                                // payload.data is a job summary
-                                // If the job row exists update it, otherwise insert it
-                                if (document.getElementById(`job-row-${j.id}`)) {
-                                    updateJobRowFromJob(j);
-                                } else {
-                                    addOrInsertJobRow(j);
+                            window._jobsEventSource.onopen = function() {
+                                try { console.debug('Jobs SSE connected'); } catch (e) {}
+                                backoff = 5000; // reset backoff on success
+                            };
+
+                            window._jobsEventSource.onmessage = function(e) {
+                                try {
+                                    const payload = JSON.parse(e.data);
+                                    if (!payload || !payload.type) return;
+                                    if (payload.type === 'job' || payload.type === 'status') {
+                                        const j = payload.data || {};
+                                        if (j.start_time) j.start_time = String(j.start_time);
+                                        if (document.getElementById(`job-row-${j.id}`)) {
+                                            updateJobRowFromJob(j);
+                                        } else {
+                                            addOrInsertJobRow(j);
+                                        }
+                                    }
+                                } catch (err) {
+                                    console.error('Error handling jobs SSE message', err);
                                 }
-                            }
-                        } catch (err) {
-                            console.error('Error handling jobs SSE message', err);
-                        }
-                    };
+                            };
 
-                    window._jobsEventSource.onerror = function(err) {
-                        console.error('Jobs SSE error', err);
-                        try { window._jobsEventSource.close(); } catch (e) {}
-                        window._jobsEventSource = null;
-                    };
+                            window._jobsEventSource.onerror = function(err) {
+                                console.error('Jobs SSE error', err);
+                                try { window._jobsEventSource.close(); } catch (e) {}
+                                window._jobsEventSource = null;
+                                // attempt reconnect with backoff
+                                setTimeout(() => { backoff = Math.min(backoff * 2, 60000); open(); }, backoff);
+                            };
+                        } catch (err) {
+                            console.error('Failed to start Jobs SSE:', err);
+                            setTimeout(open, backoff);
+                            backoff = Math.min(backoff * 2, 60000);
+                        }
+                    }
+                    open();
                 } catch (err) {
-                    console.error('Failed to start Jobs SSE:', err);
+                    console.error('Failed to initialize Jobs SSE:', err);
                 }
             }
 
@@ -737,6 +760,106 @@
                     console.error('Failed to handle row click delegation:', e);
                 }
             });
+
+            // Handle Run Now buttons with optimistic UI insertion
+            document.addEventListener('click', async function(ev) {
+                try {
+                    const btn = ev.target.closest && ev.target.closest('.start-archive-btn');
+                    if (!btn) return;
+                    ev.preventDefault();
+                    const archiveId = btn.getAttribute('data-archive-id');
+                    const archiveName = btn.getAttribute('data-archive-name') || 'Archive';
+                    // Disable button briefly
+                    btn.disabled = true;
+                    const oldHtml = btn.innerHTML;
+                    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Starting';
+                    try {
+                        const resp = await fetch(`/api/archives/${archiveId}/run`, { method: 'POST' });
+                        const data = await resp.json();
+                        if (data && data.success) {
+                            if (data.job_id) {
+                                try {
+                                    const jresp = await fetch(`/api/jobs/${data.job_id}`);
+                                    if (jresp.ok) {
+                                        const jdata = await jresp.json();
+                                        if (jdata && jdata.job) {
+                                            addOrInsertJobRow(jdata.job);
+                                        } else {
+                                            addPendingJobRow(archiveId, archiveName);
+                                        }
+                                    } else {
+                                        addPendingJobRow(archiveId, archiveName);
+                                    }
+                                } catch (e) {
+                                    addPendingJobRow(archiveId, archiveName);
+                                }
+                            } else {
+                                addPendingJobRow(archiveId, archiveName);
+                            }
+                        } else {
+                            alert('Failed to start archive: ' + (data && data.error ? data.error : 'unknown'));
+                        }
+                    } catch (e) {
+                        alert('Failed to start archive: ' + e);
+                    } finally {
+                        btn.disabled = false;
+                        btn.innerHTML = oldHtml;
+                    }
+                } catch (e) {
+                    console.error('Failed to handle Run Now click:', e);
+                }
+            });
+
+            function addPendingJobRow(archiveId, archiveName) {
+                // Create a placeholder row with a negative id
+                const job = {
+                    id: `pending-${Date.now()}`,
+                    archive_id: archiveId,
+                    archive_name: archiveName,
+                    job_type: 'archive',
+                    status: 'starting',
+                    start_time: new Date().toISOString(),
+                    total_size_bytes: null,
+                    stack_names: ''
+                };
+                try {
+                    const tbody = document.querySelector('table.table.table-hover.table-sm tbody');
+                    if (!tbody) return;
+                    // Remove any existing pending rows for same archive
+                    const old = tbody.querySelectorAll(`tr[data-pending-archive="${archiveId}"]`);
+                    old.forEach(o => o.remove());
+
+                    // Build row using the existing insertion function but mark as pending
+                    const tr = document.createElement('tr');
+                    tr.id = `job-row-${job.id}`;
+                    tr.setAttribute('data-job-id', job.id);
+                    tr.setAttribute('data-job-status', job.status || 'starting');
+                    tr.setAttribute('data-pending-archive', archiveId);
+                    tr.style.cursor = 'pointer';
+                    tr.innerHTML = `
+                        <td class="align-middle" style="white-space: nowrap;">
+                            <div class="d-inline-flex align-items-center">
+                                <strong class="me-2">#${job.id}</strong>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="(function(e){ e.stopPropagation(); toggleFollow('${job.id}'); }).call(this)"><i class="bi bi-bullseye"></i></button>
+                            </div>
+                        </td>
+                        <td><span class="badge bg-info">starting</span></td>
+                        <td>${job.job_type || 'archive'}</td>
+                        <td>${job.archive_name || 'N/A'}</td>
+                        <td><span class="text-muted small">N/A</span></td>
+                        <td class="d-none d-md-table-cell"><small style="white-space: nowrap;">${new Date().toISOString().substring(0,16).replace('T',' ')}</small></td>
+                        <td class="d-none d-md-table-cell"><small style="white-space: nowrap;">N/A</small></td>
+                        <td><small>N/A</small></td>
+                        <td style="text-align: right;"><span class="text-muted">N/A</span></td>
+                    `;
+                    tr.addEventListener('click', function() { showJobDetails(job.id); });
+                    tbody.insertBefore(tr, tbody.firstChild);
+                    tr.style.backgroundColor = '#fff3cd';
+                    setTimeout(() => { tr.style.transition = 'background-color 1s ease'; tr.style.backgroundColor = ''; }, 1200);
+                } catch (e) {
+                    console.error('Failed to add pending job row:', e);
+                }
+            }
 
             function stopJobsEventSource() {
                 if (window._jobsEventSource) {

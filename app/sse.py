@@ -24,15 +24,55 @@ _redis_global = None  # {'thread': Thread, 'stop': Event}
 _use_redis = False
 
 REDIS_URL = os.environ.get('REDIS_URL')
+JOB_EVENTS_DEBUG = os.environ.get('JOB_EVENTS_DEBUG')
+
 if REDIS_URL:
     try:
         import redis
         _redis_client = redis.from_url(REDIS_URL, decode_responses=True)
-        _use_redis = True
+        # test connection
+        try:
+            _redis_client.ping()
+            _use_redis = True
+        except Exception:
+            _redis_client = None
+            _use_redis = False
     except Exception:
         # If redis package not available or connection fails, fall back to in-memory
         _redis_client = None
         _use_redis = False
+
+if JOB_EVENTS_DEBUG:
+    print(f"[SSE] REDIS_URL={'set' if REDIS_URL else 'not-set'}, _use_redis={_use_redis}")
+
+# If Redis not available initially, start a background connector that will
+# attempt to reconnect periodically. This allows late-start Redis or network
+# readiness to still enable cross-worker event propagation.
+if not _use_redis and REDIS_URL:
+    def _redis_connector_loop():
+        try:
+            import time
+            import redis
+            while True:
+                try:
+                    client = redis.from_url(REDIS_URL, decode_responses=True)
+                    client.ping()
+                    # success
+                    global _redis_client, _use_redis
+                    _redis_client = client
+                    _use_redis = True
+                    if JOB_EVENTS_DEBUG:
+                        print(f"[SSE] Redis connected on retry")
+                    return
+                except Exception:
+                    if JOB_EVENTS_DEBUG:
+                        print(f"[SSE] Redis not available yet, retrying in 5s")
+                    time.sleep(5)
+        except Exception:
+            pass
+    import threading
+    t = threading.Thread(target=_redis_connector_loop, daemon=True)
+    t.start()
 
 
 def _start_redis_subscriber(job_id):
@@ -231,11 +271,14 @@ def send_global_event(event_type, payload):
         try:
             _redis_client.publish('jobs-events', data)
             try:
-                if os.environ.get('JOB_EVENTS_DEBUG'):
+                if JOB_EVENTS_DEBUG:
                     print(f"[SSE] Global event PUBLISHED to Redis: {data}")
             except Exception:
                 pass
         except Exception as e:
-            if os.environ.get('JOB_EVENTS_DEBUG'):
+            if JOB_EVENTS_DEBUG:
                 print(f"[SSE] Failed to publish global event to Redis: {e}")
             pass
+    else:
+        if JOB_EVENTS_DEBUG:
+            print("[SSE] Redis not available - global event was delivered locally but not published to Redis")

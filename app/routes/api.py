@@ -459,12 +459,26 @@ def run_archive(archive_id):
         if not archive:
             return jsonify({'error': 'Archive not found'}), 404
         
+        # Create a job record immediately so the UI can observe it and so the
+        # detached subprocess can attach to the precreated job.
+        from app import utils as u
+        with get_db() as conn:
+            cur = conn.cursor()
+            start_time = u.now()
+            cur.execute("""
+                INSERT INTO jobs (archive_id, job_type, status, start_time, triggered_by, log)
+                VALUES (%s, 'archive', 'running', %s, 'api', '')
+                RETURNING id;
+            """, (archive_id, start_time))
+            job_id = cur.fetchone()['id']
+            conn.commit()
+
         # Start archive job in a detached subprocess and write stdout/stderr to a log
         import sys
         jobs_dir = os.environ.get('ARCHIVE_JOB_LOG_DIR', '/var/log/archiver')
         os.makedirs(jobs_dir, exist_ok=True)
         log_path = os.path.join(jobs_dir, f"archive_{archive_id}.log")
-        cmd = [sys.executable, '-m', 'app.run_job', '--archive-id', str(archive_id)]
+        cmd = [sys.executable, '-m', 'app.run_job', '--archive-id', str(archive_id), '--job-id', str(job_id)]
         with open(log_path, 'ab') as fh:
             subprocess.Popen(cmd, stdout=fh, stderr=fh, start_new_session=True)
 
@@ -472,6 +486,7 @@ def run_archive(archive_id):
             'success': True,
             'message': f"Archive '{archive['name']}' started (detached)",
             'archive_id': archive_id,
+            'job_id': job_id,
             'log_path': log_path
         })
     
