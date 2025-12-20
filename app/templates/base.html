@@ -260,15 +260,33 @@
     // Shared job details modal function
     async function showJobDetails(jobId) {
         try {
-            console.debug('showJobDetails called for', jobId);
         } catch (e) {}
         // Track currently-open modal job id for dashboard polling
         window._currentJobId = jobId;
         const modalEl = document.getElementById('jobDetailsModal');
-        const modal = new bootstrap.Modal(modalEl);
+        if (!modalEl) {
+            console.error('Job details modal element not found');
+            alert('Could not open job details: modal element missing');
+            return;
+        }
+
+        let modal;
+        try {
+            modal = new bootstrap.Modal(modalEl);
+        } catch (e) {
+            console.error('Bootstrap Modal constructor failed', e);
+            alert('Could not open job details: modal library not available');
+            return;
+        }
+
         const content = document.getElementById('jobDetailsContent');
-        
-        modal.show();
+        try {
+            modal.show();
+        } catch (e) {
+            console.error('Failed to show modal', e);
+            alert('Could not open job details: ' + (e && e.message ? e.message : e));
+            return;
+        }
 
         // Clear current job id when modal is hidden
         modalEl.addEventListener('hide.bs.modal', () => {
@@ -635,7 +653,10 @@
                     tr.setAttribute('data-job-status', job.status || 'running');
                     tr.setAttribute('data-follow', 'false');
                     tr.style.cursor = 'pointer';
-                    tr.onclick = function() { try { attachJobRowHandlers(tr, job.id); } catch (e) { console.debug('attachJobRowHandlers failed on tr.onclick', e); } };
+                    // Inline safe onclick for classic behavior
+                    tr.setAttribute('onclick', "(function(e){ (e||window.event||{}).stopPropagation && (e||window.event).stopPropagation(); try { if (typeof showJobDetails === 'function') showJobDetails(" + job.id + "); } catch(err){ console.error(err); } })(event)");
+                    // Attach full handlers (keyboard + defensive JS handlers)
+                    try { attachJobRowHandlers(tr, job.id); } catch (e) {} ;
 
                     tr.innerHTML = `
                         <td class="align-middle" style="white-space: nowrap;">
@@ -661,7 +682,6 @@
                     try {
                         attachJobRowHandlers(tr, job.id);
                     } catch (e) {
-                        console.debug('Failed to attach click handler to job row:', e);
                     }
 
                     // Fetch full job data to populate any missing details (best-effort)
@@ -674,7 +694,6 @@
                                 updateJobRowFromJob(data.job);
                             }
                         } catch (e) {
-                            console.debug('Could not fetch job details for inserted row:', e);
                         }
                     })();
 
@@ -699,7 +718,7 @@
                             window._jobsEventSource = new EventSource('/api/jobs/events');
 
                             window._jobsEventSource.onopen = function() {
-                                try { console.debug('Jobs SSE connected'); } catch (e) {}
+                                try { } catch (e) {}
                                 backoff = 5000; // reset backoff on success
                             };
 
@@ -746,8 +765,8 @@
                     tr.addEventListener('click', function(e) {
                         try {
                             // Ignore clicks on controls inside the row (buttons/links)
-                            if (e.target && (e.target.closest('button') || e.target.closest('a'))) return;
-                            console.debug('Job row clicked:', jobId);
+                            if (e && e.target && (e.target.closest('button') || e.target.closest('a'))) return;
+
                             // Prevent duplicate modal opens
                             if (window._currentJobId && String(window._currentJobId) === String(jobId)) return;
                             if (typeof showJobDetails === 'function') {
@@ -757,13 +776,14 @@
                             }
                         } catch (err) {
                             console.error('Error in job row click handler', err);
+                            try { alert('Error opening job details: ' + (err && err.message ? err.message : err)); } catch (e) {}
                         }
                     });
 
                     // Keyboard support (Enter key)
                     tr.addEventListener('keydown', function(e) {
                         try {
-                            if (e.key === 'Enter') {
+                            if (e && e.key === 'Enter') {
                                 if (typeof showJobDetails === 'function') showJobDetails(parseInt(jobId, 10));
                             }
                         } catch (err) {
@@ -774,29 +794,20 @@
                     // Make row focusable for keyboard access
                     tr.tabIndex = 0;
                 } catch (e) {
-                    console.debug('Failed to attach handlers to job row:', e);
                 }
             }
 
-            // Delegate click on job rows as a fallback (keeps previous behavior) — still logs for debugging
-            document.addEventListener('click', function(ev) {
-                try {
-                    const tr = ev.target.closest && ev.target.closest('tr[data-job-id]');
-                    if (!tr) return;
-                    // Avoid handling clicks on controls inside the row (buttons)
-                    if (ev.target.closest('button') || ev.target.closest('a')) return;
-                    const jobId = tr.getAttribute('data-job-id');
-                    if (!jobId) return;
-                    // Stop if a modal is already open for a different job
-                    if (window._currentJobId && String(window._currentJobId) === jobId) return;
-                    console.debug('Delegated click detected for job row:', jobId);
-                    if (typeof showJobDetails === 'function') {
-                        showJobDetails(parseInt(jobId, 10));
-                    }
-                } catch (e) {
-                    console.error('Failed to handle row click delegation:', e);
-                }
-            });
+            // Attach handlers to any existing job rows on page (dashboard, history, etc.)
+            try {
+                document.querySelectorAll('tr[data-job-id]').forEach(function(tr) {
+                    try {
+                        const id = tr.getAttribute('data-job-id');
+                        if (id) attachJobRowHandlers(tr, id);
+                    } catch (e) {}
+                });
+            } catch (e) {}
+
+
 
             // Handle Run Now buttons with optimistic UI insertion
             function showToast(message, type='info') {
@@ -833,7 +844,7 @@
                 try {
                     const archiveId = btn.getAttribute('data-archive-id');
                     const archiveName = btn.getAttribute('data-archive-name') || 'Archive';
-                    console.log('Run Now invoked for archive', archiveId, archiveName);
+
                     // Disable button briefly
                     btn.disabled = true;
                     const oldHtml = btn.innerHTML;

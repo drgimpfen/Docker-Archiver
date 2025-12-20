@@ -295,7 +295,7 @@
                             </thead>
                             <tbody>
                                 {% for job in recent_jobs %}
-                                <tr id="job-row-{{ job.id }}" data-job-id="{{ job.id }}" data-job-status="{{ job.status }}" data-follow="false" style="cursor: pointer;" class="{% if job.is_dry_run %}table-secondary{% endif %}">
+                                <tr id="job-row-{{ job.id }}" data-job-id="{{ job.id }}" data-job-status="{{ job.status }}" data-follow="false" style="cursor: pointer;" class="{% if job.is_dry_run %}table-secondary{% endif %}" onclick="(function(e){ (e||window.event||{}).stopPropagation && (e||window.event).stopPropagation(); try { if (typeof showJobDetails === 'function') showJobDetails({{ job.id }}); } catch(err){ console.error(err); } })(event)">
                                     <td class="align-middle" style="white-space: nowrap;">
                                         <div class="d-inline-flex align-items-center">
                                             <strong class="me-2">#{{ job.id }}</strong>
@@ -507,7 +507,6 @@ document.querySelectorAll('tr[data-job-id]').forEach(function(tr) {
         const id = tr.getAttribute('data-job-id');
         if (id) attachJobRowHandlers(tr, id);
     } catch (e) {
-        console.debug('Failed to attach handlers to existing job row:', e);
     }
 });
 
@@ -518,10 +517,8 @@ document.querySelectorAll('.start-archive-btn').forEach(function(b) {
             ev.preventDefault();
             ev.stopPropagation();
             const archiveId = b.getAttribute('data-archive-id');
-            console.log('Fallback Run Now invoked for', archiveId);
             const resp = await fetch(`/api/archives/${archiveId}/run`, { method: 'POST' });
             const data = await resp.json();
-            console.log('Fallback run response', data);
             if (data && data.success) {
                 // Rely on SSE to show the new job; display a transient toast instead of optimistic insertion
                 if (typeof showToast === 'function') {
