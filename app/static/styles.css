@@ -201,6 +201,11 @@ body.has-sidebar .app-main {
     line-height: 1;
 }
 
+/* Badges using inline data-color should show white text by default */
+.badge[data-color] {
+    color: #fff;
+}
+
 /* Table column sizing */
 th.stacks-col, td.stacks-col {
     width: 340px; /* allow more room for stacks */

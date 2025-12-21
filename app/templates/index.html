@@ -142,9 +142,9 @@
                 <h5 class="mb-0">
                     <i class="bi bi-archive me-2"></i>Archives
                 </h5>
-                <a href="{{ url_for('archives.list_archives') }}" class="btn btn-primary btn-sm">
-                    <i class="bi bi-plus-lg me-1"></i>Manage Archives
-                </a>
+                <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createArchiveModal">
+                    <i class="bi bi-plus-lg me-1"></i>Create Archive
+                </button>
             </div>
             <div class="card-body">
                 {% if archives %}
@@ -161,12 +161,21 @@
                                     </div>
                                     
                                     <div class="mb-2">
-                                        <small class="text-muted d-block">
-                                            <i class="bi bi-stack me-1"></i>{{ archive.stacks|length }} stack(s)
-                                        </small>
+                                        <div class="stack-badges mb-1">
+                                            {% set st = archive.stacks | sort %}
+                                            {% for stack in st[:3] %}
+                                            <span class="badge" data-color="{{ stack|stack_color }}">{{ stack }}</span>
+                                            {% endfor %}
+                                            {% if st|length > 3 %}
+                                            <span class="badge bg-secondary">+{{ st|length - 3 }}</span>
+                                            {% endif %}
+                                        </div>
                                         <small class="text-muted d-block">
                                             <i class="bi bi-hdd me-1"></i><span title="Net = archived - reclaimed (job reports)">{{ format_bytes(archive.total_size) }}</span>
                                         </small>
+                                        {% if archive.schedule_enabled and archive.schedule_cron %}
+                                        <small class="text-muted d-block"><i class="bi bi-clock me-1"></i> <code class="small">{{ archive.schedule_cron }}</code></small>
+                                        {% endif %}
                                     </div>
 
                                     {% if archive.last_run %}
@@ -180,6 +189,16 @@
                                         </small>
                                     </div>
                                     {% endif %}
+
+                                    <div class="mb-2">
+                                        <small class="text-muted">Retention:</small>
+                                        <small>
+                                            {{ archive.retention_keep_days }}/{{ archive.retention_keep_weeks }}/{{ archive.retention_keep_months }}/{{ archive.retention_keep_years }}
+                                            {% if archive.retention_one_per_day %}
+                                            <i class="bi bi-calendar-check text-info" title="One per day"></i>
+                                            {% endif %}
+                                        </small>
+                                    </div>
 
                                     {% if archive.next_run %}
                                     <div class="mb-2">
@@ -264,15 +283,164 @@
                     <div class="text-center py-5">
                         <i class="bi bi-inbox fs-1 text-muted d-block mb-3"></i>
                         <p class="text-muted mb-3">No archives configured yet</p>
-                        <a href="{{ url_for('archives.list_archives') }}" class="btn btn-primary">
+                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createArchiveModal">
                             <i class="bi bi-plus-lg me-1"></i>Create First Archive
-                        </a>
+                        </button>
                     </div>
                 {% endif %}
             </div>
         </div>
     </div>
 </div>
+
+<!-- Insert Create/Edit Archive Modals (copied from archives UI) -->
+
+<!-- Create Archive Modal -->
+<div class="modal fade" id="createArchiveModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Create Archive</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('archives.create') }}" id="createArchiveForm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Archive Name</label>
+                        <input type="text" class="form-control" id="name" name="name" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Select Stacks <small class="text-muted">(required)</small></label>
+                        <div class="border rounded p-3" style="max-height: 200px; overflow-y: auto;">
+                            {% for stack in stacks %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="stacks" value="{{ stack.name }}" id="stack_{{ loop.index }}">
+                                <label class="form-check-label" for="stack_{{ loop.index }}">
+                                    {{ stack.name }} <small class="text-muted">({{ stack.mount_source }})</small>
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="stop_containers" id="stopContainers" checked>
+                            <label class="form-check-label" for="stopContainers">
+                                Stop containers during archive
+                            </label>
+                        </div>
+                        <small class="text-muted">Recommended for consistent backups</small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="outputFormat" class="form-label">Output Format</label>
+                        <select class="form-select" id="outputFormat" name="output_format">
+                            <option value="tar">tar (uncompressed)</option>
+                            <option value="tar.gz">tar.gz (gzip)</option>
+                            <option value="tar.zst" selected>tar.zst (zstandard - fast)</option>
+                            <option value="folder">folder (for borg backup)</option>
+                        </select>
+                    </div>
+                    
+                    <hr>
+                    
+                    <h6>Schedule (Optional)</h6>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="schedule_enabled" id="scheduleEnabled">
+                            <label class="form-check-label" for="scheduleEnabled">
+                                Enable scheduled execution
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="scheduleCron" class="form-label">Cron Expression</label>
+                        <input type="text" class="form-control" id="scheduleCron" name="schedule_cron" placeholder="0 3 * * *">
+                        <small class="text-muted d-block mb-2">Format: minute hour day month day_of_week</small>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-secondary" onclick="setCron('0 3 * * *')">Daily 3AM</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setCron('0 0 * * 0')">Weekly Sunday</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setCron('0 0 1 * *')">Monthly 1st</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setCron('*/15 * * * *')">Every 15min</button>
+                        </div>
+                    </div>
+                    
+                    <hr>
+                    
+                    <h6>Retention (GFS)</h6>
+                    <div class="row">
+                        <div class="col-md-3">
+                            <label for="keepDays" class="form-label">Keep Days</label>
+                            <input type="number" class="form-control" id="keepDays" name="keep_days" value="7" min="0">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="keepWeeks" class="form-label">Keep Weeks</label>
+                            <input type="number" class="form-control" id="keepWeeks" name="keep_weeks" value="4" min="0">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="keepMonths" class="form-label">Keep Months</label>
+                            <input type="number" class="form-control" id="keepMonths" name="keep_months" value="6" min="0">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="keepYears" class="form-label">Keep Years</label>
+                            <input type="number" class="form-control" id="keepYears" name="keep_years" value="2" min="0">
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="one_per_day" id="onePerDay">
+                            <label class="form-check-label" for="onePerDay">
+                                Keep only one archive per day
+                            </label>
+                        </div>
+                        <small class="text-muted">Useful if you run multiple test backups per day</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Archive</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Archive Modal -->
+<div class="modal fade" id="editArchiveModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit Archive</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="editArchiveForm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="editName" class="form-label">Archive Name</label>
+                        <input type="text" class="form-control" id="editName" name="name" readonly>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Select Stacks <small class="text-muted">(required)</small></label>
+                        <div class="border rounded p-3" style="max-height: 200px; overflow-y: auto;" id="editStacksList">
+                            {% for stack in stacks %}
+                            <div class="form-check">
+                                <input class="form-check-input edit-stack-check" type="checkbox" name="stacks" value="{{ stack.name }}" id="edit_stack_{{ loop.index }}">
+                                <label class="form-check-label" for="edit_stack_{{ loop.index }}">
+                                    {{ stack.name }} <small class="text-muted">({{ stack.mount_source }})</small>
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+<div id="archives-data" data-archives='{{ archives | tojson | safe }}' style="display:none"></div>
 
 <!-- Recent Jobs Section -->
 <div class="row">
@@ -336,7 +504,7 @@
                                         {% if job.stack_names %}
                                             {% set stacks = (job.stack_names.split(',') if job.stack_names else []) | sort %}
                                             {% for stack in stacks[:3] %}
-                                                <span class="badge" style="background-color: {{ stack|stack_color }}; color: white;">{{ stack }}</span>
+                                                <span class="badge" data-color="{{ stack|stack_color }}">{{ stack }}</span>
                                             {% endfor %}
                                             {% if stacks|length > 3 %}
                                                 <span class="badge bg-secondary">+{{ stacks|length - 3 }}</span>
@@ -344,7 +512,7 @@
                                         {% elif job.archive_stacks %}
                                             {% set stacks2 = job.archive_stacks | sort %}
                                             {% for stack in stacks2[:3] %}
-                                                <span class="badge" style="background-color: {{ stack|stack_color }}; color: white;">{{ stack }}</span>
+                                                <span class="badge" data-color="{{ stack|stack_color }}">{{ stack }}</span>
                                             {% endfor %}
                                             {% if stacks2|length > 3 %}
                                                 <span class="badge bg-secondary">+{{ stacks2|length - 3 }}</span>
@@ -559,6 +727,75 @@ setInterval(() => {
         try { startDashboardDurationTicker(); } catch (e) {}
     }
 }, 10000);
+
+// --- Archive modal helpers (copied from archives page) ---
+const archivesDataEl = document.getElementById('archives-data');
+const archivesData = (archivesDataEl && archivesDataEl.dataset && archivesDataEl.dataset.archives) ? JSON.parse(archivesDataEl.dataset.archives) : [];
+
+function editArchive(archiveId) {
+    // Find archive data
+    const archive = archivesData.find(a => a.id === archiveId);
+    if (!archive) return;
+    
+    // Set form action
+    document.getElementById('editArchiveForm').action = `/archives/${archiveId}/edit`;
+    
+    // Fill form fields
+    document.getElementById('editName').value = archive.name;
+    document.getElementById('editStopContainers').checked = archive.stop_containers;
+    document.getElementById('editOutputFormat').value = archive.output_format;
+    document.getElementById('editScheduleEnabled').checked = archive.schedule_enabled;
+    document.getElementById('editScheduleCron').value = archive.schedule_cron || '';
+    document.getElementById('editKeepDays').value = archive.retention_keep_days;
+    document.getElementById('editKeepWeeks').value = archive.retention_keep_weeks;
+    document.getElementById('editKeepMonths').value = archive.retention_keep_months;
+    document.getElementById('editKeepYears').value = archive.retention_keep_years;
+    document.getElementById('editOnePerDay').checked = archive.retention_one_per_day;
+    
+    // Check selected stacks
+    document.querySelectorAll('.edit-stack-check').forEach(checkbox => {
+        checkbox.checked = archive.stacks.includes(checkbox.value);
+    });
+    
+    // Show modal
+    new bootstrap.Modal(document.getElementById('editArchiveModal')).show();
+}
+
+function setCron(cron) {
+    document.getElementById('scheduleCron').value = cron;
+}
+
+function setEditCron(cron) {
+    document.getElementById('editScheduleCron').value = cron;
+}
+
+function deleteArchive(archiveId, archiveName) {
+    if (confirm(`Delete archive "${archiveName}"? This will also delete all associated job history.`)) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = `/archives/${archiveId}/delete`;
+        
+        // Add CSRF token
+        const csrfToken = document.querySelector('meta[name="csrf-token"]');
+        if (csrfToken) {
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrf_token';
+            csrfInput.value = csrfToken.content;
+            form.appendChild(csrfInput);
+        }
+        
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+// Apply stack badge colors from data-color attribute
+(function applyStackBadgeColors(){
+    document.querySelectorAll('.badge[data-color]').forEach(el => {
+        try { el.style.backgroundColor = el.dataset.color; el.style.color = '#fff'; } catch(e) {}
+    });
+})();
 
 </script>
 {% endblock %}
