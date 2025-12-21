@@ -296,9 +296,9 @@ def cleanup_unreferenced_dirs(is_dry_run=False, log_callback=None):
                 if active:
                     # Skip deletion if an active DB reference exists
                     if is_dry_run:
-                        log(f"Would keep stack directory (active DB references exist): {stack_dir.relative_to(archive_base)}")
+                        log(f"Would keep stack directory (active DB references exist): {str(stack_dir)}")
                     else:
-                        log(f"Skipping deletion (active DB references exist): {stack_dir.relative_to(archive_base)}")
+                        log(f"Skipping deletion (active DB references exist): {str(stack_dir)}")
                     continue
 
                 dir_count += 1
@@ -352,16 +352,15 @@ def cleanup_unreferenced_dirs(is_dry_run=False, log_callback=None):
                     dir_size = 0
 
                 if is_dry_run:
-                    log(f"Would delete unreferenced directory: {display_path}{reference_info} — no DB references / no archive files found (would reclaim {format_bytes(dir_size)})")
+                    log(f"Would delete unreferenced directory: {str(stack_dir)}{reference_info} — no DB references / no archive files found (would reclaim {format_bytes(dir_size)})")
                 else:
-                    log(f"Deleting unreferenced directory: {display_path}{reference_info} — removing (reclaimed {format_bytes(dir_size)})")
+                    log(f"Deleting unreferenced directory: {str(stack_dir)}{reference_info} — removing (reclaimed {format_bytes(dir_size)})")
                     try:
                         shutil.rmtree(stack_dir)
                         # Account for reclaimed bytes from directory removal
                         reclaimed_bytes += dir_size
                     except Exception as e:
-                        log(f"Failed to delete unreferenced directory {display_path}: {e}")
-    
+                        log(f"Failed to delete unreferenced directory {str(stack_dir)}: {e}")
     if dir_count > 0:
         log(f"Found {dir_count} unreferenced directory(ies), {format_bytes(reclaimed_bytes)} to reclaim")
     else:
@@ -580,9 +579,9 @@ def cleanup_unreferenced_files(is_dry_run=False, log_callback=None):
         # Report or delete unreferenced files for this archive dir
         if is_dry_run:
             if unreferenced_files:
-                log(f"Unreferenced files in {archive_dir.name}: {len(unreferenced_files)}")
+                log(f"Unreferenced files in {str(archive_dir)}: {len(unreferenced_files)}")
                 for uf in unreferenced_files:
-                    log(f"Unreferenced file: {uf['archive']}/{uf['path'].name} (no DB reference)")
+                    log(f"Unreferenced file: {str(uf['path'])} (no DB reference)")
         else:
             for uf in unreferenced_files:
                 path = uf['path']
@@ -598,11 +597,11 @@ def cleanup_unreferenced_files(is_dry_run=False, log_callback=None):
                                 path.unlink()
                                 deleted_count += 1
                                 reclaimed += size
-                                log(f"Deleted unreferenced file: {uf['archive']}/{path.name} ({format_bytes(size)})")
+                                log(f"Deleted unreferenced file: {str(path)} ({format_bytes(size)})")
                             except Exception as de:
                                 log(f"Failed to delete unreferenced file {path}: {de}")
                         else:
-                            log(f"Skipping deletion, file now referenced: {uf['archive']}/{path.name}")
+                            log(f"Skipping deletion, file now referenced: {str(path)}")
                 except Exception as dbe:
                     log(f"DB check failed before deleting {path}: {dbe}")
 
