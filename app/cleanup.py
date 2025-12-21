@@ -254,6 +254,26 @@ def cleanup_temp_files(is_dry_run=False, log_callback=None):
 
             # Check if stack directory is empty or has no valid backups
             if is_stack_directory_empty(stack_dir, log_callback=log):
+                # Before removing, ensure there are no active DB references to archives under this path
+                try:
+                    with get_db() as conn:
+                        cur = conn.cursor()
+                        prefix = str(stack_dir) + '/%'
+                        cur.execute("SELECT 1 FROM job_stack_metrics WHERE archive_path LIKE %s AND deleted_at IS NULL LIMIT 1;", (prefix,))
+                        active = cur.fetchone()
+                except Exception as e:
+                    # If DB check fails, be conservative and skip deletion; log the error
+                    log(f"DB check failed for {stack_dir.relative_to(archive_base)}: {e}. Skipping deletion.")
+                    active = True
+
+                if active:
+                    # Skip deletion if an active DB reference exists
+                    if is_dry_run:
+                        log(f"Would keep stack directory (active DB references exist): {stack_dir.relative_to(archive_base)}")
+                    else:
+                        log(f"Skipping deletion (active DB references exist): {stack_dir.relative_to(archive_base)}")
+                    continue
+
                 temp_count += 1
 
                 if is_dry_run:
@@ -276,26 +296,54 @@ def cleanup_temp_files(is_dry_run=False, log_callback=None):
 def is_stack_directory_empty(stack_dir, log_callback=None):
     """Check if a stack directory has no valid backups.
 
-    Recognizes timestamped folders using the canonical compact format
-    YYYYMMDD_HHMMSS (e.g. 20251221_174043).
+    Heuristics used:
+      - If any archive file (.tar, .tar.gz, .tar.zst) exists anywhere under the
+        directory, it's considered non-empty.
+      - If any subdirectory name starts with a timestamp pattern (YYYYMMDD_HHMMSS),
+        optionally followed by suffix (e.g. "20251221_182125_beszel"), it's
+        considered non-empty.
+      - If there's a nested directory with the same stack name that contains files,
+        it's considered non-empty (covers layouts like stack/stack/...).
     """
-    if not any(stack_dir.iterdir()):
-        return True  # Completely empty
+    import re
 
-    # Check for tar files
-    has_tar = any(
-        f.suffix in ['.tar', '.gz', '.zst']
-        for f in stack_dir.iterdir()
-        if f.is_file()
-    )
+    # Completely empty
+    try:
+        if not any(stack_dir.iterdir()):
+            return True
+    except Exception:
+        # If something goes wrong reading dir, treat it as non-empty to be safe
+        return False
 
-    # Check for timestamp directories (folder mode).
-    has_timestamp_dirs = any(
-        d.is_dir() and is_valid_timestamp_dirname(d.name)
-        for d in stack_dir.iterdir()
-    )
+    # 1) Look for archive files anywhere under this stack_dir
+    for f in stack_dir.rglob('*'):
+        try:
+            if f.is_file():
+                name = f.name.lower()
+                if name.endswith('.tar') or name.endswith('.tar.gz') or name.endswith('.tar.zst'):
+                    return False
+        except Exception:
+            continue
 
-    return not has_tar and not has_timestamp_dirs
+    # 2) Check for timestamp-like subdirectories (timestamp at start of name)
+    timestamp_re = re.compile(r'^\d{8}_\d{6}')
+    for d in stack_dir.iterdir():
+        if d.is_dir() and timestamp_re.match(d.name):
+            return False
+
+    # 3) Nested stack directory (e.g., stack/stack) that contains files
+    for d in stack_dir.iterdir():
+        if d.is_dir() and d.name == stack_dir.name:
+            # if nested dir contains at least one file, consider non-empty
+            try:
+                if any(p.is_file() for p in d.rglob('*')):
+                    return False
+            except Exception:
+                # Be conservative
+                return False
+
+    # If none of the above heuristics matched, consider it empty
+    return True
 
 
 def is_valid_timestamp_dirname(dirname):
