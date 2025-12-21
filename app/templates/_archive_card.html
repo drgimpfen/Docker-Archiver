@@ -1,6 +1,6 @@
 <div class="col-md-6 col-lg-4" id="archive-card-{{ archive.id }}">
     <div class="card archive-card h-100">
-        <div class="card-body">
+        <div class="card-body d-flex flex-column h-100">
             <div class="d-flex justify-content-between align-items-start mb-2">
                 <h6 class="card-title mb-0">{{ archive.name }}</h6>
                 <span class="badge bg-{{ 'success' if archive.schedule_enabled else 'secondary' }}">
@@ -8,7 +8,7 @@
                 </span>
             </div>
             
-            <div class="mb-2">
+            <div class="mb-2 meta">
                 <div class="stack-badges mb-1">
                     {% set st = archive.stacks | sort %}
                     {% for stack in st[:3] %}
@@ -23,11 +23,13 @@
                 </small>
                 {% if archive.schedule_enabled and archive.schedule_cron %}
                 <small class="text-muted d-block"><i class="bi bi-clock me-1"></i> <code class="small">{{ archive.schedule_cron }}</code></small>
+                {% else %}
+                <small class="text-muted d-block" aria-hidden="true">&nbsp;</small>
                 {% endif %}
             </div>
 
-            {% if archive.last_run %}
-            <div class="mb-2">
+            <div class="mb-2 last-run">
+                {% if archive.last_run %}
                 <small class="text-muted">Last run:</small><br>
                 <small>
                     <span class="badge bg-{{ 'success' if archive.last_status == 'success' else 'danger' }}">
@@ -35,30 +37,34 @@
                     </span>
                     {{ archive.last_run|datetime('%Y-%m-%d %H:%M') }}
                 </small>
+                {% else %}
+                <small class="text-muted" aria-hidden="true">&nbsp;</small>
+                {% endif %}
             </div>
-            {% endif %}
 
-            <div class="mb-2">
+            <div class="mb-2 retention">
                 <small class="text-muted">Retention:</small>
                 <small>
-                    {{ archive.retention_keep_days }}/{{ archive.retention_keep_weeks }}/{{ archive.retention_keep_months }}/{{ archive.retention_keep_years }}
+                    {{ archive.retention_keep_days or 0 }}/{{ archive.retention_keep_weeks or 0 }}/{{ archive.retention_keep_months or 0 }}/{{ archive.retention_keep_years or 0 }}
                     {% if archive.retention_one_per_day %}
                     <i class="bi bi-calendar-check text-info" title="One per day"></i>
                     {% endif %}
                 </small>
             </div>
 
-            {% if archive.next_run_display %}
-            <div class="mb-2">
+            <div class="mb-2 next-run">
                 <small class="text-muted">Next run:</small><br>
+                {% if archive.next_run_display %}
                 <small data-next-run="{{ archive.next_run_display|iso_z }}">
                     {{ archive.next_run_display|datetime('%Y-%m-%d %H:%M') }}
                     <span class="text-info">(<span class="time-until">{% if archive.is_overdue %}overdue{% endif %}</span>)</span>
                 </small>
+                {% else %}
+                <small class="text-muted" aria-hidden="true">&nbsp;</small>
+                {% endif %}
             </div>
-            {% endif %}
 
-            <div class="mt-3 d-flex flex-column gap-2">
+            <div class="actions mt-auto d-flex flex-column gap-2">
                 <div class="d-flex gap-2">
                     <div class="flex-fill">
                         <form method="POST" action="{{ url_for('archives.run', archive_id=archive.id) }}" class="d-block">
