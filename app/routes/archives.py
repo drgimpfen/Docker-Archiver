@@ -11,7 +11,8 @@ from app.db import get_db
 from app.stacks import discover_stacks
 from app.executor import ArchiveExecutor
 from app.scheduler import reload_schedules, get_next_run_time
-from app.utils import format_bytes, format_duration, get_disk_usage, to_iso_z
+from app.utils import format_bytes, format_duration, get_disk_usage
+from app import utils, to_iso_z
 from app.notifications import get_setting
 
 
@@ -390,7 +391,7 @@ def run_retention_only(archive_id):
         
         if not archive:
             flash('Archive not found', 'danger')
-            return redirect(url_for('index'))
+            return redirect(url_for('dashboard.index'))
         
         # Convert to dict to avoid database connection issues in thread
         archive_dict = dict(archive)
@@ -483,14 +484,14 @@ def run_retention_only(archive_id):
         print(f"[INFO] Retention thread started: {thread.is_alive()}")
         
         flash(f'Retention cleanup started for "{archive_dict["name"]}"', 'success')
-        return redirect(url_for('index'))
+        return redirect(url_for('dashboard.index'))
         
     except Exception as e:
         print(f"[ERROR] Failed to start retention route: {e}")
         import traceback
         traceback.print_exc()
         flash(f'Failed to start retention: {str(e)}', 'danger')
-        return redirect(url_for('index'))
+        return redirect(url_for('dashboard.index'))
 
 
 @bp.route('/<int:archive_id>/run', methods=['POST'])
@@ -505,7 +506,7 @@ def run(archive_id):
         
         if not archive:
             flash('Archive not found', 'danger')
-            return redirect(url_for('index'))
+            return redirect(url_for('dashboard.index'))
         
         # Create a job record atomically to prevent duplicate starts
         from app import utils as u
@@ -539,11 +540,11 @@ def run(archive_id):
             flash(f'Archive job for "{archive["name"]}" started', 'info')
         except Exception as e:
             flash(f'Failed to start job: {e}', 'danger')
-        return redirect(url_for('index'))
+        return redirect(url_for('dashboard.index'))
         
     except Exception as e:
         flash(f'Error starting archive: {e}', 'danger')
-        return redirect(url_for('index'))
+        return redirect(url_for('dashboard.index'))
 
 
 @bp.route('/<int:archive_id>/dry-run', methods=['POST'])
@@ -562,7 +563,7 @@ def dry_run(archive_id):
         
         if not archive:
             flash('Archive not found', 'danger')
-            return redirect(url_for('index'))
+            return redirect(url_for('dashboard.index'))
         
         dry_run_config = {
             'stop_containers': stop_containers,
@@ -590,8 +591,8 @@ def dry_run(archive_id):
         except Exception as e:
             flash(f'Failed to start dry run: {e}', 'danger')
 
-        return redirect(url_for('index'))
+        return redirect(url_for('dashboard.index'))
         
     except Exception as e:
         flash(f'Error starting dry run: {e}', 'danger')
-        return redirect(url_for('index'))
+        return redirect(url_for('dashboard.index'))
