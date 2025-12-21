@@ -334,11 +334,7 @@ function showRunCleanupModal() {
             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
           </div>
           <div class="modal-body">
-            <p class="mb-0">This will run the cleanup tasks immediately and may delete files (orphaned archives, old logs, temp files). Are you sure you want to continue?</p>
-            <div class="form-check form-switch mt-3">
-                <input class="form-check-input" type="checkbox" id="runCleanupDryRun" checked>
-                <label class="form-check-label" for="runCleanupDryRun">Dry Run (simulate only, do not delete)</label>
-            </div>
+            <p class="mb-0">This will run the cleanup tasks immediately. Choose <strong>Run (Dry Run)</strong> to simulate the cleanup (no files will be deleted) or <strong>Run (Live)</strong> to perform the actual cleanup now. Are you sure you want to continue?</p>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
