@@ -440,8 +440,6 @@ exclude_paths:
   - /download/*         # Archive downloads (token-based, 24h expiry)
   - /api/*              # External API endpoints (use Bearer token auth)
   - /health             # Health check endpoint
-  - /login              # Login page must be accessible
-  - /setup              # Initial setup page
 ```
 
 **Note:** The `/api/*` endpoints have their own authentication via Bearer tokens. The download endpoint (`/download/<token>`) uses time-limited tokens and doesn't require session authentication.
