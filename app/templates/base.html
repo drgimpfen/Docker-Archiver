@@ -86,15 +86,15 @@
     <main class="app-main mt-4">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-                {% set _seen = namespace(vals=[]) %}
+                {% set _seen = [] %}
                 {% for category, message in messages %}
                     {% set key = category ~ '::' ~ message %}
-                    {% if key not in _seen.vals %}
+                    {% if key not in _seen %}
                         <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
                             {{ message }}
                             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                         </div>
-                        {% do _seen.vals.append(key) %}
+                        {% set _seen = _seen + [key] %}
                     {% endif %}
                 {% endfor %}
             {% endif %}
