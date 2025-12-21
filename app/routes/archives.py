@@ -11,11 +11,90 @@ from app.db import get_db
 from app.stacks import discover_stacks
 from app.executor import ArchiveExecutor
 from app.scheduler import reload_schedules, get_next_run_time
-from app.utils import format_bytes, format_duration, get_disk_usage
+from app.utils import format_bytes, format_duration, get_disk_usage, to_iso_z
 from app.notifications import get_setting
 
 
 bp = Blueprint('archives', __name__, url_prefix='/archives')
+
+
+def _is_ajax_request():
+    """Return True if the request appears to be an AJAX/json request."""
+    return request.headers.get('X-Requested-With') == 'XMLHttpRequest' or 'application/json' in request.headers.get('Accept', '')
+
+
+def _enrich_archive(cur, archive):
+    """Enrich a single archive row (dict-like) with additional computed fields used by the UI."""
+    from app.scheduler import get_prev_run_time
+    from datetime import datetime, timezone
+
+    archive_dict = dict(archive)
+
+    # Job count
+    cur.execute("SELECT COUNT(*) as count FROM jobs WHERE archive_id = %s AND job_type = 'archive';", (archive['id'],))
+    archive_dict['job_count'] = cur.fetchone()['count']
+
+    # Last job
+    cur.execute("""
+        SELECT start_time, status FROM jobs 
+        WHERE archive_id = %s AND job_type = 'archive'
+        ORDER BY start_time DESC LIMIT 1;
+    """, (archive['id'],))
+    last_job = cur.fetchone()
+    archive_dict['last_run'] = last_job['start_time'] if last_job else None
+    archive_dict['last_status'] = last_job['status'] if last_job else None
+
+    # Next run and overdue detection
+    if archive['schedule_enabled']:
+        next_run = get_next_run_time(archive['id'])
+        prev_run = None
+        try:
+            prev_run = get_prev_run_time(archive['id'])
+        except Exception:
+            prev_run = None
+
+        now_utc = datetime.now(timezone.utc)
+        last_run = archive_dict.get('last_run')
+        last_run_utc = None
+        if last_run:
+            try:
+                last_run_utc = last_run.replace(tzinfo=timezone.utc)
+            except Exception:
+                try:
+                    last_run_utc = last_run.astimezone(timezone.utc)
+                except Exception:
+                    last_run_utc = None
+
+        is_overdue = False
+        if prev_run:
+            try:
+                prev_run_utc = prev_run.astimezone(timezone.utc)
+            except Exception:
+                prev_run_utc = prev_run
+            if prev_run_utc < now_utc:
+                if not last_run_utc or last_run_utc < prev_run_utc:
+                    is_overdue = True
+
+        archive_dict['is_overdue'] = is_overdue
+        archive_dict['next_run'] = next_run
+        archive_dict['next_run_display'] = prev_run if is_overdue else next_run
+    else:
+        archive_dict['next_run'] = None
+        archive_dict['next_run_display'] = None
+        archive_dict['is_overdue'] = False
+
+    # Total archived size for this archive
+    cur.execute("""
+        SELECT
+            COALESCE(SUM(CASE WHEN job_type = 'archive' THEN total_size_bytes ELSE 0 END), 0) AS total_archived,
+            COALESCE(SUM(reclaimed_bytes), 0) AS total_reclaimed
+        FROM jobs
+        WHERE archive_id = %s AND status = 'success';
+    """, (archive['id'],))
+    res = cur.fetchone()
+    archive_dict['total_size'] = (res['total_archived'] - res['total_reclaimed']) if res else 0
+
+    return archive_dict
 
 
 @bp.route('/')
@@ -57,22 +136,31 @@ def create():
         
         # Validate archive name for security
         if not validate_archive_name(name):
-            flash('Invalid archive name. Must be alphanumeric, no special characters or path traversal attempts.', 'danger')
-            return redirect(url_for('archives.list_archives'))
+            msg = 'Invalid archive name. Must be alphanumeric, no special characters or path traversal attempts.'
+            if _is_ajax_request():
+                return jsonify({'status': 'error', 'message': msg}), 400
+            flash(msg, 'danger')
+            return redirect(url_for('dashboard.index'))
         
         # Check if archive name already exists
         with get_db() as conn:
             cur = conn.cursor()
             cur.execute("SELECT id FROM archives WHERE name = %s;", (name,))
             if cur.fetchone():
-                flash(f'Archive name "{name}" already exists. Please choose a different name.', 'danger')
-                return redirect(url_for('archives.list_archives'))
+                msg = f'Archive name "{name}" already exists. Please choose a different name.'
+                if _is_ajax_request():
+                    return jsonify({'status': 'error', 'message': msg}), 400
+                flash(msg, 'danger')
+                return redirect(url_for('dashboard.index'))
         
         stacks = request.form.getlist('stacks')
         # Require at least one stack when creating an archive
         if not stacks:
-            flash('Please select at least one stack for the archive.', 'danger')
-            return redirect(url_for('archives.list_archives'))
+            msg = 'Please select at least one stack for the archive.'
+            if _is_ajax_request():
+                return jsonify({'status': 'error', 'message': msg}), 400
+            flash(msg, 'danger')
+            return redirect(url_for('dashboard.index'))
         stop_containers = request.form.get('stop_containers') == 'on'
         schedule_enabled = request.form.get('schedule_enabled') == 'on'
         schedule_cron = request.form.get('schedule_cron', '').strip()
@@ -81,10 +169,10 @@ def create():
         if schedule_enabled and schedule_cron:
             if not croniter.is_valid(schedule_cron):
                 flash('Invalid cron expression. Please use a valid cron format (e.g., "0 3 * * *").', 'danger')
-                return redirect(url_for('archives.list_archives'))
+                return redirect(url_for('dashboard.index'))
         elif schedule_enabled and not schedule_cron:
             flash('Schedule is enabled but no cron expression provided.', 'danger')
-            return redirect(url_for('archives.list_archives'))
+            return redirect(url_for('dashboard.index'))
         output_format = request.form.get('output_format', 'tar')
         
         # Retention settings
@@ -108,7 +196,7 @@ def create():
             keep_years = parse_retention_field('keep_years', 2)
         except ValueError as ve:
             flash(str(ve), 'danger')
-            return redirect(url_for('archives.list_archives'))
+            return redirect(url_for('dashboard.index'))
 
         one_per_day = request.form.get('one_per_day') == 'on'
         
@@ -131,12 +219,28 @@ def create():
         # Reload scheduler
         reload_schedules()
         
+        if _is_ajax_request():
+            # Return rendered archive card so client can insert it without a full page reload
+            with get_db() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM archives WHERE id = %s;", (archive_id,))
+                new_archive = cur.fetchone()
+                archive_dict = _enrich_archive(cur, new_archive)
+            rendered = render_template('_archive_card.html', archive=archive_dict, stacks=discover_stacks(), current_user=get_current_user(), format_bytes=format_bytes)
+            archive_resp = dict(archive_dict)
+            archive_resp['last_run'] = to_iso_z(archive_resp.get('last_run'))
+            archive_resp['next_run'] = to_iso_z(archive_resp.get('next_run'))
+            archive_resp['next_run_display'] = to_iso_z(archive_resp.get('next_run_display'))
+            return jsonify({'status': 'success', 'html': rendered, 'archive_id': archive_id, 'archive': archive_resp})
+
         flash(f'Archive "{name}" created successfully!', 'success')
-        return redirect(url_for('archives.list_archives'))
+        return redirect(url_for('dashboard.index'))
         
     except Exception as e:
+        if _is_ajax_request():
+            return jsonify({'status': 'error', 'message': str(e)}), 500
         flash(f'Error creating archive: {e}', 'danger')
-        return redirect(url_for('archives.list_archives'))
+        return redirect(url_for('dashboard.index'))
 
 
 @bp.route('/<int:archive_id>/edit', methods=['POST'])
@@ -150,8 +254,11 @@ def edit(archive_id):
         stacks = request.form.getlist('stacks')
         # Require at least one stack when editing an archive
         if not stacks:
-            flash('Please select at least one stack for the archive.', 'danger')
-            return redirect(url_for('archives.list_archives'))
+            msg = 'Please select at least one stack for the archive.'
+            if _is_ajax_request():
+                return jsonify({'status': 'error', 'message': msg}), 400
+            flash(msg, 'danger')
+            return redirect(url_for('dashboard.index'))
         stop_containers = request.form.get('stop_containers') == 'on'
         schedule_enabled = request.form.get('schedule_enabled') == 'on'
         schedule_cron = request.form.get('schedule_cron', '').strip()
@@ -159,11 +266,17 @@ def edit(archive_id):
         # Validate cron expression if scheduling is enabled
         if schedule_enabled and schedule_cron:
             if not croniter.is_valid(schedule_cron):
-                flash('Invalid cron expression. Please use a valid cron format (e.g., "0 3 * * *").', 'danger')
-                return redirect(url_for('archives.list_archives'))
+                msg = 'Invalid cron expression. Please use a valid cron format (e.g., "0 3 * * *").'
+                if _is_ajax_request():
+                    return jsonify({'status': 'error', 'message': msg}), 400
+                flash(msg, 'danger')
+                return redirect(url_for('dashboard.index'))
         elif schedule_enabled and not schedule_cron:
-            flash('Schedule is enabled but no cron expression provided.', 'danger')
-            return redirect(url_for('archives.list_archives'))
+            msg = 'Schedule is enabled but no cron expression provided.'
+            if _is_ajax_request():
+                return jsonify({'status': 'error', 'message': msg}), 400
+            flash(msg, 'danger')
+            return redirect(url_for('dashboard.index'))
         output_format = request.form.get('output_format', 'tar')
         
         def parse_retention_field(name, default):
@@ -185,8 +298,11 @@ def edit(archive_id):
             keep_months = parse_retention_field('keep_months', 6)
             keep_years = parse_retention_field('keep_years', 2)
         except ValueError as ve:
-            flash(str(ve), 'danger')
-            return redirect(url_for('archives.list_archives'))
+            msg = str(ve)
+            if _is_ajax_request():
+                return jsonify({'status': 'error', 'message': msg}), 400
+            flash(msg, 'danger')
+            return redirect(url_for('dashboard.index'))
 
         one_per_day = request.form.get('one_per_day') == 'on'
         
@@ -213,13 +329,29 @@ def edit(archive_id):
             conn.commit()
         
         reload_schedules()
-        
+
+        if _is_ajax_request():
+            # Return updated rendered card so client can replace the card without full reload
+            with get_db() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM archives WHERE id = %s;", (archive_id,))
+                updated_archive = cur.fetchone()
+                archive_dict = _enrich_archive(cur, updated_archive)
+            rendered = render_template('_archive_card.html', archive=archive_dict, stacks=discover_stacks(), current_user=get_current_user(), format_bytes=format_bytes)
+            archive_resp = dict(archive_dict)
+            archive_resp['last_run'] = to_iso_z(archive_resp.get('last_run'))
+            archive_resp['next_run'] = to_iso_z(archive_resp.get('next_run'))
+            archive_resp['next_run_display'] = to_iso_z(archive_resp.get('next_run_display'))
+            return jsonify({'status': 'success', 'html': rendered, 'archive_id': archive_id, 'archive': archive_resp})
+
         flash(f'Archive "{archive_name}" updated successfully!', 'success')
-        return redirect(url_for('archives.list_archives'))
+        return redirect(url_for('dashboard.index'))
         
     except Exception as e:
+        if _is_ajax_request():
+            return jsonify({'status': 'error', 'message': str(e)}), 500
         flash(f'Error updating archive: {e}', 'danger')
-        return redirect(url_for('archives.list_archives'))
+        return redirect(url_for('dashboard.index'))
 
 
 @bp.route('/<int:archive_id>/delete', methods=['POST'])
@@ -235,11 +367,11 @@ def delete(archive_id):
         reload_schedules()
         
         flash('Archive deleted successfully!', 'success')
-        return redirect(url_for('archives.list_archives'))
+        return redirect(url_for('dashboard.index'))
         
     except Exception as e:
         flash(f'Error deleting archive: {e}', 'danger')
-        return redirect(url_for('archives.list_archives'))
+        return redirect(url_for('dashboard.index'))
 
 
 @bp.route('/<int:archive_id>/retention', methods=['POST'])
