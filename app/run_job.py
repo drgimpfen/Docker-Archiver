@@ -86,7 +86,7 @@ def main(argv=None):
     # Execute the job. If stdout has been redirected by the parent (e.g., API/scheduler
     # passed a log file), reuse inherited stdout/stderr so we don't create duplicate
     # or empty files. Otherwise, create a per-run log file and redirect stdout/stderr to it.
-    import contextlib, sys
+    import contextlib
     executor = ArchiveExecutor(dict(archive), is_dry_run=args.dry_run, dry_run_config=dry_run_config)
 
     try:
