@@ -517,6 +517,12 @@ document.querySelectorAll('tr[data-job-id]').forEach(function(tr) {
 
 // Periodically check for newly started running jobs and start polling if needed
 setInterval(() => {
+    // If global Jobs SSE is connected, stop/start polling appropriately
+    if (window._jobsEventSource) {
+        if (_dashboardPoller) { clearInterval(_dashboardPoller); _dashboardPoller = null; }
+        return;
+    }
+
     if (document.querySelector('tr[data-job-status="running"]') && !_dashboardPoller) {
         _dashboardPoller = setInterval(pollRunningJobs, 5000);
     }

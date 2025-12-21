@@ -64,6 +64,9 @@
             <a href="{{ url_for('logout') }}" class="btn btn-outline-danger btn-sm w-100 mb-2">
                 <i class="bi bi-box-arrow-right me-1"></i>Logout
             </a>
+            <div class="text-center mt-2">
+                <span id="global-sse-status-badge" class="badge bg-secondary">SSE: disconnected</span>
+            </div>
             <div class="text-center">
                 <small class="text-muted">v{{ app_version }}</small>
             </div>
@@ -692,7 +695,12 @@
                             window._jobsEventSource = new EventSource('/api/jobs/events');
 
                             window._jobsEventSource.onopen = function() {
-                                try { } catch (e) {}
+                                try {
+                                    // If a dashboard poller exists, stop it — SSE provides live updates
+                                    if (window._dashboardPoller) { clearInterval(window._dashboardPoller); window._dashboardPoller = null; }
+                                } catch (e) {}
+                                try { setGlobalSseStatus('connected'); } catch (e) {}
+                                try { console.debug('Jobs SSE connected; dashboard polling stopped'); } catch (e) {}
                                 backoff = 5000; // reset backoff on success
                             };
 
@@ -716,6 +724,7 @@
 
                             window._jobsEventSource.onerror = function(err) {
                                 console.error('Jobs SSE error', err);
+                                try { setGlobalSseStatus('connecting'); } catch (e) {}
                                 try { window._jobsEventSource.close(); } catch (e) {}
                                 window._jobsEventSource = null;
                                 // attempt reconnect with backoff
@@ -841,6 +850,7 @@
                     try { window._jobsEventSource.close(); } catch (e) {}
                     window._jobsEventSource = null;
                 }
+                try { setGlobalSseStatus('disconnected'); } catch (e) {}
             }
 
             // Handle incoming SSE payloads for the Job Details modal
@@ -1186,6 +1196,27 @@
                     s.className = 'badge bg-secondary ms-2';
                     s.title = 'Using polling fallback';
                 }
+            }
+
+            // Global SSE status indicator in the sidebar
+            function setGlobalSseStatus(state) {
+                const el = document.getElementById('global-sse-status-badge');
+                if (!el) return;
+                try {
+                    if (state === 'connected') {
+                        el.textContent = 'SSE: connected';
+                        el.className = 'badge bg-success';
+                        el.title = 'Global jobs stream connected; dashboard polling paused';
+                    } else if (state === 'connecting') {
+                        el.textContent = 'SSE: connecting';
+                        el.className = 'badge bg-warning text-dark';
+                        el.title = 'Attempting to (re)connect to global jobs stream';
+                    } else {
+                        el.textContent = 'SSE: disconnected';
+                        el.className = 'badge bg-secondary';
+                        el.title = 'Global jobs stream disconnected; dashboard polling may be active';
+                    }
+                } catch (e) {}
             }
 
             updateSseStatus('polling');
