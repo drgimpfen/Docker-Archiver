@@ -1220,14 +1220,63 @@
         return `${hours}h ${mins}m`;
     }
 
+    function pad(n) { return String(n).padStart(2,'0'); }
+
     function formatJobTime(t) {
+        // Parse any ISO-like timestamp and format in the client's local timezone as YYYY-MM-DD HH:MM
         if (!t) return 'N/A';
         try {
-            const s = String(t).replace('T',' ');
-            return s.substring(0,16);
-        } catch (e) { return String(t); }
+            const d = new Date(t);
+            if (Number.isNaN(d.getTime())) return String(t).substring(0,16).replace('T',' ');
+            return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        } catch (e) { return String(t).substring(0,16).replace('T',' '); }
     }
-    
+
+    function computeDurationSecondsFromStart(startTime) {
+        if (!startTime) return null;
+        try {
+            const s = new Date(startTime).getTime();
+            if (Number.isNaN(s)) return null;
+            const now = Date.now();
+            const diff = Math.floor((now - s) / 1000);
+            return diff >= 0 ? diff : 0;
+        } catch (e) { return null; }
+    }
+
+    // Update duration cells for running jobs every second
+    function updateRunningDurations() {
+        try {
+            const runningRows = document.querySelectorAll('tr[data-job-status="running"]');
+            if (!runningRows || runningRows.length === 0) {
+                // If we have a ticker running, stop it
+                if (window._dashboardDurationTicker) { clearInterval(window._dashboardDurationTicker); window._dashboardDurationTicker = null; }
+                return;
+            }
+
+            runningRows.forEach(row => {
+                try {
+                    const id = row.getAttribute('data-job-id');
+                    if (!id) return;
+                    const durEl = document.getElementById(`row-job-duration-${id}`);
+                    const startEl = document.getElementById(`row-job-start-${id}`);
+                    if (!durEl || !startEl) return;
+                    const startRaw = startEl.dataset.start || startEl.textContent || '';
+                    const secs = computeDurationSecondsFromStart(startRaw);
+                    if (secs !== null) durEl.textContent = formatDuration(secs);
+                } catch (e) {}
+            });
+        } catch (e) {}
+    }
+
+    function startDashboardDurationTicker() {
+        if (window._dashboardDurationTicker) return;
+        window._dashboardDurationTicker = setInterval(updateRunningDurations, 1000);
+    }
+
+    function stopDashboardDurationTicker() {
+        if (window._dashboardDurationTicker) { clearInterval(window._dashboardDurationTicker); window._dashboardDurationTicker = null; }
+    }
+
     // Edit Archive Modal - Navigate to archives page
     function editArchive(archiveId) {
         localStorage.setItem('openEditModal', archiveId);

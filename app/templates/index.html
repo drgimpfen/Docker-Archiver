@@ -437,9 +437,18 @@ function updateJobRowFromJob(job) {
     const durEl = document.getElementById(`row-job-duration-${job.id}`);
     const sizeEl = document.getElementById(`row-job-size-${job.id}`);
 
-    if (startEl) startEl.textContent = formatJobTime(job.start_time);
-    if (endEl) endEl.textContent = formatJobTime(job.end_time);
-    if (durEl) durEl.textContent = formatDuration(job.duration_seconds);
+    if (startEl) { startEl.textContent = formatJobTime(job.start_time); startEl.dataset.start = job.start_time || ''; }
+    if (endEl) { endEl.textContent = formatJobTime(job.end_time); endEl.dataset.end = job.end_time || ''; }
+    if (durEl) {
+        if (job.status === 'running') {
+            const secs = computeDurationSecondsFromStart(job.start_time);
+            durEl.textContent = secs !== null ? formatDuration(secs) : 'N/A';
+            // Ensure duration ticker is running to update live
+            try { startDashboardDurationTicker(); } catch (e) {}
+        } else {
+            durEl.textContent = formatDuration(job.duration_seconds);
+        }
+    }
 
     if (sizeEl) {
         if (job.job_type === 'archive' && job.total_size_bytes) {
@@ -512,6 +521,10 @@ document.querySelectorAll('tr[data-job-id]').forEach(function(tr) {
 setInterval(() => {
     if (document.querySelector('tr[data-job-status="running"]') && !_dashboardPoller) {
         _dashboardPoller = setInterval(pollRunningJobs, 5000);
+    }
+    // If there are running rows on the page, ensure duration ticker is active
+    if (document.querySelector('tr[data-job-status="running"]')) {
+        try { startDashboardDurationTicker(); } catch (e) {}
     }
 }, 10000);
 
