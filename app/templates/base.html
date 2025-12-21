@@ -228,7 +228,7 @@
         try{
             const d = new Date(isoStr);
             if (isNaN(d.getTime())) return isoStr;
-            return `${d.toLocaleString()} <small class="text-muted">(${d.toISOString().replace('T',' ').replace('Z',' UTC')})</small>`;
+            return `${d.toLocaleString()}`;
         } catch (e){
             return isoStr;
         }
