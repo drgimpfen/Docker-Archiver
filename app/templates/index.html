@@ -494,15 +494,8 @@ async function pollRunningJobs() {
 }
 
 // Start Jobs SSE on dashboard load to receive new job events
-try {
-    if (typeof window.startJobsEventSource === 'function') {
-        window.startJobsEventSource();
-    } else {
-        console.warn('startJobsEventSource is not defined; SSE will be disabled for this page.');
-    }
-} catch (e) {
-    console.error('Error invoking startJobsEventSource:', e);
-}
+// Global Jobs SSE support removed — dashboard will use polling for updates.
+try { console.debug('Dashboard polling active (global Jobs SSE removed)'); } catch (e) {}
 
 // Attach handlers to any existing job rows rendered on the page (ensures modal opens on click)
 document.querySelectorAll('tr[data-job-id]').forEach(function(tr) {
@@ -517,12 +510,6 @@ document.querySelectorAll('tr[data-job-id]').forEach(function(tr) {
 
 // Periodically check for newly started running jobs and start polling if needed
 setInterval(() => {
-    // If global Jobs SSE is connected, stop/start polling appropriately
-    if (window._jobsEventSource) {
-        if (_dashboardPoller) { clearInterval(_dashboardPoller); _dashboardPoller = null; }
-        return;
-    }
-
     if (document.querySelector('tr[data-job-status="running"]') && !_dashboardPoller) {
         _dashboardPoller = setInterval(pollRunningJobs, 5000);
     }

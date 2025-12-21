@@ -64,9 +64,6 @@
             <a href="{{ url_for('logout') }}" class="btn btn-outline-danger btn-sm w-100 mb-2">
                 <i class="bi bi-box-arrow-right me-1"></i>Logout
             </a>
-            <div class="text-center mt-2">
-                <span id="global-sse-status-badge" class="badge bg-secondary">SSE: disconnected</span>
-            </div>
             <div class="text-center">
                 <small class="text-muted">v{{ app_version }}</small>
             </div>
@@ -209,10 +206,7 @@
     </div>
     
     <script>
-    // Safety placeholder: ensure `startJobsEventSource` exists even if rest of the script fails to execute
-    if (!window.startJobsEventSource) {
-        window.startJobsEventSource = function() { console.warn('startJobsEventSource placeholder called (SSE disabled)'); };
-    }
+    // Global Jobs SSE disabled — dashboard relies on polling now.
 
     // Shared job details modal function
     async function showJobDetails(jobId) {
@@ -684,63 +678,7 @@
                 }
             }
 
-            // --- Global jobs EventSource (dashboard) ---
-            window.startJobsEventSource = function() {
-                if (typeof(EventSource) === 'undefined') return;
-                if (window._jobsEventSource) return;
-                try {
-                    let backoff = 5000;
-                    function open() {
-                        try {
-                            window._jobsEventSource = new EventSource('/api/jobs/events');
-
-                            window._jobsEventSource.onopen = function() {
-                                try {
-                                    // If a dashboard poller exists, stop it — SSE provides live updates
-                                    if (window._dashboardPoller) { clearInterval(window._dashboardPoller); window._dashboardPoller = null; }
-                                } catch (e) {}
-                                try { setGlobalSseStatus('connected'); } catch (e) {}
-                                try { console.debug('Jobs SSE connected; dashboard polling stopped'); } catch (e) {}
-                                backoff = 5000; // reset backoff on success
-                            };
-
-                            window._jobsEventSource.onmessage = function(e) {
-                                try {
-                                    const payload = JSON.parse(e.data);
-                                    if (!payload || !payload.type) return;
-                                    if (payload.type === 'job' || payload.type === 'status') {
-                                        const j = payload.data || {};
-                                        if (j.start_time) j.start_time = String(j.start_time);
-                                        if (document.getElementById(`job-row-${j.id}`)) {
-                                            updateJobRowFromJob(j);
-                                        } else {
-                                            addOrInsertJobRow(j);
-                                        }
-                                    }
-                                } catch (err) {
-                                    console.error('Error handling jobs SSE message', err);
-                                }
-                            };
-
-                            window._jobsEventSource.onerror = function(err) {
-                                console.error('Jobs SSE error', err);
-                                try { setGlobalSseStatus('connecting'); } catch (e) {}
-                                try { window._jobsEventSource.close(); } catch (e) {}
-                                window._jobsEventSource = null;
-                                // attempt reconnect with backoff
-                                setTimeout(() => { backoff = Math.min(backoff * 2, 60000); open(); }, backoff);
-                            };
-                        } catch (err) {
-                            console.error('Failed to start Jobs SSE:', err);
-                            setTimeout(open, backoff);
-                            backoff = Math.min(backoff * 2, 60000);
-                        }
-                    }
-                    open();
-                } catch (err) {
-                    console.error('Failed to initialize Jobs SSE:', err);
-                }
-            }
+            // Global Jobs SSE removed — dashboard uses polling now.
 
             // Helper to attach click/keyboard handlers to a job row
             function attachJobRowHandlers(tr, jobId) {
@@ -846,11 +784,7 @@
             }
 
             function stopJobsEventSource() {
-                if (window._jobsEventSource) {
-                    try { window._jobsEventSource.close(); } catch (e) {}
-                    window._jobsEventSource = null;
-                }
-                try { setGlobalSseStatus('disconnected'); } catch (e) {}
+                // No-op: global Jobs SSE disabled
             }
 
             // Handle incoming SSE payloads for the Job Details modal
@@ -1198,26 +1132,7 @@
                 }
             }
 
-            // Global SSE status indicator in the sidebar
-            function setGlobalSseStatus(state) {
-                const el = document.getElementById('global-sse-status-badge');
-                if (!el) return;
-                try {
-                    if (state === 'connected') {
-                        el.textContent = 'SSE: connected';
-                        el.className = 'badge bg-success';
-                        el.title = 'Global jobs stream connected; dashboard polling paused';
-                    } else if (state === 'connecting') {
-                        el.textContent = 'SSE: connecting';
-                        el.className = 'badge bg-warning text-dark';
-                        el.title = 'Attempting to (re)connect to global jobs stream';
-                    } else {
-                        el.textContent = 'SSE: disconnected';
-                        el.className = 'badge bg-secondary';
-                        el.title = 'Global jobs stream disconnected; dashboard polling may be active';
-                    }
-                } catch (e) {}
-            }
+
 
             updateSseStatus('polling');
 
