@@ -112,6 +112,8 @@ def init_db():
                 stack_name VARCHAR(255),
                 archive_path TEXT NOT NULL,
                 is_folder BOOLEAN DEFAULT false,
+                -- Added in v0.7.x: flag to indicate server is currently preparing a generated download file
+                is_preparing BOOLEAN DEFAULT false,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMP NOT NULL,
                 downloads INTEGER DEFAULT 0
@@ -267,6 +269,19 @@ def init_db():
             print(f"[DB MIGRATE] Complete. Migrated: {len(migrated)}; Skipped: {len(skipped)}; Failed: {len(failed)}")
         else:
             print('[DB] MIGRATE_TIMESTAMPTZ not enabled; skipping timestamptz migration. Set MIGRATE_TIMESTAMPTZ=true to enable.')
+
+        # Ensure download_tokens has an is_preparing column for in-progress generation
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='is_preparing'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN is_preparing BOOLEAN DEFAULT false;
+                END IF;
+            END $$;
+        """)
 
         # Insert default settings if not exist
         cur.execute("""

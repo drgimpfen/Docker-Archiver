@@ -10,7 +10,8 @@ from app.db import get_db
 from app import utils
 
 # Directory where generated download archives live (default: container tmp)
-DOWNLOADS_PATH = Path(os.environ.get('DOWNLOADS_PATH', '/tmp/downloads'))
+# Fixed downloads directory - always use /tmp/downloads (not configurable)
+DOWNLOADS_PATH = Path('/tmp/downloads')
 DOWNLOADS_PATH.mkdir(parents=True, exist_ok=True)
 
 
@@ -227,7 +228,7 @@ def startup_rescan_downloads():
                                 new_name = f"{utils.local_now().strftime('%Y%m%d_%H%M%S')}_download_{utils.filename_safe(candidate.name)}{candidate.suffix}"
                                 dest = DOWNLOADS_PATH / new_name
                                 shutil.copy2(str(candidate), str(dest))
-                                cur.execute("UPDATE download_tokens SET archive_path = %s WHERE token = %s;", (str(dest), token))
+                                cur.execute("UPDATE download_tokens SET archive_path = %s, is_preparing = false WHERE token = %s;", (str(dest), token))
                                 conn.commit()
                                 print(f"[Downloads] Restored download for token {token} from job metric: {dest}")
                                 continue
@@ -241,7 +242,7 @@ def startup_rescan_downloads():
                                 # Prefer compressed zstd archives for downloads when creating from folders
                                 new_path, should_cleanup = prepare_archive_for_download(str(candidate), output_format='tar.zst')
                                 if new_path:
-                                    cur.execute("UPDATE download_tokens SET archive_path = %s, is_folder = false WHERE token = %s;", (str(new_path), token))
+                                    cur.execute("UPDATE download_tokens SET archive_path = %s, is_folder = false, is_preparing = false WHERE token = %s;", (str(new_path), token))
                                     conn.commit()
                                     print(f"[Downloads] Created archive {new_path} for token {token} from directory {candidate}")
                                     continue
@@ -257,3 +258,123 @@ def startup_rescan_downloads():
                 print(f"[Downloads] Failed to mark token {token} expired: {e}")
 
     print("[Downloads] Startup rescan complete.")
+
+
+def regenerate_token(token):
+    """Attempt to regenerate a download file for a specific token into DOWNLOADS_PATH.
+
+    Sets `is_preparing` to True at the start and clears it at the end.
+    """
+    print(f"[Downloads] Starting regeneration for token {token}")
+    with get_db() as conn:
+        cur = conn.cursor()
+        # Mark as preparing if not already
+        try:
+            cur.execute("SELECT is_preparing, archive_path, is_folder, job_id, stack_name FROM download_tokens WHERE token = %s;", (token,))
+            row = cur.fetchone()
+            if not row:
+                print(f"[Downloads] regenerate_token: token {token} not found")
+                return False
+            if row.get('is_preparing'):
+                print(f"[Downloads] regenerate_token: token {token} already preparing")
+                return False
+            cur.execute("UPDATE download_tokens SET is_preparing = true WHERE token = %s;", (token,))
+            conn.commit()
+        except Exception as e:
+            print(f"[Downloads] Failed to mark token {token} as preparing: {e}")
+            return False
+
+    success = False
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT archive_path, is_folder, job_id, stack_name FROM download_tokens WHERE token = %s;", (token,))
+            trow = cur.fetchone()
+            if not trow:
+                print(f"[Downloads] regenerate_token: token {token} disappeared")
+                return False
+            archive_path = trow.get('archive_path')
+            is_folder = trow.get('is_folder')
+
+            if not archive_path:
+                print(f"[Downloads] regenerate_token: token {token} has no archive_path")
+                return False
+
+            candidate = Path(archive_path)
+            if candidate.exists():
+                # If candidate points outside DOWNLOADS_PATH, copy/prepare into DOWNLOADS_PATH
+                if candidate.is_file():
+                    try:
+                        new_name = f"{utils.local_now().strftime('%Y%m%d_%H%M%S')}_download_{utils.filename_safe(candidate.name)}{candidate.suffix}"
+                        dest = DOWNLOADS_PATH / new_name
+                        shutil.copy2(str(candidate), str(dest))
+                        cur.execute("UPDATE download_tokens SET archive_path = %s, is_preparing = false WHERE token = %s;", (str(dest), token))
+                        conn.commit()
+                        print(f"[Downloads] regenerate_token: Restored token {token} from {candidate} -> {dest}")
+                        success = True
+                    except Exception as e:
+                        print(f"[Downloads] regenerate_token: Failed to copy candidate {candidate} for token {token}: {e}")
+                elif candidate.is_dir():
+                    try:
+                        new_path, did_cleanup = prepare_archive_for_download(str(candidate), output_format='tar.zst')
+                        if new_path and Path(new_path).exists():
+                            cur.execute("UPDATE download_tokens SET archive_path = %s, is_folder = false, is_preparing = false WHERE token = %s;", (str(new_path), token))
+                            conn.commit()
+                            print(f"[Downloads] regenerate_token: Created archive {new_path} for token {token} from directory {candidate}")
+                            success = True
+                    except Exception as e:
+                        print(f"[Downloads] regenerate_token: Failed to create archive from {candidate} for token {token}: {e}")
+            else:
+                # Try to find from job_stack_metrics
+                job_id = trow.get('job_id')
+                stack_name = trow.get('stack_name')
+                if job_id and stack_name:
+                    cur.execute("""
+                        SELECT archive_path FROM job_stack_metrics
+                        WHERE job_id = %s AND stack_name = %s AND archive_path IS NOT NULL
+                        ORDER BY start_time DESC LIMIT 1;
+                    """, (job_id, stack_name))
+                    row2 = cur.fetchone()
+                    if row2 and row2.get('archive_path'):
+                        cand = Path(row2['archive_path'])
+                        if cand.exists():
+                            if cand.is_file():
+                                try:
+                                    new_name = f"{utils.local_now().strftime('%Y%m%d_%H%M%S')}_download_{utils.filename_safe(cand.name)}{cand.suffix}"
+                                    dest = DOWNLOADS_PATH / new_name
+                                    shutil.copy2(str(cand), str(dest))
+                                    cur.execute("UPDATE download_tokens SET archive_path = %s, is_preparing = false WHERE token = %s;", (str(dest), token))
+                                    conn.commit()
+                                    print(f"[Downloads] regenerate_token: Restored token {token} from job metric {cand} -> {dest}")
+                                    success = True
+                                except Exception as e:
+                                    print(f"[Downloads] regenerate_token: Failed to copy candidate file {cand} for token {token}: {e}")
+                            elif cand.is_dir():
+                                try:
+                                    new_path, did_cleanup = prepare_archive_for_download(str(cand), output_format='tar.zst')
+                                    if new_path and Path(new_path).exists():
+                                        cur.execute("UPDATE download_tokens SET archive_path = %s, is_folder = false, is_preparing = false WHERE token = %s;", (str(new_path), token))
+                                        conn.commit()
+                                        print(f"[Downloads] regenerate_token: Created archive {new_path} for token {token} from job metric {cand}")
+                                        success = True
+                                except Exception as e:
+                                    print(f"[Downloads] regenerate_token: Failed to create archive from {cand} for token {token}: {e}")
+
+    except Exception as e:
+        print(f"[Downloads] regenerate_token: Unexpected error for token {token}: {e}")
+    finally:
+        try:
+            # Ensure we clear is_preparing if we didn't already set the new archive_path
+            with get_db() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT archive_path, is_preparing FROM download_tokens WHERE token = %s;", (token,))
+                r = cur.fetchone()
+                if r and (not r.get('archive_path')) and r.get('is_preparing'):
+                    cur.execute("UPDATE download_tokens SET is_preparing = false WHERE token = %s;", (token,))
+                    conn.commit()
+                    print(f"[Downloads] regenerate_token: Cleared is_preparing for token {token}")
+        except Exception:
+            pass
+
+    print(f"[Downloads] regenerate_token complete for token {token} (success={success})")
+    return success

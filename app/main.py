@@ -13,9 +13,11 @@ from app.db import init_db, get_db
 from app.auth import login_required, authenticate_user, create_user, get_user_count, get_current_user
 from app.scheduler import init_scheduler, get_next_run_time
 from app.stacks import discover_stacks, get_stack_mount_paths
-from app.downloads import get_download_by_token, get_download_token_row, prepare_archive_for_download, increment_download_count
+from app.downloads import get_download_by_token, get_download_token_row, prepare_archive_for_download, increment_download_count, DOWNLOADS_PATH
 from app.notifications import get_setting
 from app.utils import format_bytes, format_duration, get_disk_usage, to_iso_z
+import shutil
+from app import utils
 from pathlib import Path
 
 # Import blueprints
@@ -352,14 +354,70 @@ def download_archive(token):
         return render_template('download_error.html', reason='Download-Limit erreicht', hint='Der Download wurde zu oft verwendet. Erstelle bitte einen neuen Download.'), 429
 
     archive_path = token_row['archive_path']
-    # Security: Validate path is within archives directory
-    if archive_path and not is_safe_path('/archives', archive_path):
-        return render_template('download_error.html', reason='Ungültiger Pfad', hint='Der Pfad zum Archiv ist ungültig.'), 403
+    # We enforce that served downloads always come from DOWNLOADS_PATH.
+    # If the token references a different path, attempt to regenerate a download
+    # inside DOWNLOADS_PATH (copy file or create archive from folder) and update
+    # the token to point to that generated file.
+    from pathlib import Path as _Path
+    def _is_under_downloads(p):
+        try:
+            return _Path(p).resolve().is_relative_to(DOWNLOADS_PATH.resolve())
+        except Exception:
+            # Fallback for Python <3.9: compare parts
+            try:
+                return str(_Path(p).resolve()).startswith(str(DOWNLOADS_PATH.resolve()))
+            except Exception:
+                return False
 
-    # Prepare archive (create if folder)
-    actual_path, should_cleanup = prepare_archive_for_download(archive_path, output_format='tar.gz')
+    actual_path = None
+    should_cleanup = False
 
-    if not actual_path or not Path(actual_path).exists():
+    if archive_path:
+        try:
+            p = _Path(archive_path)
+            if p.exists() and _is_under_downloads(p):
+                actual_path = str(p.resolve())
+            else:
+                # If token is already preparing, show preparing message
+                if token_row.get('is_preparing'):
+                    return render_template('download_error.html', reason='Download wird vorbereitet', hint='Der Download wird gerade neu erstellt. Bitte versuche es in ein paar Minuten erneut.'), 202
+
+                # Try to detect if an original source exists (either the token's archive_path or a job metric)
+                source_exists = False
+                try:
+                    if p.exists():
+                        source_exists = True
+                    else:
+                        job_id = token_row.get('job_id')
+                        stack_name = token_row.get('stack_name')
+                        if job_id and stack_name:
+                            with get_db() as conn:
+                                cur = conn.cursor()
+                                cur.execute("""
+                                    SELECT archive_path FROM job_stack_metrics
+                                    WHERE job_id = %s AND stack_name = %s AND archive_path IS NOT NULL
+                                    ORDER BY start_time DESC LIMIT 1;
+                                """, (job_id, stack_name))
+                                row = cur.fetchone()
+                                if row and row.get('archive_path') and _Path(row['archive_path']).exists():
+                                    source_exists = True
+                except Exception:
+                    source_exists = False
+
+                if source_exists:
+                    # Start background regeneration which will set is_preparing=true
+                    try:
+                        from app.downloads import regenerate_token
+                        threading.Thread(target=regenerate_token, args=(token,), daemon=True).start()
+                        return render_template('download_error.html', reason='Download wird vorbereitet', hint='Der Download wird gerade neu erstellt. Bitte versuche es in ein paar Minuten erneut.'), 202
+                    except Exception as e:
+                        print(f"[Downloads] Failed to start background regeneration for token {token}: {e}")
+                        # Fall back to reporting not found
+                
+        except Exception as e:
+            print(f"[Downloads] Error while resolving archive_path for token {token}: {e}")
+
+    if not actual_path or not _Path(actual_path).exists():
         return render_template('download_error.html', reason='Datei nicht gefunden', hint='Die Datei ist nicht mehr vorhanden. Du kannst den Download erneut generieren, indem du ein neues Archiv erstellst oder die Download‑Aktion nochmal startest.'), 404
 
     # Before sending, increment download counter

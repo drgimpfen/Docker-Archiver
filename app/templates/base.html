@@ -1261,13 +1261,17 @@
             const data = await response.json();
             
             if (data.success) {
-                if (data.is_folder) {
-                    // Show a modal informing the user that archive preparation has started
+                if (data.is_folder || data.is_preparing) {
+                    // Show a modal informing the user that archive preparation has started or is in-progress
                     const modalEl = document.getElementById('downloadPrepModal');
                     const msgEl = document.getElementById('downloadPrepMessage');
-                    if (msgEl) msgEl.textContent = data.message || 'The archive is being prepared; you will receive a notification when it is ready.';
+                    if (msgEl) msgEl.textContent = data.message || (data.is_preparing ? 'The archive is being prepared; please try again in a few minutes.' : 'The archive is being prepared; you will receive a notification when it is ready.');
                     try { if (modalEl && typeof bootstrap !== 'undefined' && bootstrap.Modal) new bootstrap.Modal(modalEl).show(); else alert(data.message); } catch(e){ alert(data.message); }
+
+                    // Persist token in localStorage so the modal persists across reloads and start polling
+                    try { if (data.token) { localStorage.setItem('download_prep_token', data.token); startDownloadStatusPolling(data.token); } } catch(e) {}
                 } else {
+                    try { localStorage.removeItem('download_prep_token'); } catch(e) {}
                     window.open(data.download_url, '_blank');
                 }
             } else {
@@ -1281,6 +1285,58 @@
     function downloadLog(jobId) {
         window.open(`/api/jobs/${jobId}/log`, '_blank');
     }
+
+    // Polling for a token's prepare status so the modal persists across reloads
+    let _downloadStatusPollInterval = null;
+    async function checkDownloadStatus(token) {
+        try {
+            const resp = await fetch(`/api/downloads/status?token=${encodeURIComponent(token)}`);
+            const d = await resp.json();
+            if (d.ready && d.download_url) {
+                // Clear persisted state
+                try { localStorage.removeItem('download_prep_token'); } catch(e){}
+                // Hide modal if visible
+                const modalEl = document.getElementById('downloadPrepModal');
+                try { if (modalEl && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+                    const inst = bootstrap.Modal.getInstance(modalEl);
+                    if (inst) inst.hide();
+                }} catch(e){}
+                // Auto-open download in a new tab
+                window.open(d.download_url, '_blank');
+                return true;
+            } else {
+                // Show modal status
+                const modalEl = document.getElementById('downloadPrepModal');
+                const msgEl = document.getElementById('downloadPrepMessage');
+                if (msgEl) msgEl.textContent = 'The archive is being prepared; please try again in a few minutes.';
+                try { if (modalEl && typeof bootstrap !== 'undefined' && bootstrap.Modal) new bootstrap.Modal(modalEl).show(); } catch(e){}
+                return false;
+            }
+        } catch (e) {
+            console.error('Failed to check download status', e);
+            return false;
+        }
+    }
+
+    function startDownloadStatusPolling(token) {
+        if (_downloadStatusPollInterval) clearInterval(_downloadStatusPollInterval);
+        checkDownloadStatus(token);
+        _downloadStatusPollInterval = setInterval(async () => {
+            const ready = await checkDownloadStatus(token);
+            if (ready && _downloadStatusPollInterval) {
+                clearInterval(_downloadStatusPollInterval);
+                _downloadStatusPollInterval = null;
+            }
+        }, 10000);
+    }
+
+    // On page load, resume any persisted preparing state
+    document.addEventListener('DOMContentLoaded', () => {
+        try {
+            const t = localStorage.getItem('download_prep_token');
+            if (t) startDownloadStatusPolling(t);
+        } catch (e) {}
+    });
 
     function downloadStackLog(jobId, stackName) {
         window.open(`/api/jobs/${jobId}/log?stack=${encodeURIComponent(stackName)}`, '_blank');

@@ -444,6 +444,8 @@ exclude_paths:
 
 **Note:** The `/api/*` endpoints have their own authentication via Bearer tokens. The download endpoint (`/download/<token>`) uses time-limited tokens and doesn't require session authentication.
 
+Downloads are always prepared/stored under `/tmp/downloads` on the host container (this path is fixed and not configurable). If a requested token points to an archive outside this directory, the application will attempt to regenerate a download file into `/tmp/downloads` before serving it.
+
 ### Reverse proxy examples
 
 For readable, centralized reverse proxy guidance and ready-to-copy examples for Traefik, Nginx / Nginx Proxy Manager, and Caddy, see `REVERSE_PROXY.md`.

@@ -144,6 +144,39 @@ def request_download(job_id):
         # Check if it's a folder - if yes, we need to create an archive
         is_folder = os.path.isdir(archive_path)
         
+        # Check for an existing valid token for this job/stack so we don't create duplicate work
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT token, archive_path, is_folder, is_preparing FROM download_tokens
+                WHERE job_id = %s AND stack_name = %s AND (expires_at IS NULL OR expires_at > NOW())
+                ORDER BY id DESC LIMIT 1;
+            """, (job_id, stack_name))
+            existing = cur.fetchone()
+
+        if existing:
+            # If a ready file already exists for the token, return its download URL
+            existing_path = existing.get('archive_path')
+            if existing_path and os.path.exists(existing_path):
+                base_url = _get_base_url().rstrip('/')
+                download_url = f"{base_url}/download/{existing['token']}"
+                return jsonify({
+                    'success': True,
+                    'download_url': download_url,
+                    'token': existing['token'],
+                    'expires_in': '24 hours',
+                    'is_folder': False
+                })
+            # If it's actively preparing, inform the caller so the UI can show the modal
+            if existing.get('is_preparing'):
+                return jsonify({
+                    'success': True,
+                    'message': 'Archive is being prepared. You will receive a notification when it is ready.',
+                    'is_folder': True,
+                    'is_preparing': True,
+                    'token': existing['token']
+                })
+
         # Generate download token
         token = secrets.token_urlsafe(32)
         expires_at = utils.now() + timedelta(hours=24)
@@ -170,7 +203,22 @@ def request_download(job_id):
                 'is_folder': True
             })
         else:
-            # File is ready, return download link
+            # If the requested file path does not (yet) exist on disk, start background regeneration
+            if archive_path and not os.path.exists(archive_path):
+                try:
+                    from app.downloads import regenerate_token
+                    threading.Thread(target=regenerate_token, args=(token,), daemon=True).start()
+                    return jsonify({
+                        'success': True,
+                        'message': 'The file is being prepared; please try again in a few minutes.',
+                        'is_folder': False,
+                        'is_preparing': True,
+                        'token': token
+                    })
+                except Exception as e:
+                    print(f"[API] Failed to start background regeneration for token {token}: {e}")
+
+            # File is ready (or we couldn't start regen), return download link
             base_url = _get_base_url().rstrip('/')
             download_url = f"{base_url}/download/{token}"
             return jsonify({
@@ -180,6 +228,7 @@ def request_download(job_id):
                 'expires_in': '24 hours',
                 'is_folder': False
             })
+
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -408,53 +457,78 @@ def _prepare_folder_download(token, folder_path, stack_name, user_email):
         archive_name = f"{timestamp}_download_{safe_name}.tar.zst"
         archive_path = _downloads.DOWNLOADS_PATH / archive_name
 
-        # Compress folder
-        subprocess.run(
-            ['tar', '-I', 'zstd', '-cf', str(archive_path), '-C', str(Path(folder_path).parent), Path(folder_path).name],
-            check=True,
-            timeout=3600
-        )
+        # Mark token as preparing
+        try:
+            with get_db() as conn:
+                cur = conn.cursor()
+                cur.execute("UPDATE download_tokens SET is_preparing = true WHERE token = %s;", (token,))
+                conn.commit()
+        except Exception as e:
+            print(f"[ERROR] Failed to mark token {token} as preparing: {e}")
 
-        # Update token with new path
-        with get_db() as conn:
-            cur = conn.cursor()
-            cur.execute("""
-                UPDATE download_tokens 
-                SET archive_path = %s, is_folder = false 
-                WHERE token = %s;
-            """, (str(archive_path), token))
-            conn.commit()
-        
-        # Send notification
-        if user_email:
-            import apprise
-            apobj = apprise.Apprise()
+        try:
+            # Compress folder
+            subprocess.run(
+                ['tar', '-I', 'zstd', '-cf', str(archive_path), '-C', str(Path(folder_path).parent), Path(folder_path).name],
+                check=True,
+                timeout=3600
+            )
+
+            # Update token with new path and clear preparing flag
+            with get_db() as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    UPDATE download_tokens 
+                    SET archive_path = %s, is_folder = false, is_preparing = false 
+                    WHERE token = %s;
+                """, (str(archive_path), token))
+                conn.commit()
             
-            # Get SMTP config
-            smtp_server = os.environ.get('SMTP_SERVER')
-            smtp_user = os.environ.get('SMTP_USER')
-            smtp_password = os.environ.get('SMTP_PASSWORD')
-            smtp_port = os.environ.get('SMTP_PORT', '587')
-            smtp_from = os.environ.get('SMTP_FROM')
-            
-            if all([smtp_server, smtp_user, smtp_password, smtp_from]):
-                mailto_url = f"mailtos://{smtp_user}:{smtp_password}@{smtp_server}:{smtp_port}/?from={smtp_from}&to={user_email}"
-                apobj.add(mailto_url)
+            # Send notification
+            if user_email:
+                import apprise
+                apobj = apprise.Apprise()
                 
-                base_url = _get_base_url().rstrip('/')
-                download_url = f"{base_url}/download/{token}"
+                # Get SMTP config
+                smtp_server = os.environ.get('SMTP_SERVER')
+                smtp_user = os.environ.get('SMTP_USER')
+                smtp_password = os.environ.get('SMTP_PASSWORD')
+                smtp_port = os.environ.get('SMTP_PORT', '587')
+                smtp_from = os.environ.get('SMTP_FROM')
                 
-                apobj.notify(
-                    title="📦 Archive Download Ready",
-                    body=f"""<h2>Your archive is ready for download</h2>
+                if all([smtp_server, smtp_user, smtp_password, smtp_from]):
+                    mailto_url = f"mailtos://{smtp_user}:{smtp_password}@{smtp_server}:{smtp_port}/?from={smtp_from}&to={user_email}"
+                    apobj.add(mailto_url)
+                    
+                    base_url = _get_base_url().rstrip('/')
+                    download_url = f"{base_url}/download/{token}"
+                    
+                    apobj.notify(
+                        title="📦 Archive Download Ready",
+                        body=f"""<h2>Your archive is ready for download</h2>
 <p><strong>Stack:</strong> {stack_name}</p>
 <p><a href="{download_url}">Download Archive</a></p>
 <p><small>This link will expire in 24 hours</small></p>""",
-                    body_format='html'
-                )
-    
+                        body_format='html'
+                    )
+        except Exception as e:
+            print(f"[ERROR] Failed to prepare download: {e}")
+            try:
+                with get_db() as conn:
+                    cur = conn.cursor()
+                    cur.execute("UPDATE download_tokens SET is_preparing = false WHERE token = %s;", (token,))
+                    conn.commit()
+            except Exception:
+                pass
     except Exception as e:
-        print(f"[ERROR] Failed to prepare download: {e}")
+        print(f"[ERROR] _prepare_folder_download failed: {e}")
+        try:
+            with get_db() as conn:
+                cur = conn.cursor()
+                cur.execute("UPDATE download_tokens SET is_preparing = false WHERE token = %s;", (token,))
+                conn.commit()
+        except Exception:
+            pass
 
 
 @bp.route('/archives', methods=['GET'])
@@ -678,3 +752,36 @@ def _get_base_url():
         cur.execute("SELECT value FROM settings WHERE key = 'base_url';")
         result = cur.fetchone()
         return result['value'] if result else 'http://localhost:8080'
+
+
+@bp.route('/downloads/status')
+@api_auth_required
+def download_status():
+    """Return status for a given download token (used by client polling)."""
+    token = request.args.get('token')
+    if not token:
+        return jsonify({'error': 'token required'}), 400
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT token, archive_path, is_preparing, is_folder, expires_at FROM download_tokens WHERE token = %s;", (token,))
+        row = cur.fetchone()
+
+    if not row:
+        return jsonify({'error': 'token not found'}), 404
+
+    archive_path = row.get('archive_path')
+    is_preparing = bool(row.get('is_preparing'))
+    ready = True if (archive_path and os.path.exists(archive_path)) else False
+
+    download_url = None
+    if ready:
+        base_url = _get_base_url().rstrip('/')
+        download_url = f"{base_url}/download/{token}"
+
+    return jsonify({
+        'token': token,
+        'is_preparing': is_preparing,
+        'ready': ready,
+        'download_url': download_url
+    })
