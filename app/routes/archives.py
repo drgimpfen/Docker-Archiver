@@ -227,11 +227,13 @@ def create():
                 new_archive = cur.fetchone()
                 archive_dict = _enrich_archive(cur, new_archive)
             rendered = render_template('_archive_card.html', archive=archive_dict, stacks=discover_stacks(), current_user=get_current_user(), format_bytes=format_bytes)
+            # Wrap in a column container that matches the dashboard grid
+            wrapped = f"<div class=\"col-md-6 col-lg-3\" id=\"archive-card-{archive_id}\">" + rendered + "</div>"
             archive_resp = dict(archive_dict)
             archive_resp['last_run'] = to_iso_z(archive_resp.get('last_run'))
             archive_resp['next_run'] = to_iso_z(archive_resp.get('next_run'))
             archive_resp['next_run_display'] = to_iso_z(archive_resp.get('next_run_display'))
-            return jsonify({'status': 'success', 'html': rendered, 'archive_id': archive_id, 'archive': archive_resp})
+            return jsonify({'status': 'success', 'html': wrapped, 'archive_id': archive_id, 'archive': archive_resp})
 
         flash(f'Archive "{name}" created successfully!', 'success')
         return redirect(url_for('dashboard.index'))
@@ -338,11 +340,13 @@ def edit(archive_id):
                 updated_archive = cur.fetchone()
                 archive_dict = _enrich_archive(cur, updated_archive)
             rendered = render_template('_archive_card.html', archive=archive_dict, stacks=discover_stacks(), current_user=get_current_user(), format_bytes=format_bytes)
+            # Wrap in a column container that matches the dashboard grid
+            wrapped = f"<div class=\"col-md-6 col-lg-3\" id=\"archive-card-{archive_id}\">" + rendered + "</div>"
             archive_resp = dict(archive_dict)
             archive_resp['last_run'] = to_iso_z(archive_resp.get('last_run'))
             archive_resp['next_run'] = to_iso_z(archive_resp.get('next_run'))
             archive_resp['next_run_display'] = to_iso_z(archive_resp.get('next_run_display'))
-            return jsonify({'status': 'success', 'html': rendered, 'archive_id': archive_id, 'archive': archive_resp})
+            return jsonify({'status': 'success', 'html': wrapped, 'archive_id': archive_id, 'archive': archive_resp})
 
         flash(f'Archive "{archive_name}" updated successfully!', 'success')
         return redirect(url_for('dashboard.index'))

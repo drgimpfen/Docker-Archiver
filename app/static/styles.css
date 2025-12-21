@@ -186,8 +186,7 @@ body.has-sidebar .app-main {
     /* keep default Bootstrap behavior */
 }
 .row.g-3 > .col-md-6 > .card, .row.g-3 > .col-lg-4 > .card {
-    display: flex;
-    flex-direction: column;
+    /* Keep default block layout for the card container so columns size normally */
     width: 100%;
     min-height: 200px; /* modest card height so empty cards aren't tiny */
 }
