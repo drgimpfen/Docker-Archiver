@@ -242,24 +242,29 @@ def get_next_run_time(archive_id):
 
     try:
         from datetime import datetime, timezone as _tz
+        from app.utils import get_display_timezone
+        display_tz = get_display_timezone()
+
+        # Interpret the cron expression in the configured display timezone so that
+        # cron times map to local clock times (e.g., '0 3 * * *' means 03:00 local).
         trigger = CronTrigger(
             minute=cron_parts[0],
             hour=cron_parts[1],
             day=cron_parts[2],
             month=cron_parts[3],
             day_of_week=cron_parts[4],
-            timezone=_tz.utc
+            timezone=display_tz
         )
-        # Ask the trigger for the next fire time relative to now (UTC-aware)
-        now = datetime.utcnow().replace(tzinfo=_tz.utc)
+        # Ask the trigger for the next fire time relative to now in the display tz
+        now = datetime.now(display_tz)
         next_run = trigger.get_next_fire_time(None, now)
         if next_run:
-            # Normalize to UTC-naive for template consistency
+            # Convert to UTC-naive datetime for template code (which treats datetimes as UTC)
             next_run_naive = next_run.astimezone(_tz.utc).replace(tzinfo=None)
             try:
-                print(f"[Scheduler] Next run (computed) for archive_{archive_id}: {next_run_naive.isoformat()}")
+                print(f"[Scheduler] Next run (computed) for archive_{archive_id}: {next_run_naive.isoformat()} (local: {next_run.isoformat()})")
             except Exception:
-                print(f"[Scheduler] Next run (computed) for archive_{archive_id}: {next_run_naive}")
+                print(f"[Scheduler] Next run (computed) for archive_{archive_id}: {next_run_naive} (local: {next_run})")
             return next_run_naive
     except Exception as e:
         print(f"[Scheduler] Could not compute next run from cron for archive_{archive_id}: {e}")
