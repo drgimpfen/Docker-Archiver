@@ -346,9 +346,9 @@
                                             <span class="text-muted small">N/A</span>
                                         {% endif %}
                                     </td>
-                                    <td><small style="white-space: nowrap;" id="row-job-start-{{ job.id }}">{{ job.start_time|datetime('%Y-%m-%d %H:%M') }}</small></td>
-                                    <td><small style="white-space: nowrap;" id="row-job-end-{{ job.id }}">{{ job.end_time|datetime('%Y-%m-%d %H:%M') }}</small></td>
-                                    <td><small id="row-job-duration-{{ job.id }}">{{ format_duration(job.duration_seconds) }}</small></td>
+                                    <td><small style="white-space: nowrap;" id="row-job-start-{{ job.id }}" data-start="{{ job.start_time.strftime('%Y-%m-%dT%H:%M:%SZ') if job.start_time else '' }}">{{ job.start_time|datetime('%Y-%m-%d %H:%M') }}</small></td>
+                                    <td><small style="white-space: nowrap;" id="row-job-end-{{ job.id }}" data-end="{{ job.end_time.strftime('%Y-%m-%dT%H:%M:%SZ') if job.end_time else '' }}">{{ job.end_time|datetime('%Y-%m-%d %H:%M') }}</small></td>
+                                    <td><small id="row-job-duration-{{ job.id }}">{% if job.status != 'running' %}{{ format_duration(job.duration_seconds) }}{% else %}&mdash;{% endif %}</small></td>
                                     <td style="text-align: right;">
                                         <span id="row-job-size-{{ job.id }}">
                                         {% if job.job_type == 'archive' and job.total_size_bytes %}
@@ -442,11 +442,17 @@ function updateJobRowFromJob(job) {
     if (durEl) {
         if (job.status === 'running') {
             const secs = computeDurationSecondsFromStart(job.start_time);
-            durEl.textContent = secs !== null ? formatDuration(secs) : 'N/A';
+            durEl.textContent = secs !== null ? formatDuration(secs) : formatDuration(0);
             // Ensure duration ticker is running to update live
             try { startDashboardDurationTicker(); } catch (e) {}
         } else {
             durEl.textContent = formatDuration(job.duration_seconds);
+            // If no other running rows remain, stop the ticker now
+            try {
+                if (!document.querySelector('tr[data-job-status="running"]')) {
+                    stopDashboardDurationTicker();
+                }
+            } catch (e) {}
         }
     }
 
@@ -515,6 +521,25 @@ document.querySelectorAll('tr[data-job-id]').forEach(function(tr) {
     }
 });
 
+// Initialize durations immediately for existing running jobs and start ticker
+try {
+    updateRunningDurations();
+    if (document.querySelector('tr[data-job-status="running"]')) {
+        startDashboardDurationTicker();
+    }
+    // Ensure any rows that are running but lacked an initial duration are populated
+    document.querySelectorAll('tr[data-job-status="running"]').forEach(function(r){
+        try {
+            const id = r.getAttribute('data-job-id');
+            const startEl = document.getElementById(`row-job-start-${id}`);
+            const durEl = document.getElementById(`row-job-duration-${id}`);
+            if (startEl && durEl && (!durEl.textContent || durEl.textContent.trim() === '—')) {
+                const secs = computeDurationSecondsFromStart(startEl.dataset.start || startEl.textContent);
+                durEl.textContent = secs !== null ? formatDuration(secs) : formatDuration(0);
+            }
+        } catch (e) {}
+    });
+} catch (e) {}
 
 
 // Periodically check for newly started running jobs and start polling if needed

@@ -586,7 +586,7 @@ def list_jobs():
             j.start_time, j.end_time, j.total_size_bytes, j.reclaimed_size_bytes,
             j.is_dry_run, j.triggered_by,
             a.name as archive_name,
-            EXTRACT(EPOCH FROM (COALESCE(j.end_time, NOW()) - j.start_time))::INTEGER as duration_seconds,
+            CASE WHEN j.status = 'running' THEN NULL ELSE EXTRACT(EPOCH FROM (j.end_time - j.start_time))::INTEGER END as duration_seconds,
             (SELECT STRING_AGG(stack_name, ',') FROM job_stack_metrics WHERE job_id = j.id) as stack_names
         FROM jobs j
         LEFT JOIN archives a ON j.archive_id = a.id
