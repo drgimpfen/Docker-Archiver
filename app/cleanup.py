@@ -72,6 +72,35 @@ def run_cleanup(dry_run_override=None):
         
         total_reclaimed = orphaned_stats.get('reclaimed', 0) + temp_stats.get('reclaimed', 0)
         
+        # If dry-run, include a structured report in the log so operators can review candidates
+        if is_dry_run:
+            try:
+                report = generate_cleanup_report()
+                log_message('INFO', '--- Cleanup Dry-Run Report ---')
+                # Orphaned archive dirs
+                if report.get('orphaned'):
+                    log_message('INFO', f"Orphaned archive directories (not in DB): {len(report['orphaned'])}")
+                    for o in report['orphaned']:
+                        log_message('INFO', f"  - {o['name']} ({format_bytes(o['size'])})")
+                else:
+                    log_message('INFO', 'Orphaned archive directories: None')
+
+                # Old logs
+                log_message('INFO', f"Old job logs older than retention: {report.get('old_logs_count', 0)}")
+
+                # Temp items
+                if report.get('temp_items'):
+                    log_message('INFO', f"Empty/Temp stack directories: {len(report['temp_items'])}")
+                    for t in report['temp_items']:
+                        flag = 'KEEP' if t['has_active_db_ref'] else 'DELETE'
+                        log_message('INFO', f"  - {t['display_path']} -> {t['path']} [{flag}] {t['reference_info']}")
+                else:
+                    log_message('INFO', 'Empty/Temp stack directories: None')
+
+                log_message('INFO', '--- End Cleanup Dry-Run Report ---')
+            except Exception as e:
+                log_message('ERROR', f'Failed to generate dry-run report: {e}')
+
         log_message('INFO', f"Cleanup task completed ({mode})")
         log_message('INFO', f"Total reclaimed: {format_bytes(total_reclaimed)}")
         
@@ -160,6 +189,29 @@ def cleanup_orphaned_archives(is_dry_run=False, log_callback=None):
                 except Exception as e:
                     # Log and continue with other directories; don't let one failure abort the entire cleanup
                     log(f"Failed to delete {archive_dir}: {e}")
+        else:
+            # Archive directory exists in DB — inspect files inside and log unreferenced files
+            try:
+                for entry in archive_dir.iterdir():
+                    try:
+                        if entry.is_file():
+                            # Check DB references for this file
+                            with get_db() as conn:
+                                cur = conn.cursor()
+                                # Check for exact match or a LIKE pattern containing the filename
+                                cur.execute("SELECT 1 FROM job_stack_metrics WHERE archive_path = %s OR archive_path LIKE %s LIMIT 1;", (str(entry), f"%/{entry.name}"))
+                                r = cur.fetchone()
+                                if r:
+                                    # referenced — log minimal info
+                                    log(f"Keeping referenced file: {archive_dir.name}/{entry.name}")
+                                else:
+                                    # unreferenced file — candidate for cleanup
+                                    log(f"Unreferenced file in archive dir: {archive_dir.name}/{entry.name} (candidate for manual cleanup)")
+                        # If entry is directory, we skip here — deeper checks are in cleanup_temp_files
+                    except Exception as inner_e:
+                        log(f"Error inspecting {entry}: {inner_e}")
+            except Exception as e:
+                log(f"Failed to inspect files in {archive_dir}: {e}")
     
     if orphaned_count > 0:
         log(f"Found {orphaned_count} orphaned archive(s), {format_bytes(reclaimed_bytes)} to reclaim")
@@ -440,6 +492,109 @@ def _mark_archives_as_deleted_by_path(path_prefix, deleted_by='cleanup'):
         print(f"[Cleanup] Failed to mark archives as deleted in DB: {e}")
 
 
+def generate_cleanup_report(archive_base_path=None):
+    """Generate a non-destructive report of what cleanup would delete.
+
+    Returns a dict with keys: orphaned_dirs, old_logs_count, temp_items (list of dicts)
+    Each temp item includes display_path, path, has_active_db_ref (bool), reference_info
+    """
+    report = {
+        'orphaned': [],
+        'old_logs_count': 0,
+        'temp_items': []
+    }
+
+    archive_base = Path(archive_base_path) if archive_base_path else Path(ARCHIVE_BASE)
+    if not archive_base.exists():
+        return report
+
+    # orphaned archive directories
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM archives;")
+        db_archives = {row['name'] for row in cur.fetchall()}
+
+    for archive_dir in archive_base.iterdir():
+        if not archive_dir.is_dir():
+            continue
+        if archive_dir.name.startswith('_'):
+            continue
+        if archive_dir.name not in db_archives:
+            size = get_directory_size(archive_dir)
+            report['orphaned'].append({'name': archive_dir.name, 'size': size})
+
+    # old logs count
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) as count FROM jobs WHERE start_time < NOW() - INTERVAL '%s days';", (int(get_setting('cleanup_log_retention_days', '90')),))
+        row = cur.fetchone()
+        if row:
+            report['old_logs_count'] = int(row['count'])
+
+    # temp files and empty stack dirs (using is_stack_directory_empty and DB checks)
+    for archive_dir in archive_base.iterdir():
+        if not archive_dir.is_dir() or archive_dir.name.startswith('_'):
+            continue
+        for stack_dir in archive_dir.iterdir():
+            if not stack_dir.is_dir():
+                continue
+            # check if considered empty by current heuristics
+            empty = is_stack_directory_empty(stack_dir, log_callback=None)
+            if not empty:
+                continue
+
+            # DB active ref check
+            active = False
+            reference_info = ''
+            archive_label = None
+            try:
+                with get_db() as conn:
+                    cur = conn.cursor()
+                    like = str(stack_dir) + '/%'
+                    cur.execute("""
+                        SELECT a.name as archive_name, m.stack_name
+                        FROM job_stack_metrics m
+                        LEFT JOIN jobs j ON m.job_id = j.id
+                        LEFT JOIN archives a ON j.archive_id = a.id
+                        WHERE m.archive_path LIKE %s
+                        ORDER BY j.start_time DESC NULLS LAST LIMIT 1;
+                    """, (like,))
+                    ref = cur.fetchone()
+                    if ref:
+                        active = True if ref.get('stack_name') else False
+                        reference_info = f"archive='{ref.get('archive_name') or 'unknown'}', stack='{ref.get('stack_name') or 'unknown'}'"
+                        archive_label = ref.get('archive_name')
+            except Exception as e:
+                reference_info = f"DB lookup failed: {e}"
+                active = True  # be conservative
+
+            # determine display path similar to deletion logic
+            rel = str(stack_dir.relative_to(archive_base))
+            if archive_label:
+                if rel.startswith(f"{archive_label}/") or rel == archive_label:
+                    display_path = rel
+                else:
+                    display_path = f"{archive_label}/{rel}"
+            else:
+                try:
+                    inferred = stack_dir.parent.name
+                    if rel.startswith(f"{inferred}/") or rel == inferred:
+                        display_path = rel
+                    else:
+                        display_path = f"{inferred}/{rel}"
+                except Exception:
+                    display_path = rel
+
+            report['temp_items'].append({
+                'display_path': display_path,
+                'path': str(stack_dir),
+                'has_active_db_ref': bool(active),
+                'reference_info': reference_info
+            })
+
+    return report
+
+
 def send_cleanup_notification(orphaned_stats, log_stats, temp_stats, total_reclaimed, is_dry_run):
     """Send notification about cleanup results."""
     try:
@@ -501,3 +656,38 @@ def send_cleanup_notification(orphaned_stats, log_stats, temp_stats, total_recla
         
     except Exception as e:
         print(f"[Cleanup] Failed to send notification: {e}")
+
+
+if __name__ == '__main__':
+    import argparse, json
+    parser = argparse.ArgumentParser(description='Cleanup utilities: generate a dry-run cleanup report')
+    parser.add_argument('--archive-base', help='Path to archive base (overrides default)')
+    parser.add_argument('--json', action='store_true', help='Output JSON')
+    parser.add_argument('--run-cleanup', action='store_true', help='Run cleanup now (live mode)')
+    parser.add_argument('--dry-run', action='store_true', help='Run cleanup in dry-run mode')
+    args = parser.parse_args()
+
+    if args.run_cleanup:
+        # Run cleanup (honor --dry-run if provided)
+        run_cleanup(dry_run_override=(True if args.dry_run else False))
+    else:
+        rep = generate_cleanup_report(args.archive_base)
+        if args.json:
+            print(json.dumps(rep, indent=2))
+        else:
+            print('Orphaned archive directories:')
+            if not rep['orphaned']:
+                print('  None')
+            else:
+                for o in rep['orphaned']:
+                    print(f"  - {o['name']} ({o['size']} bytes)")
+
+            print(f"\nOld job logs older than retention: {rep['old_logs_count']}")
+
+            print('\nEmpty/Temp stack directories (would be deleted if no DB refs):')
+            if not rep['temp_items']:
+                print('  None')
+            else:
+                for t in rep['temp_items']:
+                    flag = 'KEEP (has DB refs)' if t['has_active_db_ref'] else 'DELETE'
+                    print(f"  - {t['display_path']} -> {t['path']} [{flag}] {t['reference_info']}")
