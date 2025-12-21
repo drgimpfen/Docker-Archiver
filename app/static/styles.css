@@ -189,12 +189,21 @@ body.has-sidebar .app-main {
     display: flex;
     flex-direction: column;
     width: 100%;
-    min-height: 240px; /* modest card height so empty cards aren't tiny */
+    min-height: 220px; /* modest card height so empty cards aren't tiny */
 }
 .archive-card .card-body {
     display: flex;
     flex-direction: column;
     flex: 1 1 auto;
+}
+/* Make the title truncate gracefully instead of overflowing the card */
+.archive-card .card-title {
+    min-width: 0; /* allow flex child to shrink and enable overflow */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2; /* clamp to 2 lines */
+    -webkit-box-orient: vertical;
 }
 .archive-card .meta,
 .archive-card .last-run,
