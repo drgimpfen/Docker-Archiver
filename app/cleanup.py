@@ -278,6 +278,7 @@ def cleanup_temp_files(is_dry_run=False, log_callback=None):
 
                 # Attempt to fetch a recent job reference for context (even if deleted) so logs show source
                 reference_info = ''
+                archive_label = None
                 try:
                     with get_db() as conn:
                         cur = conn.cursor()
@@ -292,19 +293,31 @@ def cleanup_temp_files(is_dry_run=False, log_callback=None):
                         """, (like,))
                         ref = cur.fetchone()
                         if ref:
-                            reference_info = f" (from job {ref.get('job_id') or 'unknown'}, archive '{ref.get('archive_name') or 'unknown'}', stack '{ref.get('stack_name') or 'unknown'}')"
+                            reference_info = f" (archive '{ref.get('archive_name') or 'unknown'}', stack '{ref.get('stack_name') or 'unknown'}')"
+                            archive_label = ref.get('archive_name')
                 except Exception as e:
                     # Non-fatal; include note in logs
                     reference_info = f" (DB lookup failed: {e})"
 
-                if is_dry_run:
-                    log(f"Would delete empty stack directory: {stack_dir.relative_to(archive_base)}{reference_info}")
+                # Determine display path to include archive name when available
+                if archive_label:
+                    display_path = f"{archive_label}/{stack_dir.relative_to(archive_base)}"
                 else:
-                    log(f"Deleting empty stack directory: {stack_dir.relative_to(archive_base)}{reference_info}")
+                    # Fallback: infer archive name from path (parent directory)
+                    try:
+                        inferred = stack_dir.parent.name
+                        display_path = f"{inferred}/{stack_dir.relative_to(archive_base)}"
+                    except Exception:
+                        display_path = f"{stack_dir.relative_to(archive_base)}"
+
+                if is_dry_run:
+                    log(f"Would delete empty stack directory: {display_path}{reference_info}")
+                else:
+                    log(f"Deleting empty stack directory: {display_path}{reference_info}")
                     try:
                         shutil.rmtree(stack_dir)
                     except Exception as e:
-                        log(f"Failed to delete empty stack directory {stack_dir.relative_to(archive_base)}: {e}")
+                        log(f"Failed to delete empty stack directory {display_path}: {e}")
     
     if temp_count > 0:
         log(f"Found {temp_count} temp file(s)/directory(ies), {format_bytes(reclaimed_bytes)} to reclaim")
