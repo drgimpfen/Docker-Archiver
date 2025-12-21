@@ -19,7 +19,7 @@ from app.utils import format_bytes, format_duration, get_disk_usage, to_iso_z
 from pathlib import Path
 
 # Import blueprints
-from app.routes import archives, history, settings, profile, api
+from app.routes import archives, history, settings, profile, api, dashboard
 
 
 app = Flask(__name__)
@@ -64,6 +64,7 @@ app.register_blueprint(history.bp)
 app.register_blueprint(settings.bp)
 app.register_blueprint(profile.bp)
 app.register_blueprint(api.bp)
+app.register_blueprint(dashboard.bp)
 
 # Exempt API blueprint from CSRF (uses Bearer tokens)
 csrf.exempt(api.bp)
@@ -244,152 +245,7 @@ def health():
     return jsonify({'status': 'ok'}), 200
 
 
-@app.route('/')
-@login_required
-def index():
-    """Dashboard page."""
-    from datetime import datetime, timedelta
-    
-    # Check maintenance mode
-    maintenance_mode = get_setting('maintenance_mode', 'false').lower() == 'true'
-    
-    # Get disk usage
-    disk = get_disk_usage()
-    
-    # Get all archives
-    with get_db() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM archives ORDER BY name;")
-        archives_list = cur.fetchall()
-        
-        # Dashboard statistics
-        total_archives_configured = len(archives_list)
-        active_schedules = sum(1 for a in archives_list if a['schedule_enabled'])
-        
-        # Last 24h jobs
-        cur.execute("""
-            SELECT COUNT(*) as count FROM jobs 
-            WHERE job_type = 'archive' 
-            AND status = 'success' 
-            AND start_time >= NOW() - INTERVAL '24 hours';
-        """)
-        jobs_last_24h = cur.fetchone()['count']
-        
-        # Next scheduled job
-        next_scheduled = None
-        for archive in archives_list:
-            if archive['schedule_enabled']:
-                next_run = get_next_run_time(archive['id'])
-                if next_run and (not next_scheduled or next_run < next_scheduled):
-                    next_scheduled = next_run
-        
-        # Total archives size (net = archived bytes - reclaimed bytes)
-        cur.execute("""
-            SELECT
-                COALESCE(SUM(CASE WHEN job_type = 'archive' THEN total_size_bytes ELSE 0 END),0) as total_archived,
-                COALESCE(SUM(reclaimed_bytes),0) as total_reclaimed
-            FROM jobs
-            WHERE status = 'success';
-        """)
-        result = cur.fetchone()
-        total_archives_size = (result['total_archived'] - result['total_reclaimed']) if result else 0
-
-        # Optionally calculate on-disk size (toggle with environment variable SHOW_ONDISK_ARCHIVE_SIZE)
-        on_disk_archives_size = None
-        try:
-            if os.environ.get('SHOW_ONDISK_ARCHIVE_SIZE') == '1':
-                archives_path = os.environ.get('ARCHIVES_PATH', '/archives')
-                total = 0
-                for root, dirs, files in os.walk(archives_path):
-                    for f in files:
-                        try:
-                            fp = os.path.join(root, f)
-                            total += os.path.getsize(fp)
-                        except Exception:
-                            pass
-                on_disk_archives_size = total
-        except Exception:
-            on_disk_archives_size = None
-        
-        # Enrich archives with stats
-        archive_list = []
-        for archive in archives_list:
-            archive_dict = dict(archive)
-            
-            # Get job count
-            cur.execute(
-                "SELECT COUNT(*) as count FROM jobs WHERE archive_id = %s AND job_type = 'archive';",
-                (archive['id'],)
-            )
-            archive_dict['job_count'] = cur.fetchone()['count']
-            
-            # Get last job
-            cur.execute("""
-                SELECT start_time, status FROM jobs 
-                WHERE archive_id = %s AND job_type = 'archive'
-                ORDER BY start_time DESC LIMIT 1;
-            """, (archive['id'],))
-            last_job = cur.fetchone()
-            archive_dict['last_run'] = last_job['start_time'] if last_job else None
-            archive_dict['last_status'] = last_job['status'] if last_job else None
-            
-            # Get next run time
-            if archive['schedule_enabled']:
-                archive_dict['next_run'] = get_next_run_time(archive['id'])
-            else:
-                archive_dict['next_run'] = None
-            
-            # Get total archived size and reclaimed size for this archive (net = archived - reclaimed)
-            cur.execute("""
-                SELECT
-                    COALESCE(SUM(CASE WHEN job_type = 'archive' THEN total_size_bytes ELSE 0 END), 0) AS total_archived,
-                    COALESCE(SUM(reclaimed_bytes), 0) AS total_reclaimed
-                FROM jobs
-                WHERE archive_id = %s AND status = 'success';
-            """, (archive['id'],))
-            result = cur.fetchone()
-            archive_dict['total_size'] = (result['total_archived'] - result['total_reclaimed']) if result else 0
-            
-            archive_list.append(archive_dict)
-        
-        # Get recent jobs (last 10)
-        cur.execute("""
-            SELECT j.*, a.name as archive_name, a.stacks as archive_stacks,
-                   (SELECT STRING_AGG(stack_name, ',') FROM job_stack_metrics WHERE job_id = j.id) as stack_names,
-                   CASE WHEN j.status = 'running' THEN NULL ELSE EXTRACT(EPOCH FROM (j.end_time - j.start_time))::integer END as duration_seconds
-            FROM jobs j
-            LEFT JOIN archives a ON j.archive_id = a.id
-            ORDER BY j.start_time DESC
-            LIMIT 10;
-        """)
-        recent_jobs = cur.fetchall()
-    
-    # Calculate disk health status
-    disk_percent = disk.get('percent', 0)
-    if disk_percent >= 90:
-        disk_status = 'danger'
-    elif disk_percent >= 70:
-        disk_status = 'warning'
-    else:
-        disk_status = 'success'
-    
-    return render_template(
-        'index.html',
-        archives=archive_list,
-        recent_jobs=recent_jobs,
-        disk=disk,
-        disk_status=disk_status,
-        total_archives_size=total_archives_size,
-        on_disk_archives_size=on_disk_archives_size,  # may be None if not calculated
-        total_archives_configured=total_archives_configured,
-        active_schedules=active_schedules,
-        jobs_last_24h=jobs_last_24h,
-        next_scheduled=next_scheduled,
-        maintenance_mode=maintenance_mode,
-        format_bytes=format_bytes,
-        format_duration=format_duration,
-        current_user=get_current_user()
-    )
+# Dashboard route moved to `app.routes.dashboard` as a Blueprint. See `app/routes/dashboard.py` for implementation.
 
 
 @app.route('/login', methods=['GET', 'POST'])

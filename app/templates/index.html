@@ -105,9 +105,9 @@
                     <i class="bi bi-calendar-check fs-4 text-success"></i>
                 </div>
                 {% if next_scheduled %}
-                    <h6 class="mb-2">{{ next_scheduled|datetime('%H:%M') }}</h6>
-                    <small class="text-muted">{{ next_scheduled|datetime('%Y-%m-%d') }}</small>
-                    <br><small class="text-info" data-next-run="{{ next_scheduled|iso_z }}"><span class="time-until"></span></small>
+                    <h6 class="mb-2">{{ next_scheduled.time|datetime('%H:%M') }}</h6>
+                    <small class="text-muted">{{ next_scheduled.time|datetime('%Y-%m-%d') }}</small>
+                    <br><small class="text-info" data-next-run="{{ next_scheduled.time|iso_z }}"><span class="time-until">{% if next_scheduled.overdue %}overdue{% endif %}</span></small>
                 {% else %}
                     <h6 class="mb-2 text-muted">None</h6>
                     <small class="text-muted">No schedules active</small>
@@ -200,12 +200,12 @@
                                         </small>
                                     </div>
 
-                                    {% if archive.next_run %}
+                                    {% if archive.next_run_display %}
                                     <div class="mb-2">
                                         <small class="text-muted">Next run:</small><br>
-                                        <small data-next-run="{{ archive.next_run.isoformat() }}">
-                                            {{ archive.next_run|datetime('%Y-%m-%d %H:%M') }}
-                                            <span class="text-info">(<span class="time-until"></span>)</span>
+                                        <small data-next-run="{{ archive.next_run_display|iso_z }}">
+                                            {{ archive.next_run_display|datetime('%Y-%m-%d %H:%M') }}
+                                            <span class="text-info">(<span class="time-until">{% if archive.is_overdue %}overdue{% endif %}</span>)</span>
                                         </small>
                                     </div>
                                     {% endif %}

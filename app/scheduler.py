@@ -214,13 +214,15 @@ def get_next_run_time(archive_id):
         job = scheduler.get_job(f"archive_{archive_id}")
         if job and job.next_run_time:
             try:
-                # Normalize to UTC-naive datetime for consistent display handling in templates
+                # Keep timezone-aware UTC datetime for correct formatting and JS parsing
                 from datetime import timezone
-                next_run = job.next_run_time.astimezone(timezone.utc).replace(tzinfo=None)
+                next_run = job.next_run_time.astimezone(timezone.utc)
             except Exception:
                 nr = job.next_run_time
                 try:
-                    next_run = nr.replace(tzinfo=None)
+                    # If job.next_run_time is naive, assume it's UTC
+                    from datetime import timezone
+                    next_run = nr.replace(tzinfo=timezone.utc)
                 except Exception:
                     next_run = nr
             try:
@@ -270,14 +272,53 @@ def get_next_run_time(archive_id):
         now = datetime.now(display_tz)
         next_run = trigger.get_next_fire_time(None, now)
         if next_run:
-            # Convert to UTC-naive datetime for template code (which treats datetimes as UTC)
-            next_run_naive = next_run.astimezone(_tz.utc).replace(tzinfo=None)
+            # Keep timezone-aware UTC datetime for correct formatting/parsing
+            next_run_utc = next_run.astimezone(_tz.utc)
             try:
-                print(f"[Scheduler] Next run (computed) for archive_{archive_id}: {next_run_naive.isoformat()} (local: {next_run.isoformat()})")
+                print(f"[Scheduler] Next run (computed) for archive_{archive_id}: {next_run_utc.isoformat()} (local: {next_run.isoformat()})")
             except Exception:
-                print(f"[Scheduler] Next run (computed) for archive_{archive_id}: {next_run_naive} (local: {next_run})")
-            return next_run_naive
+                print(f"[Scheduler] Next run (computed) for archive_{archive_id}: {next_run_utc} (local: {next_run})")
+            return next_run_utc
     except Exception as e:
         print(f"[Scheduler] Could not compute next run from cron for archive_{archive_id}: {e}")
+
+    return None
+
+
+def get_prev_run_time(archive_id):
+    """Get previous scheduled run time for an archive (UTC-naive datetime) if computable."""
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT schedule_cron FROM archives WHERE id = %s", (archive_id,))
+            row = cur.fetchone()
+            cron_expr = row['schedule_cron'] if row else None
+    except Exception as e:
+        print(f"[Scheduler] Could not read schedule from DB for archive_{archive_id}: {e}")
+        cron_expr = None
+
+    if not cron_expr:
+        return None
+
+    try:
+        from datetime import datetime, timezone as _tz
+        from croniter import croniter
+        from app.utils import get_display_timezone
+
+        display_tz = get_display_timezone()
+        now = datetime.now(display_tz)
+
+        ci = croniter(cron_expr, now)
+        prev_local = ci.get_prev(datetime)
+        if prev_local:
+            # Convert to timezone-aware UTC datetime for consistent handling
+            prev_utc = prev_local.astimezone(_tz.utc)
+            try:
+                print(f"[Scheduler] Prev run (computed) for archive_{archive_id}: {prev_utc.isoformat()} (local: {prev_local.isoformat()})")
+            except Exception:
+                print(f"[Scheduler] Prev run (computed) for archive_{archive_id}: {prev_utc} (local: {prev_local})")
+            return prev_utc
+    except Exception as e:
+        print(f"[Scheduler] Could not compute previous run from cron for archive_{archive_id}: {e}")
 
     return None
