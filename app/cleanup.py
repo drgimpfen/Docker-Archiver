@@ -626,22 +626,18 @@ def cleanup_unreferenced_files(is_dry_run=False, log_callback=None):
 def send_cleanup_notification(orphaned_stats, log_stats, temp_stats, uf_stats, total_reclaimed, is_dry_run):
     """Send notification about cleanup results."""
     try:
-        import apprise
-        from app.notifications import get_setting, get_subject_with_tag
-        
-        apprise_urls = get_setting('apprise_urls', '')
-        if not apprise_urls:
-            return
-        
-        apobj = apprise.Apprise()
-        for url in apprise_urls.strip().split('\n'):
-            url = url.strip()
-            if url:
-                apobj.add(url)
-        
+        # Create Apprise instance using shared logic so SMTP env vars are honoured
+        from app.notifications import get_apprise_instance, get_setting, get_subject_with_tag
+
+        # Debug log to assist with dry-run notification troubleshooting
+        print(f"[Cleanup] Sending cleanup notification ({'DRY RUN' if is_dry_run else 'LIVE'})")
+
+        apobj = get_apprise_instance()
         if not apobj:
+            print("[Cleanup] No apprise URLs or SMTP configured; skipping notification")
             return
         
+        import apprise
         mode = "🧪 DRY RUN" if is_dry_run else "✅"
         
         # Build message
