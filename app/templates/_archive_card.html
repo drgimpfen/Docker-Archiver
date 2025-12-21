@@ -88,9 +88,14 @@
                             <i class="bi bi-trash me-1"></i>Run Retention
                         </button>
                     </form>
-                    <button type="button" class="btn btn-outline-primary btn-sm" title="Edit Archive" onclick="editArchive({{ archive.id }})">
-                        <i class="bi bi-pencil"></i>
-                    </button>
+                    <div class="btn-group">
+                        <button type="button" class="btn btn-outline-primary btn-sm" title="Edit Archive" onclick="editArchive({{ archive.id }})">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-danger btn-sm" title="Delete Archive" onclick="deleteArchive({{ archive.id }}, {{ archive.name|tojson }})">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

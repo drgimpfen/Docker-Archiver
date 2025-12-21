@@ -792,12 +792,29 @@ function deleteArchive(archiveId, archiveName) {
     }
 }
 
-// Apply stack badge colors from data-color attribute
-(function applyStackBadgeColors(){
-    document.querySelectorAll('.badge[data-color]').forEach(el => {
-        try { el.style.backgroundColor = el.dataset.color; el.style.color = '#fff'; } catch(e) {}
+// Compute a deterministic color for a stack name (fallback)
+function computeStackColor(name){
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+    return `hsl(${h}, 65%, 45%)`;
+}
+
+// Apply stack badge colors from data-color attribute, or compute a fallback
+function applyStackBadgeColors(root=document){
+    // badges with explicit data-color
+    root.querySelectorAll('.badge[data-color]').forEach(el => {
+        const c = el.dataset.color || computeStackColor(el.textContent.trim());
+        try { el.style.backgroundColor = c; el.style.color = '#fff'; } catch(e) {}
     });
-})();
+    // badges without data-color (fallback for server-rendering misses)
+    root.querySelectorAll('.stack-badges .badge:not([data-color])').forEach(el => {
+        const c = computeStackColor(el.textContent.trim());
+        try { el.dataset.color = c; el.style.backgroundColor = c; el.style.color = '#fff'; } catch(e) {}
+    });
+}
+
+// Run initially
+try { applyStackBadgeColors(); } catch (e) {}
 
 // Small helper to show inline alerts for AJAX operations
 function showAlert(message, category='success'){
@@ -870,12 +887,29 @@ if (editForm) {
         if (res.ok && res.data && res.data.status === 'success'){
             const id = res.data.archive_id;
             const card = document.getElementById(`archive-card-${id}`);
+            // Hide modal first to avoid focus/scroll issues
+            const modalEl = document.getElementById('editArchiveModal');
+            try { const m = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl); m.hide(); } catch(e){}
+
             if (card){
                 card.outerHTML = res.data.html;
+                // Re-apply colors and timers only to the replaced wrapper
+                try {
+                    const newWrapper = document.getElementById(`archive-card-${id}`);
+                    if (newWrapper) {
+                        applyStackBadgeColors(newWrapper);
+                        try { updateTimeUntil(); } catch(e){}
+                    } else {
+                        // fallback global reapply
+                        applyStackBadgeColors();
+                        try { updateTimeUntil(); } catch(e){}
+                    }
+                } catch(e) { applyStackBadgeColors(); try { updateTimeUntil(); } catch(e){} }
             } else {
                 location.reload();
                 return;
             }
+
             // Update archivesData
             try {
                 const adEl = document.getElementById('archives-data');
@@ -891,10 +925,6 @@ if (editForm) {
                 }
             } catch(e){}
 
-            applyStackBadgeColors();
-            try { updateTimeUntil(); } catch(e){}
-            const modalEl = document.getElementById('editArchiveModal');
-            try { const m = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl); m.hide(); } catch(e){}
             showAlert('Archive updated', 'success');
         } else {
             const msg = (res.data && res.data.message) ? res.data.message : 'Failed to update archive';
