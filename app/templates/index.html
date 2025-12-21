@@ -52,42 +52,35 @@
 
 <!-- System Info Cards -->
 <div class="row g-3 mb-4">
-    <!-- Disk Info Card -->
+    <!-- Total Archives Card -->
     <div class="col-md-2">
         <div class="card h-100">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h6 class="card-subtitle text-muted mb-0">Disk Info</h6>
-                    <i class="bi bi-hdd-fill fs-4 text-{{ disk_status }}"></i>
+                    <h6 class="card-subtitle text-muted mb-0">Total Archives</h6>
+                    <i class="bi bi-stack fs-4 text-primary"></i>
                 </div>
-                <h6 class="mb-1">{{ format_bytes(disk.used) }} / {{ format_bytes(disk.total) }}</h6>
-                <div class="progress mb-2" style="height: 10px;">
-                    <div class="progress-bar bg-{{ disk_status }}" role="progressbar" style="width: {{ disk.percent }}%" aria-valuenow="{{ disk.percent }}" aria-valuemin="0" aria-valuemax="100"></div>
-                </div>
-                <small class="text-muted">{{ "%.1f"|format(disk.percent) }}% used</small>
+                <h3 class="mb-2" id="total-archives-count">{{ total_archives_configured }}</h3>
+                <small class="text-muted">{{ active_schedules }} scheduled</small>
             </div>
         </div>
     </div>
 
-    <!-- Archives Card (count, storage, last 24h) -->
-    <div class="col-md-4">
+    <!-- Archive Storage Card -->
+    <div class="col-md-2">
         <div class="card h-100">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h6 class="card-subtitle text-muted mb-0">Archives</h6>
+                    <h6 class="card-subtitle text-muted mb-0">Archive Storage</h6>
                     <i class="bi bi-archive fs-4 text-primary"></i>
                 </div>
-                <h3 class="mb-2"><strong id="total-archives-count">{{ total_archives_configured }}</strong> <small class="text-muted">archives</small></h3>
-                <div><small class="text-muted">Storage: {{ format_bytes(total_archives_size) }}</small></div>
+                <h3 class="mb-2" id="total-archives-size">{{ format_bytes(total_archives_size) }}</h3>
                 {% if on_disk_archives_size is not none %}
                 <div><small class="text-muted">On-disk: {{ format_bytes(on_disk_archives_size) }}</small></div>
                 {% endif %}
-                <div class="mt-2"><small class="text-muted">Last 24h: {{ jobs_last_24h }} successful backups</small></div>
             </div>
         </div>
     </div>
-
-
 
     <!-- Last 24h Card -->
     <div class="col-md-3">
@@ -119,6 +112,23 @@
                     <h6 class="mb-2 text-muted">None</h6>
                     <small class="text-muted">No schedules active</small>
                 {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Disk Info Card -->
+    <div class="col-md-2">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="card-subtitle text-muted mb-0">Disk Info</h6>
+                    <i class="bi bi-hdd-fill fs-4 text-{{ disk_status }}"></i>
+                </div>
+                <h6 class="mb-1">{{ format_bytes(disk.used) }} / {{ format_bytes(disk.total) }}</h6>
+                <div class="progress mb-2" style="height: 10px;">
+                    <div class="progress-bar bg-{{ disk_status }}" role="progressbar" style="width: {{ disk.percent }}%" aria-valuenow="{{ disk.percent }}" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+                <small class="text-muted">{{ "%.1f"|format(disk.percent) }}% used</small>
             </div>
         </div>
     </div>

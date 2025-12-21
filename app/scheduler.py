@@ -190,8 +190,15 @@ def get_next_run_time(archive_id):
     """Get next run time for a scheduled archive."""
     global scheduler
     
+    # If the scheduler isn't initialized (e.g., skipped at import-time), try to initialize it now.
     if scheduler is None:
-        return None
+        try:
+            init_scheduler()
+        except Exception:
+            pass
+        if scheduler is None:
+            # Still unavailable — we cannot determine next run time.
+            return None
     
     job = scheduler.get_job(f"archive_{archive_id}")
     if job and job.next_run_time:
