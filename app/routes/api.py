@@ -234,40 +234,7 @@ def job_events(job_id):
     return Response(stream_with_context(gen()), mimetype='text/event-stream')
 
 
-@bp.route('/jobs/events')
-@api_auth_required
-def jobs_events():
-    """Global SSE endpoint for job metadata/status changes (preferred over dashboard polling).
-
-    Streams events with shape: {"type": "job", "data": {<job summary>}}
-    """
-    try:
-        from app.sse import register_global_listener, unregister_global_listener
-    except Exception:
-        return jsonify({'error': 'SSE not available in this deployment'}), 501
-
-    def gen():
-        q = register_global_listener()
-        try:
-            yield ': connected\n\n'
-            while True:
-                try:
-                    msg = q.get(timeout=15)
-                except Exception:
-                    yield ': keepalive\n\n'
-                    continue
-                # Debug log when JOB_EVENTS_DEBUG enabled
-                try:
-                    import os
-                    if os.environ.get('JOB_EVENTS_DEBUG'):
-                        print(f"[SSE] Sending to client: {msg}")
-                except Exception:
-                    pass
-                yield f"data: {msg}\n\n"
-        finally:
-            unregister_global_listener(q)
-
-    return Response(stream_with_context(gen()), mimetype='text/event-stream')
+# Global Jobs SSE endpoint removed (dashboard uses polling now).
 
 
 # Debug endpoint for SSE internals (secured by api_auth_required)
