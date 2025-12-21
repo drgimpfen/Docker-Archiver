@@ -37,7 +37,11 @@ def init_scheduler():
         print("[Scheduler] Initialization skipped (scheduler already started by another process)")
         return None
 
-    scheduler = BackgroundScheduler(daemon=True)
+    from app.utils import get_display_timezone
+    display_tz = get_display_timezone()
+
+    # Create scheduler with explicit display timezone so cron triggers behave consistently
+    scheduler = BackgroundScheduler(timezone=display_tz, daemon=True)
     scheduler.start()
 
     # Load all scheduled archives (with error handling for initial setup)
@@ -141,6 +145,13 @@ def reload_schedules():
         """)
         archives = cur.fetchall()
     
+    display_tz = None
+    try:
+        from app.utils import get_display_timezone
+        display_tz = get_display_timezone()
+    except Exception:
+        display_tz = None
+
     for archive in archives:
         try:
             # Parse cron expression
@@ -150,21 +161,29 @@ def reload_schedules():
                 print(f"[Scheduler] Invalid cron expression for archive {archive['name']}: {archive['schedule_cron']}")
                 continue
             
-            trigger = CronTrigger(
+            # Use the configured display timezone for triggers so scheduled times match UI
+            trigger_kwargs = dict(
                 minute=cron_parts[0],
                 hour=cron_parts[1],
                 day=cron_parts[2],
                 month=cron_parts[3],
                 day_of_week=cron_parts[4]
             )
+            if display_tz is not None:
+                trigger_kwargs['timezone'] = display_tz
+
+            trigger = CronTrigger(**trigger_kwargs)
             
+            # Allow a short misfire grace so jobs that just missed due to timing/worker switchover
+            # are executed if within the grace window (seconds)
             scheduler.add_job(
                 run_scheduled_archive,
                 trigger,
                 args=[dict(archive)],
                 id=f"archive_{archive['id']}",
                 name=f"Archive: {archive['name']}",
-                replace_existing=True
+                replace_existing=True,
+                misfire_grace_time=300
             )
             
             print(f"[Scheduler] Scheduled archive '{archive['name']}' with cron: {archive['schedule_cron']}")
