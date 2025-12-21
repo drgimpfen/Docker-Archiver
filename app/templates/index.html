@@ -754,7 +754,7 @@ function editArchive(archiveId) {
     
     // Set form action
     const editForm = document.getElementById('editArchiveForm');
-    if (editForm) editForm.action = `/archives/${archiveId}/edit`;
+    if (editForm) editForm.action = `/api/archives/${archiveId}/edit`;
     
     // Fill form fields (defensive checks)
     const editName = document.getElementById('editName'); if (editName) editName.value = archive.name;
@@ -804,7 +804,7 @@ function openDeleteModal(archiveId, archiveName){
 async function performDelete(){
     if (!window._pendingDelete) return;
     const {id} = window._pendingDelete;
-    const url = `/archives/${id}/delete`;
+    const url = `/api/archives/${id}/delete`;
     try {
         const resp = await fetch(url, {method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}});
         if (!resp.ok) {

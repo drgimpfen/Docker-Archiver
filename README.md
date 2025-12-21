@@ -419,12 +419,12 @@ curl -O http://your-server:8080/download/abc123token
 | `/login` | GET/POST | Login page |
 | `/logout` | GET | Logout |
 | `/setup` | GET/POST | Initial user setup |
-| `/archives/` | GET | Archive management UI |
-| `/archives/create` | POST | Create archive config |
-| `/archives/<id>/edit` | POST | Edit archive config |
-| `/archives/<id>/delete` | POST | Delete archive config |
-| `/archives/<id>/run` | POST | Run archive job |
-| `/archives/<id>/dry-run` | POST | Run dry run |
+| `/archives/` | GET | Redirects to Dashboard (Archive UI removed) |
+| `/api/archives/create` | POST | Create archive config (via Dashboard/API) |
+| `/api/archives/<id>/edit` | POST | Edit archive config (via Dashboard/API) |
+| `/api/archives/<id>/delete` | POST | Delete archive config (via Dashboard/API) |
+| `/api/archives/<id>/run` | POST | Run archive job (API) |
+| `/api/archives/<id>/dry-run` | POST | Run dry run (API) |
 | `/history/` | GET | Job history UI |
 | `/profile/` | GET/POST | User profile (password, email) |
 | `/settings/` | GET/POST | Settings page |
@@ -496,7 +496,7 @@ Docker-Archiver/
 │   ├── templates/           # Jinja2 templates
 │   │   ├── base.html        # Base layout with navigation
 │   │   ├── index.html       # Dashboard
-│   │   ├── archives.html    # Archive management
+│   │   ├── (removed) archives.html    # Archive management (moved/removed)
 │   │   ├── history.html     # Job history
 │   │   ├── settings.html    # Settings page
 │   │   ├── profile.html     # User profile
