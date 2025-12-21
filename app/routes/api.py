@@ -768,7 +768,7 @@ def run_cleanup_manual():
             # Create a job record immediately and return its id so the UI can link to details
             with get_db() as conn:
                 cur = conn.cursor()
-                start_time = __import__('app').app.utils.now()
+                start_time = utils.now()
                 cur.execute("""
                     INSERT INTO jobs (job_type, status, start_time, triggered_by, is_dry_run, log)
                     VALUES ('cleanup', 'running', %s, 'manual', %s, '')
