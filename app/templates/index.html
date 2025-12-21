@@ -295,6 +295,8 @@
 
 <!-- Insert Create/Edit Archive Modals (copied from archives UI) -->
 
+<div id="archives-data" data-archives='{{ archives | tojson | safe }}' style="display:none"></div>
+
 <!-- Create Archive Modal -->
 <div class="modal fade" id="createArchiveModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
@@ -424,6 +426,7 @@
                     <div class="mb-3">
                         <label for="editName" class="form-label">Archive Name</label>
                         <input type="text" class="form-control" id="editName" name="name" readonly>
+                        <small class="text-muted">Archive name cannot be changed after creation</small>
                     </div>
                     
                     <div class="mb-3">
@@ -439,8 +442,89 @@
                             {% endfor %}
                         </div>
                     </div>
-
-<div id="archives-data" data-archives='{{ archives | tojson | safe }}' style="display:none"></div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="stop_containers" id="editStopContainers">
+                            <label class="form-check-label" for="editStopContainers">
+                                Stop containers during archive
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="editOutputFormat" class="form-label">Output Format</label>
+                        <select class="form-select" id="editOutputFormat" name="output_format">
+                            <option value="tar">tar (uncompressed)</option>
+                            <option value="tar.gz">tar.gz (gzip)</option>
+                            <option value="tar.zst">tar.zst (zstandard - fast)</option>
+                            <option value="folder">folder (for borg backup)</option>
+                        </select>
+                    </div>
+                    
+                    <hr>
+                    
+                    <h6>Schedule (Optional)</h6>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="schedule_enabled" id="editScheduleEnabled">
+                            <label class="form-check-label" for="editScheduleEnabled">
+                                Enable scheduled execution
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="editScheduleCron" class="form-label">Cron Expression</label>
+                        <input type="text" class="form-control" id="editScheduleCron" name="schedule_cron" placeholder="0 3 * * *">
+                        <small class="text-muted d-block mb-2">Format: minute hour day month day_of_week</small>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-secondary" onclick="setEditCron('0 3 * * *')">Daily 3AM</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setEditCron('0 0 * * 0')">Weekly Sunday</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setEditCron('0 0 1 * *')">Monthly 1st</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setEditCron('*/15 * * * *')">Every 15min</button>
+                        </div>
+                    </div>
+                    
+                    <hr>
+                    
+                    <h6>Retention (GFS)</h6>
+                    <div class="row">
+                        <div class="col-md-3">
+                            <label for="editKeepDays" class="form-label">Keep Days</label>
+                            <input type="number" class="form-control" id="editKeepDays" name="keep_days" min="0">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="editKeepWeeks" class="form-label">Keep Weeks</label>
+                            <input type="number" class="form-control" id="editKeepWeeks" name="keep_weeks" min="0">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="editKeepMonths" class="form-label">Keep Months</label>
+                            <input type="number" class="form-control" id="editKeepMonths" name="keep_months" min="0">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="editKeepYears" class="form-label">Keep Years</label>
+                            <input type="number" class="form-control" id="editKeepYears" name="keep_years" min="0">
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="one_per_day" id="editOnePerDay">
+                            <label class="form-check-label" for="editOnePerDay">
+                                Keep only one archive per day
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 
 <!-- Recent Jobs Section -->
 <div class="row">
@@ -740,27 +824,33 @@ function editArchive(archiveId) {
     if (!archive) return;
     
     // Set form action
-    document.getElementById('editArchiveForm').action = `/archives/${archiveId}/edit`;
+    const editForm = document.getElementById('editArchiveForm');
+    if (editForm) editForm.action = `/archives/${archiveId}/edit`;
     
-    // Fill form fields
-    document.getElementById('editName').value = archive.name;
-    document.getElementById('editStopContainers').checked = archive.stop_containers;
-    document.getElementById('editOutputFormat').value = archive.output_format;
-    document.getElementById('editScheduleEnabled').checked = archive.schedule_enabled;
-    document.getElementById('editScheduleCron').value = archive.schedule_cron || '';
-    document.getElementById('editKeepDays').value = archive.retention_keep_days;
-    document.getElementById('editKeepWeeks').value = archive.retention_keep_weeks;
-    document.getElementById('editKeepMonths').value = archive.retention_keep_months;
-    document.getElementById('editKeepYears').value = archive.retention_keep_years;
-    document.getElementById('editOnePerDay').checked = archive.retention_one_per_day;
+    // Fill form fields (defensive checks)
+    const editName = document.getElementById('editName'); if (editName) editName.value = archive.name;
+    const editStop = document.getElementById('editStopContainers'); if (editStop) editStop.checked = !!archive.stop_containers;
+    const editOutput = document.getElementById('editOutputFormat'); if (editOutput) editOutput.value = archive.output_format;
+    const editScheduleEnabled = document.getElementById('editScheduleEnabled'); if (editScheduleEnabled) editScheduleEnabled.checked = !!archive.schedule_enabled;
+    const editScheduleCron = document.getElementById('editScheduleCron'); if (editScheduleCron) editScheduleCron.value = archive.schedule_cron || '';
+    const editKeepDays = document.getElementById('editKeepDays'); if (editKeepDays) editKeepDays.value = archive.retention_keep_days;
+    const editKeepWeeks = document.getElementById('editKeepWeeks'); if (editKeepWeeks) editKeepWeeks.value = archive.retention_keep_weeks;
+    const editKeepMonths = document.getElementById('editKeepMonths'); if (editKeepMonths) editKeepMonths.value = archive.retention_keep_months;
+    const editKeepYears = document.getElementById('editKeepYears'); if (editKeepYears) editKeepYears.value = archive.retention_keep_years;
+    const editOnePerDay = document.getElementById('editOnePerDay'); if (editOnePerDay) editOnePerDay.checked = !!archive.retention_one_per_day;
     
-    // Check selected stacks
+    // Check selected stacks (existing checkboxes only)
     document.querySelectorAll('.edit-stack-check').forEach(checkbox => {
-        checkbox.checked = archive.stacks.includes(checkbox.value);
+        checkbox.checked = archive.stacks && archive.stacks.includes(checkbox.value);
     });
     
     // Show modal
-    new bootstrap.Modal(document.getElementById('editArchiveModal')).show();
+    const modalEl = document.getElementById('editArchiveModal');
+    if (modalEl && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+        new bootstrap.Modal(modalEl).show();
+    } else if (modalEl) {
+        modalEl.classList.add('show');
+    }
 }
 
 function setCron(cron) {
