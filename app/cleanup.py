@@ -357,15 +357,18 @@ def is_stack_directory_empty(stack_dir, log_callback=None):
         # If something goes wrong reading dir, treat it as non-empty to be safe
         return False
 
-    # 1) Look for archive files anywhere under this stack_dir
+    # 1) If any file exists anywhere under this stack_dir, it's not empty
     for f in stack_dir.rglob('*'):
         try:
             if f.is_file():
-                name = f.name.lower()
-                if name.endswith('.tar') or name.endswith('.tar.gz') or name.endswith('.tar.zst'):
-                    return False
+                # Any regular file (compose.yaml, data files, archives, etc.) indicates the
+                # directory holds content and should not be considered empty.
+                return False
         except Exception:
             continue
+
+    # If no regular files exist, we still consider timestamped subdirectories or nested
+    # stack directories as indicators of non-empty backup folders.
 
     # 2) Check for timestamp-like subdirectories (timestamp at start of name)
     timestamp_re = re.compile(r'^\d{8}_\d{6}')
