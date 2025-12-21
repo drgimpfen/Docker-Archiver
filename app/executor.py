@@ -341,7 +341,8 @@ class ArchiveExecutor:
         log_line = f"[{timestamp}] [{level}] {prefix}{message}"
         # Append to in-memory buffer
         self.log_buffer.append(log_line)
-        print(log_line)
+        # Ensure immediate flush so redirected stdout/stderr files are written promptly
+        print(log_line, flush=True)
 
         # Emit SSE event for live listeners (best-effort)
         try:
@@ -739,21 +740,41 @@ def _create_archive(self, stack_name, stack_path):
             ext = 'tar'
             tar_opts = '-cf'
         
-        # Create output path
-        output_dir = Path(ARCHIVE_BASE) / archive_name / stack_name
+        # Create output paths
+        base_dir = Path(ARCHIVE_BASE) / archive_name
+        output_dir = base_dir / stack_name
+        # For auditing, log the timestamp and configured display timezone
+        try:
+            from app.utils import get_display_timezone
+            tz_obj = get_display_timezone()
+            tz_name = getattr(tz_obj, 'key', None) or os.environ.get('TZ', 'UTC')
+            from datetime import datetime, timezone
+            aware_local = datetime.now(tz_obj)
+            iso_local = aware_local.isoformat()
+            iso_utc = aware_local.astimezone(timezone.utc).isoformat()
+        except Exception:
+            tz_name = os.environ.get('TZ', 'UTC')
+            iso_local = timestamp
+            iso_utc = ''
+        self.log('INFO', f"Using archive timestamp {timestamp} (display TZ={tz_name}, local={iso_local}, utc={iso_utc})")
         
         if ext:
             output_file = output_dir / f"{timestamp}_{stack_name}.{ext}"
         else:
-            output_file = output_dir / f"{timestamp}_{stack_name}"
+            # For folder outputs, place the timestamped folder under the archive root
+            output_file = base_dir / f"{timestamp}_{stack_name}"
+        
         # Skip archive creation if disabled in dry run
         if self.is_dry_run and not self.dry_run_config.get('create_archive', True):
             self.log('INFO', f"Skipping archive creation for '{stack_name}' (dry run disabled)")
             return str(output_file), 0
         
+        # Ensure parent directories exist
         if not self.is_dry_run:
-            output_dir.mkdir(parents=True, exist_ok=True)
-        
+            if ext:
+                output_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                base_dir.mkdir(parents=True, exist_ok=True)        
         if ext:
             # Create compressed archive
             format_name = output_format.upper()

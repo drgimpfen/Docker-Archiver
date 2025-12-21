@@ -67,39 +67,48 @@ def init_scheduler():
 def schedule_cleanup_task():
     """Schedule or reschedule the cleanup task based on settings."""
     global scheduler
-    
+
     if scheduler is None:
         return
-    
+
     enabled = get_setting('cleanup_enabled', 'true').lower() == 'true'
-    
+
     if not enabled:
         # Remove job if it exists
         if scheduler.get_job('cleanup_task'):
             scheduler.remove_job('cleanup_task')
-            print("[Scheduler] Cleanup task disabled")
+            print("[Scheduler] Scheduled cleanup task disabled")
         return
-    
-    # Get cleanup time from settings (format: HH:MM)
-    cleanup_time = get_setting('cleanup_time', '02:30')
-    try:
-        hour, minute = map(int, cleanup_time.split(':'))
-    except (ValueError, AttributeError):
-        hour, minute = 2, 30  # Default fallback
-        print(f"[Scheduler] Invalid cleanup_time format '{cleanup_time}', using default 02:30")
-    
+
+    # Get cleanup cron from settings (format: minute hour day month day_of_week)
+    cleanup_cron = get_setting('cleanup_cron', '30 2 * * *')
+    cron_parts = cleanup_cron.split()
+    if len(cron_parts) != 5:
+        print(f"[Scheduler] Invalid cleanup_cron '{cleanup_cron}', using default '30 2 * * *'")
+        cron_parts = ['30', '2', '*', '*', '*']
+
     from app.cleanup import run_cleanup
-    
-    scheduler.add_job(
-        run_cleanup,
-        'cron',
-        hour=hour,
-        minute=minute,
-        id='cleanup_task',
-        replace_existing=True
-    )
-    
-    print(f"[Scheduler] Cleanup task scheduled for {hour:02d}:{minute:02d}")
+
+    try:
+        from app.utils import get_display_timezone
+        display_tz = get_display_timezone()
+        trigger = CronTrigger(
+            minute=cron_parts[0],
+            hour=cron_parts[1],
+            day=cron_parts[2],
+            month=cron_parts[3],
+            day_of_week=cron_parts[4],
+            timezone=display_tz
+        )
+        scheduler.add_job(
+            run_cleanup,
+            trigger,
+            id='cleanup_task',
+            replace_existing=True
+        )
+        print(f"[Scheduler] Scheduled cleanup task with cron: {cleanup_cron}")
+    except Exception as e:
+        print(f"[Scheduler] Failed to schedule cleanup task: {e}")
 
 
 def reload_schedules():
@@ -173,18 +182,20 @@ def run_scheduled_archive(archive_config):
     try:
         # Start the scheduled archive as a detached subprocess to avoid blocking the scheduler
         import subprocess, sys, os
+        from app import utils as _utils
         jobs_dir = os.environ.get('ARCHIVE_JOB_LOG_DIR', '/var/log/archiver')
         os.makedirs(jobs_dir, exist_ok=True)
-        log_path = os.path.join(jobs_dir, f"archive_sched_{archive_config['id']}.log")
-        cmd = [sys.executable, '-m', 'app.run_job', '--archive-id', str(archive_config['id'])]
-        with open(log_path, 'ab') as fh:
-            subprocess.Popen(cmd, stdout=fh, stderr=fh, start_new_session=True)
-        print(f"[Scheduler] Enqueued scheduled archive {archive_config['name']}")
+        timestamp = _utils.local_now().strftime('%Y%m%d_%H%M%S')
+        safe_name = _utils.filename_safe(archive_config['name'])
+        log_name = f"{timestamp}_scheduled_{safe_name}.log"
+        log_path = os.path.join(jobs_dir, log_name)
+        cmd = [sys.executable, '-m', 'app.run_job', '--archive-id', str(archive_config['id']), '--log-path', log_path]
+        subprocess.Popen(cmd, start_new_session=True)
+        print(f"[Scheduler] Enqueued scheduled archive {archive_config['name']} (log: {log_name})")
     except Exception as e:
         print(f"[Scheduler] Archive failed: {e}")
         from app.notifications import send_error_notification
         send_error_notification(archive_config['name'], str(e))
-
 
 def get_next_run_time(archive_id):
     """Get next run time for a scheduled archive.

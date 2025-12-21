@@ -444,11 +444,13 @@ def dry_run(archive_id):
 
         jobs_dir = os.environ.get('ARCHIVE_JOB_LOG_DIR', '/var/log/archiver')
         os.makedirs(jobs_dir, exist_ok=True)
-        log_path = os.path.join(jobs_dir, f"archive_dryrun_{archive_id}.log")
+        timestamp = utils.local_now().strftime('%Y%m%d_%H%M%S')
+        safe_name = utils.filename_safe(archive['name'])
+        log_name = f"{timestamp}_dryrun_{safe_name}.log"
+        log_path = os.path.join(jobs_dir, log_name)
         try:
-            with open(log_path, 'ab') as fh:
-                subprocess.Popen(cmd, stdout=fh, stderr=fh, start_new_session=True)
-            flash(f'Dry run for "{archive["name"]}" started', 'info')
+            subprocess.Popen(cmd + ['--log-path', log_path], start_new_session=True)
+            flash(f'Dry run for "{archive["name"]}" started (log: {log_name})', 'info')
         except Exception as e:
             flash(f'Failed to start dry run: {e}', 'danger')
 

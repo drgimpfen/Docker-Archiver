@@ -82,21 +82,18 @@ def manage_settings():
             
             # Cleanup settings
             cleanup_enabled = request.form.get('cleanup_enabled') == 'on'
-            cleanup_time = request.form.get('cleanup_time', '02:30')
+            cleanup_cron = request.form.get('cleanup_cron', '30 2 * * *')
             cleanup_log_retention_days = request.form.get('cleanup_log_retention_days', '90')
             cleanup_dry_run = request.form.get('cleanup_dry_run') == 'on'
             notify_cleanup = request.form.get('notify_cleanup') == 'on'
-            
-            # Validate cleanup time format
+
+            # Validate cron expression loosely (5 parts)
             if cleanup_enabled:
-                try:
-                    hour, minute = map(int, cleanup_time.split(':'))
-                    if not (0 <= hour <= 23 and 0 <= minute <= 59):
-                        raise ValueError
-                except (ValueError, AttributeError):
-                    flash('Invalid cleanup time format. Please use HH:MM format (e.g., 02:30).', 'danger')
+                cron_parts = cleanup_cron.split()
+                if len(cron_parts) != 5:
+                    flash('Invalid cleanup cron expression. Use format: minute hour day month day_of_week (e.g., "30 2 * * *").', 'danger')
                     return redirect(url_for('settings.manage_settings'))
-            
+
             with get_db() as conn:
                 cur = conn.cursor()
                 settings_to_update = [
@@ -109,7 +106,7 @@ def manage_settings():
                     ('maintenance_mode', 'true' if maintenance_mode else 'false'),
                     ('max_token_downloads', max_token_downloads),
                     ('cleanup_enabled', 'true' if cleanup_enabled else 'false'),
-                    ('cleanup_time', cleanup_time),
+                    ('cleanup_cron', cleanup_cron),
                     ('cleanup_log_retention_days', cleanup_log_retention_days),
                     ('cleanup_dry_run', 'true' if cleanup_dry_run else 'false'),
                     ('notify_on_cleanup', 'true' if notify_cleanup else 'false'),

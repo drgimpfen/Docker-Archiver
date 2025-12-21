@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-md-8">
+      <div class="card">
+        <div class="card-body">
+          <h3 class="card-title">Download nicht verfügbar</h3>
+
+          <div class="mt-3">
+            <p class="lead">{{ reason }}</p>
+            {% if hint %}
+            <p class="text-muted">{{ hint }}</p>
+            {% endif %}
+          </div>
+
+          <div class="mt-4">
+            <a href="{{ url_for('archives.list_archives') }}" class="btn btn-primary me-2">Zu den Archiven</a>
+            <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">Zurück zum Dashboard</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

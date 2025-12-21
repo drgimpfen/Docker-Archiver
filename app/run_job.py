@@ -26,7 +26,9 @@ def parse_args(argv):
     parser.add_argument('--no-stop-containers', action='store_true')
     parser.add_argument('--no-create-archive', action='store_true')
     parser.add_argument('--no-run-retention', action='store_true')
-    return parser.parse_args(argv)
+    # Optional: parent may pass an explicit log path so both parent and child know it
+    parser.add_argument('--log-path', type=str, help='Optional path for the job log file')
+    return parser.parse_args(argv or sys.argv[1:])
 
 
 def main(argv=None):
@@ -58,24 +60,56 @@ def main(argv=None):
     except Exception:
         pass
 
+    # Determine log path: allow parent to pass a path via --log-path, otherwise
+    # create a per-run timestamped filename using the same convention as before.
     timestamp = utils.local_now().strftime('%Y%m%d_%H%M%S')
     archive_name = archive['name']
-    log_name = f"job_{archive_name}_{timestamp}.log"
-    log_path = jobs_dir / log_name
+    safe_name = utils.filename_safe(archive_name)
+    job_type = 'dryrun' if args.dry_run else 'archive'
+    default_log_name = f"{timestamp}_{job_type}_{safe_name}.log"
+    default_log_path = jobs_dir / default_log_name
 
-    # Redirect stdout/stderr to log file
+    # If the parent passed a log path (via CLI arg), use that. We'll parse args
+    # early so we can accept --log-path.
+    # Note: argparse parsing is at top; access attribute `log_path` if present.
+    cli_log_path = None
     try:
-        with open(log_path, 'ab') as fh:
-            # Small wrapper to write both stdout/stderr to file while still printing to console
-            # Execute the job
-            executor = ArchiveExecutor(dict(archive), is_dry_run=args.dry_run, dry_run_config=dry_run_config)
-            # Flush any prints to file
-            executor.run(triggered_by='subprocess', job_id=args.job_id)
+        cli_log_path = args.log_path if hasattr(args, 'log_path') and args.log_path else None
+    except Exception:
+        cli_log_path = None
+
+    if cli_log_path:
+        log_path = Path(cli_log_path)
+    else:
+        log_path = default_log_path
+
+    # Execute the job. If stdout has been redirected by the parent (e.g., API/scheduler
+    # passed a log file), reuse inherited stdout/stderr so we don't create duplicate
+    # or empty files. Otherwise, create a per-run log file and redirect stdout/stderr to it.
+    import contextlib, sys
+    executor = ArchiveExecutor(dict(archive), is_dry_run=args.dry_run, dry_run_config=dry_run_config)
+
+    try:
+        # If stdout is not a TTY, it is likely redirected by the parent (file/pipe)
+        if not sys.stdout.isatty():
+            # Reuse inherited stdout/stderr
+            try:
+                executor.run(triggered_by='subprocess', job_id=args.job_id)
+            finally:
+                try:
+                    sys.stdout.flush()
+                except Exception:
+                    pass
+        else:
+            # No inherited redirection - create our own per-run log file
+            with open(log_path, 'a', encoding='utf-8', errors='replace') as fh:
+                with contextlib.redirect_stdout(fh), contextlib.redirect_stderr(fh):
+                    executor.run(triggered_by='subprocess', job_id=args.job_id)
     except Exception as e:
         # Ensure exceptions are visible in the log
         try:
-            with open(log_path, 'ab') as fh:
-                fh.write((str(e) + '\n').encode('utf-8', errors='replace'))
+            with open(log_path, 'a', encoding='utf-8', errors='replace') as fh:
+                fh.write((str(e) + '\n'))
         except Exception:
             pass
         raise

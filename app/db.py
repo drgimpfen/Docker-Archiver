@@ -225,7 +225,7 @@ def init_db():
                 ('maintenance_mode', 'false'),
                 ('max_token_downloads', '3'),
                 ('cleanup_enabled', 'true'),
-                ('cleanup_time', '02:30'),
+                ('cleanup_cron', '30 2 * * *'),
                 ('cleanup_log_retention_days', '90'),
                 ('cleanup_dry_run', 'false'),
                 ('notify_on_cleanup', 'false'),

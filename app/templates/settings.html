@@ -167,17 +167,23 @@
                        id="cleanupEnabled" name="cleanup_enabled"
                        {% if settings.get('cleanup_enabled', 'true') == 'true' %}checked{% endif %}>
                 <label class="form-check-label" for="cleanupEnabled">
-                    <strong>Enable Nightly Cleanup</strong><br>
-                    <small class="text-muted">Automatically clean up orphaned files, old logs, and temp files</small>
+                    <strong>Enable Scheduled Cleanup</strong><br>
+                    <small class="text-muted">Automatically run scheduled cleanup tasks to remove orphaned files, old logs, and temp files</small>
                 </label>
             </div>
             
             <div class="row">
                 <div class="col-md-6 mb-3">
-                    <label for="cleanupTime" class="form-label">Cleanup Time</label>
-                    <input type="time" class="form-control" id="cleanupTime" name="cleanup_time" 
-                           value="{{ settings.get('cleanup_time', '02:30') }}">
-                    <div class="form-text">Daily time to run cleanup (24-hour format)</div>
+                    <label for="cleanupCron" class="form-label">Cleanup schedule (cron)</label>
+                    <input type="text" class="form-control" id="cleanupCron" name="cleanup_cron" 
+                           value="{{ settings.get('cleanup_cron', '30 2 * * *') }}">
+                    <div class="form-text">Cron expression (minute hour day month day_of_week). Example: <code>30 2 * * *</code></div>
+                    <div class="btn-group btn-group-sm mt-2" role="group" aria-label="Cleanup presets">
+                        <button type="button" class="btn btn-outline-secondary" onclick="setCleanupCron('30 2 * * *')">Daily 2:30AM</button>
+                        <button type="button" class="btn btn-outline-secondary" onclick="setCleanupCron('0 0 * * 0')">Weekly Sunday</button>
+                        <button type="button" class="btn btn-outline-secondary" onclick="setCleanupCron('0 0 1 * *')">Monthly 1st</button>
+                        <button type="button" class="btn btn-outline-secondary" onclick="setCleanupCron('*/15 * * * *')">Every 15min</button>
+                    </div>
                 </div>
                 
                 <div class="col-md-6 mb-3">
@@ -304,6 +310,10 @@ function testNotification() {
         btn.disabled = false;
         btn.innerHTML = originalContent;
     });
+}
+
+function setCleanupCron(cron) {
+    document.getElementById('cleanupCron').value = cron;
 }
 </script>
 {% endblock %}

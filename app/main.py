@@ -170,6 +170,17 @@ def run_startup_discovery():
             except Exception as e:
                 if verbose:
                     print(f"[Startup] Failed to start stale job cleanup thread: {e}")
+
+            # Run downloads startup rescan to restore any missing download artifacts if possible
+            try:
+                from app.downloads import startup_rescan_downloads
+                startup_rescan_downloads()
+                if verbose:
+                    print("[Startup] Download startup rescan complete")
+            except Exception as e:
+                if verbose:
+                    print(f"[Startup] Download startup rescan failed: {e}")
+
             startup_discovery_done = True
 
 
@@ -451,23 +462,43 @@ def download_archive(token):
     """Download archive by token (no auth required)."""
     from app.security import is_safe_path
     
-    download_info = get_download_by_token(token)
-    
-    if not download_info:
-        return "Invalid or expired download link", 404
-    
-    archive_path = download_info['archive_path']
-    
+    # First, fetch raw token row to determine specific failure reasons without
+    # incrementing the download counter.
+    token_row = get_download_token_row(token)
+    if not token_row:
+        return render_template('download_error.html', reason='Ungültiger Download-Link', hint='Der Link ist ungültig oder wurde nie erstellt.'), 404
+
+    # Check expiry
+    from datetime import datetime
+    now = datetime.utcnow()
+    expires_at = token_row.get('expires_at')
+    if expires_at and expires_at <= now:
+        return render_template('download_error.html', reason='Der Download-Link ist abgelaufen', hint='Bitte erstelle einen neuen Download-Link für die gewünschte Datei.'), 410
+
+    # Check max downloads
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM settings WHERE key = 'max_token_downloads';")
+        setting = cur.fetchone()
+        max_downloads = int(setting['value']) if setting else 3
+
+    if token_row.get('downloads', 0) >= max_downloads:
+        return render_template('download_error.html', reason='Download-Limit erreicht', hint='Der Download wurde zu oft verwendet. Erstelle bitte einen neuen Download.'), 429
+
+    archive_path = token_row['archive_path']
     # Security: Validate path is within archives directory
-    if not is_safe_path('/archives', archive_path):
-        return "Invalid archive path", 403
-    
+    if archive_path and not is_safe_path('/archives', archive_path):
+        return render_template('download_error.html', reason='Ungültiger Pfad', hint='Der Pfad zum Archiv ist ungültig.'), 403
+
     # Prepare archive (create if folder)
     actual_path, should_cleanup = prepare_archive_for_download(archive_path, output_format='tar.gz')
-    
-    if not actual_path:
-        return "Archive file not found or could not be created", 404
-    
+
+    if not actual_path or not Path(actual_path).exists():
+        return render_template('download_error.html', reason='Datei nicht gefunden', hint='Die Datei ist nicht mehr vorhanden. Du kannst den Download erneut generieren, indem du ein neues Archiv erstellst oder die Download‑Aktion nochmal startest.'), 404
+
+    # Before sending, increment download counter
+    increment_download_count(token)
+
     # Send file
     try:
         return send_file(
@@ -476,7 +507,7 @@ def download_archive(token):
             download_name=os.path.basename(actual_path)
         )
     except Exception as e:
-        return f"Error downloading file: {e}", 500
+        return render_template('download_error.html', reason='Fehler beim Herunterladen', hint=str(e)), 500
 
 
 if __name__ == '__main__':

@@ -114,3 +114,18 @@ def to_iso_z(dt):
     except Exception:
         pass
     return str(dt)
+
+
+def filename_safe(name):
+    """Return a filesystem-safe name derived from the provided string.
+
+    Replaces any character not in [A-Za-z0-9_-] with underscore and collapses
+    repeated underscores.
+    """
+    try:
+        import re
+        safe = re.sub(r'[^A-Za-z0-9_-]+', '_', str(name))
+        safe = re.sub(r'_+', '_', safe).strip('_')
+        return safe or 'unnamed'
+    except Exception:
+        return 'unnamed'

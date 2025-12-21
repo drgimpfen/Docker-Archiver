@@ -374,21 +374,25 @@ def tail_log(job_id):
 def _prepare_folder_download(token, folder_path, stack_name, user_email):
     """Background task to compress folder and notify user."""
     try:
-        # Create compressed archive
-        download_dir = Path('/archives/_downloads')
-        download_dir.mkdir(exist_ok=True)
-        
+        # Create compressed archive in configured DOWNLOADS_PATH
+        from app import downloads as _downloads
+        try:
+            _downloads.DOWNLOADS_PATH.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
         timestamp = utils.local_now().strftime('%Y%m%d_%H%M%S')
-        archive_name = f"{stack_name}_{timestamp}.tar.zst"
-        archive_path = download_dir / archive_name
-        
+        safe_name = utils.filename_safe(stack_name)
+        archive_name = f"{timestamp}_download_{safe_name}.tar.zst"
+        archive_path = _downloads.DOWNLOADS_PATH / archive_name
+
         # Compress folder
         subprocess.run(
             ['tar', '-I', 'zstd', '-cf', str(archive_path), '-C', str(Path(folder_path).parent), Path(folder_path).name],
             check=True,
             timeout=3600
         )
-        
+
         # Update token with new path
         with get_db() as conn:
             cur = conn.cursor()
@@ -505,10 +509,14 @@ def run_archive(archive_id):
         import sys
         jobs_dir = os.environ.get('ARCHIVE_JOB_LOG_DIR', '/var/log/archiver')
         os.makedirs(jobs_dir, exist_ok=True)
-        log_path = os.path.join(jobs_dir, f"archive_{archive_id}.log")
-        cmd = [sys.executable, '-m', 'app.run_job', '--archive-id', str(archive_id), '--job-id', str(job_id)]
-        with open(log_path, 'ab') as fh:
-            subprocess.Popen(cmd, stdout=fh, stderr=fh, start_new_session=True)
+        # Create a per-job timestamped log file and pass it to the subprocess via --log-path
+        timestamp = utils.local_now().strftime('%Y%m%d_%H%M%S')
+        safe_name = utils.filename_safe(archive['name'])
+        log_name = f"{timestamp}_archive_{safe_name}.log"
+        log_path = os.path.join(jobs_dir, log_name)
+
+        cmd = [sys.executable, '-m', 'app.run_job', '--archive-id', str(archive_id), '--job-id', str(job_id), '--log-path', log_path]
+        subprocess.Popen(cmd, start_new_session=True)
 
         return jsonify({
             'success': True,
@@ -544,12 +552,16 @@ def dry_run_archive(archive_id):
             'run_retention': data.get('run_retention', True)
         }
         
-        # Start dry run in a detached subprocess
+        # Start dry run in a detached subprocess and pass an explicit per-run log path
         import sys
         jobs_dir = os.environ.get('ARCHIVE_JOB_LOG_DIR', '/var/log/archiver')
         os.makedirs(jobs_dir, exist_ok=True)
-        log_path = os.path.join(jobs_dir, f"archive_dryrun_{archive_id}.log")
-        cmd = [sys.executable, '-m', 'app.run_job', '--archive-id', str(archive_id), '--dry-run']
+        timestamp = utils.local_now().strftime('%Y%m%d_%H%M%S')
+        safe_name = utils.filename_safe(archive['name'])
+        log_name = f"{timestamp}_dryrun_{safe_name}.log"
+        log_path = os.path.join(jobs_dir, log_name)
+
+        cmd = [sys.executable, '-m', 'app.run_job', '--archive-id', str(archive_id), '--dry-run', '--log-path', log_path]
         # Pass negative flags if config disables the behavior
         if not dry_run_config.get('stop_containers', True):
             cmd.append('--no-stop-containers')
