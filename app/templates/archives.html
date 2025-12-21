@@ -94,7 +94,7 @@
                     <button class="btn btn-sm btn-outline-primary" onclick="editArchive({{ archive.id }})" title="Edit Archive">
                         <i class="bi bi-pencil me-1"></i>Edit
                     </button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteArchive({{ archive.id }}, '{{ archive.name }}')" title="Delete Archive">
+                    <button class="btn btn-sm btn-outline-danger" onclick='deleteArchive({{ archive.id }}, {{ archive.name|tojson }})' title="Delete Archive">
                         <i class="bi bi-trash me-1"></i>Delete
                     </button>
                 </td>
@@ -382,7 +382,7 @@ function setEditCron(cron) {
 }
 
 function deleteArchive(archiveId, archiveName) {
-    if (confirm(`Delete archive "${archiveName}"? This will also delete all associated job history.`)) {
+    if (confirm('Delete archive "' + archiveName + '"? This will also delete all associated job history.')) {
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = `/archives/${archiveId}/delete`;

@@ -84,7 +84,7 @@
                     <form method="POST" action="{{ url_for('archives.run_retention_only', archive_id=archive.id) }}" class="flex-fill">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                         <button type="submit" class="btn btn-outline-warning btn-sm w-100" 
-                                onclick="return confirm('Run retention cleanup for {{ archive.name }}? This will delete old archives according to retention rules.')">
+                                onclick="return confirm({{ ('Run retention cleanup for ' ~ archive.name ~ '? This will delete old archives according to retention rules.') | tojson }})">
                             <i class="bi bi-trash me-1"></i>Run Retention
                         </button>
                     </form>
@@ -92,7 +92,7 @@
                         <button type="button" class="btn btn-outline-primary btn-sm" title="Edit Archive" onclick="editArchive({{ archive.id }})">
                             <i class="bi bi-pencil"></i>
                         </button>
-                        <button type="button" class="btn btn-outline-danger btn-sm" title="Delete Archive" onclick="openDeleteModal({{ archive.id }}, {{ archive.name|tojson }})">
+                        <button type="button" class="btn btn-outline-danger btn-sm" title="Delete Archive" onclick='openDeleteModal({{ archive.id }}, {{ archive.name|tojson }})'>
                             <i class="bi bi-trash"></i>
                         </button>
                     </div>
