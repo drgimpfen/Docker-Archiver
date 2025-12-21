@@ -570,6 +570,32 @@
                 }
             }
 
+            // Modal duration ticker (updates the Job Details modal duration every second)
+            function updateModalDuration() {
+                try {
+                    const id = window._currentJobId;
+                    if (!id) return;
+                    const startEl = document.getElementById('job-start-time');
+                    const durEl = document.getElementById('job-duration');
+                    if (!startEl || !durEl) return;
+                    const startRaw = startEl.dataset.start || startEl.textContent || '';
+                    const secs = computeDurationSecondsFromStart(startRaw);
+                    if (secs !== null) {
+                        durEl.textContent = formatDuration(secs);
+                    }
+                } catch (e) {}
+            }
+
+            function startJobModalDurationTicker() {
+                if (window._jobModalDurationTicker) return;
+                updateModalDuration();
+                window._jobModalDurationTicker = setInterval(updateModalDuration, 1000);
+            }
+
+            function stopJobModalDurationTicker() {
+                if (window._jobModalDurationTicker) { clearInterval(window._jobModalDurationTicker); window._jobModalDurationTicker = null; }
+            }
+
             function stopJobEventSource() {
                 if (window._jobEventSource) {
                     try { window._jobEventSource.close(); } catch (e) {}
@@ -863,11 +889,12 @@
                         }
                     }
 
-                    // If job finished, stop SSE and any polling
+                    // If job finished, stop SSE, any polling, and modal duration ticker
                     if (job.status !== 'running') {
                         stopJobEventSource();
                         try { updateSseStatus('stopped'); } catch (e) {}
                         if (window._jobLogPoller) { clearTimeout(window._jobLogPoller); window._jobLogPoller = null; }
+                        try { stopJobModalDurationTicker(); } catch (e) {}
                     }
 
                     // Refresh authoritative job info shortly to pick up any missing fields
@@ -927,9 +954,21 @@
                     const elTotal = document.getElementById('job-total-size');
                     const elReclaimed = document.getElementById('job-reclaimed');
 
-                    if (elStart) elStart.textContent = job.start_time || 'N/A';
-                    if (elEnd) elEnd.textContent = job.end_time || 'N/A';
-                    if (elDuration) elDuration.textContent = (job.duration_seconds !== null && job.duration_seconds !== undefined) ? job.duration_seconds + 's' : 'N/A';
+                    if (elStart) { elStart.textContent = job.start_time || 'N/A'; elStart.dataset.start = job.start_time || ''; }
+                    if (elEnd) { elEnd.textContent = job.end_time || 'N/A'; elEnd.dataset.end = job.end_time || ''; }
+
+                    // If job is running, compute duration from start_time and start modal ticker
+                    if (job.status === 'running') {
+                        if (elDuration) {
+                            const secs = computeDurationSecondsFromStart(job.start_time);
+                            elDuration.textContent = secs !== null ? formatDuration(secs) : formatDuration(0);
+                        }
+                        try { startJobModalDurationTicker(); } catch (e) {}
+                    } else {
+                        if (elDuration) elDuration.textContent = (job.duration_seconds !== null && job.duration_seconds !== undefined) ? formatDuration(job.duration_seconds) : 'N/A';
+                        try { stopJobModalDurationTicker(); } catch (e) {}
+                    }
+
                     if (elTotal) elTotal.textContent = job.total_size_bytes ? formatBytes(job.total_size_bytes) : 'N/A';
                     if (elReclaimed) elReclaimed.textContent = job.reclaimed_bytes ? formatBytes(job.reclaimed_bytes) : 'N/A';
 

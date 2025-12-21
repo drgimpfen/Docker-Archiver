@@ -348,7 +348,7 @@
                                     </td>
                                     <td><small style="white-space: nowrap;" id="row-job-start-{{ job.id }}" data-start="{{ job.start_time.strftime('%Y-%m-%dT%H:%M:%SZ') if job.start_time else '' }}">{{ job.start_time|datetime('%Y-%m-%d %H:%M') }}</small></td>
                                     <td><small style="white-space: nowrap;" id="row-job-end-{{ job.id }}" data-end="{{ job.end_time.strftime('%Y-%m-%dT%H:%M:%SZ') if job.end_time else '' }}">{{ job.end_time|datetime('%Y-%m-%d %H:%M') }}</small></td>
-                                    <td><small id="row-job-duration-{{ job.id }}">{% if job.status != 'running' %}{{ format_duration(job.duration_seconds) }}{% else %}&mdash;{% endif %}</small></td>
+                                    <td><small><span id="row-job-duration-{{ job.id }}">{% if job.status != 'running' %}{{ format_duration(job.duration_seconds) }}{% else %}&mdash;{% endif %}</span></small></td>
                                     <td style="text-align: right;">
                                         <span id="row-job-size-{{ job.id }}">
                                         {% if job.job_type == 'archive' and job.total_size_bytes %}
