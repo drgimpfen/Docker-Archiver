@@ -75,7 +75,7 @@ def run_cleanup(dry_run_override=None):
         # Handle unreferenced files: list in dry-run or delete in live run
         try:
             uf_stats = cleanup_unreferenced_files(is_dry_run, log_message)
-            # uf_stats: {'count': int, 'reclaimed': bytes}
+            # uf_stats: {'count': total_candidates, 'deleted': deleted_count, 'reclaimed': bytes}
             total_reclaimed += uf_stats.get('reclaimed', 0)
         except Exception as e:
             log_message('ERROR', f'Failed to process unreferenced files: {e}')
@@ -83,6 +83,27 @@ def run_cleanup(dry_run_override=None):
 
         log_message('INFO', f"Cleanup task completed ({mode})")
         log_message('INFO', f"Total reclaimed: {format_bytes(total_reclaimed)}")
+
+        # Global summary for all checks
+        try:
+            orphaned_count = orphaned_stats.get('count', 0)
+            orphaned_reclaimed = orphaned_stats.get('reclaimed', 0)
+            temp_count = temp_stats.get('count', 0)
+            temp_reclaimed = temp_stats.get('reclaimed', 0)
+            old_logs = log_stats.get('count', 0)
+            unref_count = uf_stats.get('count', 0)
+            unref_reclaimed = uf_stats.get('reclaimed', 0)
+
+            summary = (
+                f"Summary: Orphaned Archives: {orphaned_count} ({format_bytes(orphaned_reclaimed)}), "
+                f"Unreferenced files: {unref_count} ({format_bytes(unref_reclaimed)}), "
+                f"Temp Files: {temp_count} ({format_bytes(temp_reclaimed)}), "
+                f"Old Logs: {old_logs}, Total Reclaimed: {format_bytes(total_reclaimed)}"
+            )
+            log_message('INFO', summary)
+        except Exception:
+            # If any stat is unavailable, skip the consolidated summary
+            pass
         
         # Update job status
         if job_id:
@@ -99,7 +120,7 @@ def run_cleanup(dry_run_override=None):
         
         # Send notification if enabled
         if notify_cleanup:
-            send_cleanup_notification(orphaned_stats, log_stats, temp_stats, total_reclaimed, is_dry_run)
+            send_cleanup_notification(orphaned_stats, log_stats, temp_stats, uf_stats, total_reclaimed, is_dry_run)
             
     except Exception as e:
         log_message('ERROR', f"Cleanup failed: {str(e)}")
@@ -170,28 +191,9 @@ def cleanup_orphaned_archives(is_dry_run=False, log_callback=None):
                     # Log and continue with other directories; don't let one failure abort the entire cleanup
                     log(f"Failed to delete {archive_dir}: {e}")
         else:
-            # Archive directory exists in DB — inspect files inside and log unreferenced files
-            try:
-                for entry in archive_dir.iterdir():
-                    try:
-                        if entry.is_file():
-                            # Check DB references for this file
-                            with get_db() as conn:
-                                cur = conn.cursor()
-                                # Check for exact match or a LIKE pattern containing the filename
-                                cur.execute("SELECT 1 FROM job_stack_metrics WHERE archive_path = %s OR archive_path LIKE %s LIMIT 1;", (str(entry), f"%/{entry.name}"))
-                                r = cur.fetchone()
-                                if r:
-                                    # referenced — log minimal info
-                                    log(f"Keeping referenced file: {archive_dir.name}/{entry.name}")
-                                else:
-                                    # unreferenced file — candidate for cleanup
-                                    log(f"Unreferenced file in archive dir: {archive_dir.name}/{entry.name} (candidate for manual cleanup)")
-                        # If entry is directory, we skip here — deeper checks are in cleanup_temp_files
-                    except Exception as inner_e:
-                        log(f"Error inspecting {entry}: {inner_e}")
-            except Exception as e:
-                log(f"Failed to inspect files in {archive_dir}: {e}")
+            # Archive directory exists in DB — detailed per-file inspection is handled by the
+            # dedicated `cleanup_unreferenced_files` pass to avoid duplicate logging.
+            log(f"Archive directory {archive_dir.name} exists in DB; detailed file checks are handled separately")
     
     if orphaned_count > 0:
         log(f"Found {orphaned_count} orphaned archive(s), {format_bytes(reclaimed_bytes)} to reclaim")
@@ -487,8 +489,13 @@ def cleanup_unreferenced_files(is_dry_run=False, log_callback=None):
     if not archive_base.exists():
         return {'count': 0, 'reclaimed': 0}
 
+    # Header for consistency with other checks
+    log("Checking for unreferenced files...")
+
     deleted_count = 0
     reclaimed = 0
+    candidate_count = 0
+    potential_reclaimed = 0
 
     # Iterate archive dirs that are known in DB
     with get_db() as conn:
@@ -502,6 +509,8 @@ def cleanup_unreferenced_files(is_dry_run=False, log_callback=None):
         if archive_dir.name not in db_archives:
             continue
 
+        # Collect candidates for this archive dir
+        candidates = []
         for entry in archive_dir.iterdir():
             try:
                 if entry.is_file():
@@ -510,33 +519,61 @@ def cleanup_unreferenced_files(is_dry_run=False, log_callback=None):
                         cur = conn.cursor()
                         cur.execute("SELECT 1 FROM job_stack_metrics WHERE archive_path = %s OR archive_path LIKE %s LIMIT 1;", (str(entry), f"%/{entry.name}"))
                         r = cur.fetchone()
-                        if r:
-                            # referenced — keep
-                            log(f"Keeping referenced file: {archive_dir.name}/{entry.name}")
-                        else:
-                            # unreferenced
-                            if is_dry_run:
-                                log(f"Unreferenced file in archive dir: {archive_dir.name}/{entry.name} (candidate for deletion)")
-                            else:
-                                try:
-                                    size = entry.stat().st_size if entry.exists() else 0
-                                    entry.unlink()
-                                    deleted_count += 1
-                                    reclaimed += size
-                                    log(f"Deleted unreferenced file: {archive_dir.name}/{entry.name} ({format_bytes(size)})")
-                                except Exception as de:
-                                    log(f"Failed to delete unreferenced file {entry}: {de}")
+                        if not r:
+                            size = entry.stat().st_size if entry.exists() else 0
+                            candidates.append({'archive': archive_dir.name, 'path': entry, 'size': size})
+                            candidate_count += 1
+                            potential_reclaimed += size
             except Exception as e:
                 log(f"Error inspecting {entry}: {e}")
 
-    return {'count': deleted_count if not is_dry_run else 0, 'reclaimed': reclaimed}
+        # Report or delete candidates for this archive dir
+        if is_dry_run:
+            if candidates:
+                log(f"Unreferenced files in {archive_dir.name}: {len(candidates)}")
+                for u in candidates:
+                    log(f"Unreferenced file: {u['archive']}/{u['path'].name} (no DB reference)")
+        else:
+            for u in candidates:
+                path = u['path']
+                try:
+                    # Re-check DB before deleting
+                    with get_db() as conn:
+                        cur = conn.cursor()
+                        cur.execute("SELECT 1 FROM job_stack_metrics WHERE archive_path = %s OR archive_path LIKE %s LIMIT 1;", (str(path), f"%/{path.name}"))
+                        r = cur.fetchone()
+                        if not r:
+                            try:
+                                size = u['size']
+                                path.unlink()
+                                deleted_count += 1
+                                reclaimed += size
+                                log(f"Deleted unreferenced file: {u['archive']}/{path.name} ({format_bytes(size)})")
+                            except Exception as de:
+                                log(f"Failed to delete unreferenced file {path}: {de}")
+                        else:
+                            log(f"Skipping deletion, file now referenced: {u['archive']}/{path.name}")
+                except Exception as dbe:
+                    log(f"DB check failed before deleting {path}: {dbe}")
+
+    # Per-check summary
+    if candidate_count == 0:
+        log("No unreferenced files found")
+    else:
+        if is_dry_run:
+            log(f"Found {candidate_count} unreferenced file(s), {format_bytes(potential_reclaimed)} to reclaim")
+        else:
+            log(f"Found {deleted_count} unreferenced file(s) deleted, {format_bytes(reclaimed)} reclaimed (candidates: {candidate_count})")
+
+    # Return aggregated stats
+    return {'count': candidate_count, 'deleted': deleted_count if not is_dry_run else 0, 'reclaimed': (reclaimed if not is_dry_run else potential_reclaimed)}
 
 
 # remove generate_cleanup_report and CLI usage - report not needed per config
 
 
 
-def send_cleanup_notification(orphaned_stats, log_stats, temp_stats, total_reclaimed, is_dry_run):
+def send_cleanup_notification(orphaned_stats, log_stats, temp_stats, uf_stats, total_reclaimed, is_dry_run):
     """Send notification about cleanup results."""
     try:
         import apprise
@@ -568,6 +605,7 @@ def send_cleanup_notification(orphaned_stats, log_stats, temp_stats, total_recla
 <h3>Summary</h3>
 <ul>
     <li><strong>Orphaned Archives:</strong> {orphaned_stats.get('count', 0)} removed ({format_bytes(orphaned_stats.get('reclaimed', 0))})</li>
+    <li><strong>Unreferenced files total:</strong> {uf_stats.get('count', 0)} ({format_bytes(uf_stats.get('reclaimed', 0))})</li>
     <li><strong>Old Logs:</strong> {log_stats.get('count', 0)} deleted</li>
     <li><strong>Temp Files:</strong> {temp_stats.get('count', 0)} removed ({format_bytes(temp_stats.get('reclaimed', 0))})</li>
     <li><strong>Total Reclaimed:</strong> {format_bytes(total_reclaimed)}</li>
