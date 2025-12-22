@@ -419,19 +419,32 @@ def send_retention_notification(archive_name, deleted_count, reclaimed_bytes):
         logger.exception("Failed to send notification: %s", e)
 
 
-def send_permissions_fix_notification(fixed_files, fixed_dirs, payload=None):
+def send_permissions_fix_notification(fixed_files, fixed_dirs, payload=None, report_path=None):
     """Send notification after a permissions fix run.
 
     fixed_files/fixed_dirs should be lists of file paths (may be truncated samples).
     payload may include additional metadata like counts and base path.
+    report_path, if provided, will be attached to the notification as a TXT file (full report).
     Group the items by stack (archive/stack) for nicer presentation.
     """
     if not should_notify('success'):
+        # Clean up the report file if present (best-effort)
+        try:
+            if report_path and os.path.exists(report_path):
+                os.unlink(report_path)
+        except Exception:
+            pass
         return
 
     try:
         apobj = get_apprise_instance()
         if not apobj:
+            # Cleanup
+            try:
+                if report_path and os.path.exists(report_path):
+                    os.unlink(report_path)
+            except Exception:
+                pass
             return
 
         base = None
@@ -483,24 +496,15 @@ def send_permissions_fix_notification(fixed_files, fixed_dirs, payload=None):
   <h2 style='margin-bottom:6px;'>🔧 Permissions Fix Completed</h2>
   <p class='da-small'><strong>Files fixed:</strong> {total_files} &nbsp;|&nbsp; <strong>Dirs fixed:</strong> {total_dirs}</p>
 """
-        # Per-stack sections
+        # Per-stack sections (summary only; full report attached separately)
         if stacks:
-            body += "\n  <h3>FIXED ITEMS BY STACK (sample)</h3>\n"
-            # Sort stacks alphabetically
+            body += "\n  <h3>FIXED ITEMS BY STACK (summary)</h3>\n"
+            body += "  <ul>\n"
             for stack_name in sorted(stacks.keys()):
                 s = stacks[stack_name]
-                body += f"  <div class='da-stack'><h4 style='margin-bottom:4px;'>{stack_name} — {len(s['files'])} files, {len(s['dirs'])} dirs</h4>\n"
-                if s['files']:
-                    body += "    <table class='da-table'>\n      <thead><tr><th>Fixed files (sample)</th></tr></thead>\n      <tbody>\n"
-                    for p in s['files'][:200]:
-                        body += f"        <tr><td><code>{p}</code></td></tr>\n"
-                    body += "      </tbody></table>\n"
-                if s['dirs']:
-                    body += "    <table class='da-table mt-2'>\n      <thead><tr><th>Fixed dirs (sample)</th></tr></thead>\n      <tbody>\n"
-                    for p in s['dirs'][:200]:
-                        body += f"        <tr><td><code>{p}</code></td></tr>\n"
-                    body += "      </tbody></table>\n"
-                body += "  </div>\n"
+                body += f"    <li><strong>{stack_name}</strong>: {len(s['files'])} file(s), {len(s['dirs'])} dir(s)</li>\n"
+            body += "  </ul>\n"
+            body += "  <p class='da-small'>A full report has been attached to this notification (if available).</p>\n"
         else:
             body += "  <p><em>No fixes were necessary.</em></p>\n"
 
@@ -514,7 +518,23 @@ def send_permissions_fix_notification(fixed_files, fixed_dirs, payload=None):
         else:
             send_body = body
 
-        apobj.notify(title=title, body=send_body, body_format=body_format)
+        # Attach full report if it exists
+        attach_path = None
+        try:
+            if report_path and os.path.exists(report_path):
+                attach_path = report_path
+        except Exception:
+            attach_path = None
+
+        if attach_path:
+            apobj.notify(title=title, body=send_body + "\n\n(Full report attached)", body_format=body_format, attach=attach_path)
+            # Remove the report file after sending (best-effort)
+            try:
+                os.unlink(attach_path)
+            except Exception:
+                pass
+        else:
+            apobj.notify(title=title, body=send_body, body_format=body_format)
     except Exception as e:
         logger = get_logger(__name__)
         logger.exception("Failed to send permissions notification: %s", e)

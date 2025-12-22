@@ -209,11 +209,13 @@ def filename_safe(name):
         return 'unnamed'
 
 
-def apply_permissions_recursive(base_path, file_mode=0o644, dir_mode=0o755, collect_list=False, max_samples=1000):
+def apply_permissions_recursive(base_path, file_mode=0o644, dir_mode=0o755, collect_list=False, max_samples=1000, report_path=None):
     """Recursively apply permissions to files and directories under base_path.
 
     Returns a dict with counts: {'files_changed': int, 'dirs_changed': int, 'errors': int}.
     If collect_list is True, also returns 'fixed_files' and 'fixed_dirs' lists (limited by max_samples).
+    If report_path is provided, a full report (one entry per fixed path) is appended to the file
+    as the job runs (format: 'F\t<path>' for files, 'D\t<path>' for directories).
     This is a best-effort operation and will continue on errors.
     """
     import os
@@ -224,11 +226,23 @@ def apply_permissions_recursive(base_path, file_mode=0o644, dir_mode=0o755, coll
     errors = 0
     fixed_files = []
     fixed_dirs = []
+    report_file = None
 
     try:
+        if report_path:
+            try:
+                report_file = open(report_path, 'a', encoding='utf-8')
+                report_file.write(f"# Permissions fix report for base: {base_path}\n")
+                report_file.write(f"# Started: {datetime.utcnow().isoformat()}Z\n")
+            except Exception:
+                report_file = None
+
         base = Path(base_path)
         if not base.exists():
-            return {'files_changed': 0, 'dirs_changed': 0, 'errors': 0, 'fixed_files': [], 'fixed_dirs': []}
+            if report_file:
+                try: report_file.close()
+                except Exception: pass
+            return {'files_changed': 0, 'dirs_changed': 0, 'errors': 0, 'fixed_files': [], 'fixed_dirs': [], 'report_path': report_path}
 
         for root, dirs, files in os.walk(str(base)):
             # Apply directory permissions
@@ -241,6 +255,11 @@ def apply_permissions_recursive(base_path, file_mode=0o644, dir_mode=0o755, coll
                         dirs_changed += 1
                         if collect_list and len(fixed_dirs) < max_samples:
                             fixed_dirs.append(str(p))
+                        if report_file:
+                            try:
+                                report_file.write(f"D\t{p}\n")
+                            except Exception:
+                                pass
                 except Exception:
                     errors += 1
 
@@ -254,16 +273,32 @@ def apply_permissions_recursive(base_path, file_mode=0o644, dir_mode=0o755, coll
                         files_changed += 1
                         if collect_list and len(fixed_files) < max_samples:
                             fixed_files.append(str(p))
+                        if report_file:
+                            try:
+                                report_file.write(f"F\t{p}\n")
+                            except Exception:
+                                pass
                 except Exception:
                     errors += 1
 
     except Exception:
         errors += 1
+    finally:
+        if report_file:
+            try:
+                report_file.write(f"# Completed: files_changed={files_changed} dirs_changed={dirs_changed} errors={errors}\n")
+            except Exception:
+                pass
+            try:
+                report_file.close()
+            except Exception:
+                pass
 
     out = {'files_changed': files_changed, 'dirs_changed': dirs_changed, 'errors': errors}
     if collect_list:
         out['fixed_files'] = fixed_files
         out['fixed_dirs'] = fixed_dirs
+    out['report_path'] = report_path
     return out
 
     # NOTE: unreachable, kept for clarity

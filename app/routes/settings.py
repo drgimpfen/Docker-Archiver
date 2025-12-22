@@ -189,18 +189,25 @@ def fix_permissions():
             try:
                 base = get_archives_path()
                 logger.info("[FixPerm] Starting permission fix on %s", base)
-                # Collect lists of fixed files/dirs (limit to 500 items to avoid memory blowup)
-                res = apply_permissions_recursive(base, collect_list=True, max_samples=500)
+                # Create a temporary report file to store the full list of fixed paths
+                import tempfile
+                tf = tempfile.NamedTemporaryFile(mode='w', prefix='permissions_fix_', suffix='.txt', delete=False, encoding='utf-8')
+                tf_name = tf.name
+                tf.close()
+
+                # Collect lists of fixed files/dirs (limit to 500 items to avoid memory blowup), and write full report to file
+                res = apply_permissions_recursive(base, collect_list=True, max_samples=500, report_path=tf_name)
                 logger.info("[FixPerm] Completed: %s", res)
 
-                # Prepare payload for SSE/global event
+                # Prepare payload for SSE/global event (include report path reference)
                 payload = {
                     'base': str(base),
                     'files_changed': res.get('files_changed', 0),
                     'dirs_changed': res.get('dirs_changed', 0),
                     'errors': res.get('errors', 0),
                     'fixed_files_sample': res.get('fixed_files', [])[:200],
-                    'fixed_dirs_sample': res.get('fixed_dirs', [])[:200]
+                    'fixed_dirs_sample': res.get('fixed_dirs', [])[:200],
+                    'report_path': res.get('report_path')
                 }
 
                 try:
@@ -208,10 +215,10 @@ def fix_permissions():
                 except Exception:
                     logger.exception('[FixPerm] Failed to send global SSE event')
 
-                # Send notification with list of fixed items
+                # Send notification with list of fixed items and attach full report file
                 try:
-                    # pass sample lists from payload
-                    send_permissions_fix_notification(payload.get('fixed_files_sample', []), payload.get('fixed_dirs_sample', []), payload)
+                    # pass sample lists from payload and attach full report
+                    send_permissions_fix_notification(payload.get('fixed_files_sample', []), payload.get('fixed_dirs_sample', []), payload, report_path=tf_name)
                 except Exception:
                     logger.exception('[FixPerm] Failed to send permissions notification')
 
