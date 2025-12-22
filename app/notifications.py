@@ -419,13 +419,13 @@ def send_retention_notification(archive_name, deleted_count, reclaimed_bytes):
         logger.exception("Failed to send notification: %s", e)
 
 
-def send_permissions_fix_notification(fixed_files, fixed_dirs, payload=None, report_path=None):
+def send_permissions_fix_notification(result, report_path=None):
     """Send notification after a permissions fix run.
 
-    fixed_files/fixed_dirs should be lists of file paths (may be truncated samples).
-    payload may include additional metadata like counts and base path.
-    report_path, if provided, will be attached to the notification as a TXT file (full report).
-    Group the items by stack (archive/stack) for nicer presentation.
+    `result` is the dict returned from `apply_permissions_recursive`.
+    `report_path`, if provided, will be attached to the notification as a TXT file (full report).
+
+    The email contains totals and a per-stack summary derived from the collected samples (if any).
     """
     if not should_notify('success'):
         # Clean up the report file if present (best-effort)
@@ -447,15 +447,16 @@ def send_permissions_fix_notification(fixed_files, fixed_dirs, payload=None, rep
                 pass
             return
 
-        base = None
-        try:
-            base = payload.get('base') if payload and payload.get('base') else get_archives_path()
-        except Exception:
-            base = get_archives_path()
+        base = get_archives_path()
 
-        # Group files/dirs by stack using same logic as check_permissions
+        # Extract samples from result (may be truncated)
+        fixed_files = (result.get('fixed_files') or [])[:200]
+        fixed_dirs = (result.get('fixed_dirs') or [])[:200]
+
+        # Group files/dirs by stack using same logic as check_permissions.
+        # Keep small sample lists for display (limited) and counters for accurate totals.
         from collections import defaultdict
-        stacks = defaultdict(lambda: {'files': [], 'dirs': []})
+        stacks = defaultdict(lambda: {'files': [], 'dirs': [], 'file_count': 0, 'dir_count': 0})
 
         def _stack_key(p):
             try:
@@ -471,13 +472,57 @@ def send_permissions_fix_notification(fixed_files, fixed_dirs, payload=None, rep
                 display = f"{top}/{stack}"
             return display
 
-        for p in (fixed_files or []):
-            stacks[_stack_key(p)]['files'].append(p)
-        for p in (fixed_dirs or []):
-            stacks[_stack_key(p)]['dirs'].append(p)
+        # Populate stacks from available in-memory samples (if any)
+        for p in fixed_files:
+            s = stacks[_stack_key(p)]
+            if len(s['files']) < 5:
+                s['files'].append(p)
+            s['file_count'] += 1
+        for p in fixed_dirs:
+            s = stacks[_stack_key(p)]
+            if len(s['dirs']) < 5:
+                s['dirs'].append(p)
+            s['dir_count'] += 1
 
-        total_files = sum(len(v['files']) for v in stacks.values())
-        total_dirs = sum(len(v['dirs']) for v in stacks.values())
+        # If no in-memory samples, try to parse the report file to build per-stack counts (best-effort)
+        if not fixed_files and not fixed_dirs and report_path:
+            try:
+                with open(report_path, 'r', encoding='utf-8') as rf:
+                    for line in rf:
+                        line = line.strip()
+                        if not line or line.startswith('#'):
+                            continue
+                        if line.startswith('F\t'):
+                            p = line[2:]
+                            s = stacks[_stack_key(p)]
+                            if len(s['files']) < 5:
+                                s['files'].append(p)
+                            s['file_count'] += 1
+                        elif line.startswith('D\t'):
+                            p = line[2:]
+                            s = stacks[_stack_key(p)]
+                            if len(s['dirs']) < 5:
+                                s['dirs'].append(p)
+                            s['dir_count'] += 1
+            except Exception:
+                # Best-effort: if report can't be read, fall back to available data
+                pass
+
+        # Prefer totals reported in result (full counts); fall back to parsed/sample sums
+        total_files = None
+        total_dirs = None
+        try:
+            if result and isinstance(result, dict):
+                total_files = int(result.get('files_changed')) if result.get('files_changed') is not None else None
+                total_dirs = int(result.get('dirs_changed')) if result.get('dirs_changed') is not None else None
+        except Exception:
+            total_files = None
+            total_dirs = None
+
+        if total_files is None:
+            total_files = sum(v.get('file_count', len(v.get('files', []))) for v in stacks.values())
+        if total_dirs is None:
+            total_dirs = sum(v.get('dir_count', len(v.get('dirs', []))) for v in stacks.values())
 
         title = get_subject_with_tag(f"🔧 Permissions Fixed: {total_files} files, {total_dirs} dirs")
 

@@ -209,13 +209,16 @@ def filename_safe(name):
         return 'unnamed'
 
 
-def apply_permissions_recursive(base_path, file_mode=0o644, dir_mode=0o755, collect_list=False, max_samples=1000, report_path=None):
+def apply_permissions_recursive(base_path, file_mode=0o644, dir_mode=0o755, collect_list=False, report_path=None):
     """Recursively apply permissions to files and directories under base_path.
 
     Returns a dict with counts: {'files_changed': int, 'dirs_changed': int, 'errors': int}.
-    If collect_list is True, also returns 'fixed_files' and 'fixed_dirs' lists (limited by max_samples).
-    If report_path is provided, a full report (one entry per fixed path) is appended to the file
+    If collect_list is True, also returns 'fixed_files' and 'fixed_dirs' lists (limited by an internal cap).
+    If `report_path` is provided, a full report (one entry per fixed path) is appended to the file
     as the job runs (format: 'F\t<path>' for files, 'D\t<path>' for directories).
+
+    Note: the `max_samples` public parameter was removed to simplify the API. An
+    internal safe cap (`_MAX_SAMPLES`) protects memory usage when `collect_list` is True.
     This is a best-effort operation and will continue on errors.
     """
     import os
@@ -228,12 +231,25 @@ def apply_permissions_recursive(base_path, file_mode=0o644, dir_mode=0o755, coll
     fixed_dirs = []
     report_file = None
 
+    # Internal cap for in-memory samples to avoid memory blowup when collect_list is True
+    _MAX_SAMPLES = 1000
+
+    logger = get_logger(__name__)
     try:
         if report_path:
             try:
                 report_file = open(report_path, 'a', encoding='utf-8')
                 report_file.write(f"# Permissions fix report for base: {base_path}\n")
                 report_file.write(f"# Started: {datetime.utcnow().isoformat()}Z\n")
+                try:
+                    report_file.flush()
+                    try:
+                        os.fsync(report_file.fileno())
+                    except Exception:
+                        # fsync is best-effort; ignore if not supported
+                        pass
+                except Exception:
+                    logger.debug("Failed to flush/fsync report file at start", exc_info=True)
             except Exception:
                 report_file = None
 
@@ -253,13 +269,21 @@ def apply_permissions_recursive(base_path, file_mode=0o644, dir_mode=0o755, coll
                     if current_mode != dir_mode:
                         os.chmod(p, dir_mode)
                         dirs_changed += 1
-                        if collect_list and len(fixed_dirs) < max_samples:
+                        if collect_list and len(fixed_dirs) < _MAX_SAMPLES:
                             fixed_dirs.append(str(p))
                         if report_file:
                             try:
                                 report_file.write(f"D\t{p}\n")
+                                try:
+                                    report_file.flush()
+                                    try:
+                                        os.fsync(report_file.fileno())
+                                    except Exception:
+                                        pass
+                                except Exception:
+                                    logger.debug("Failed to flush/fsync report file after D write", exc_info=True)
                             except Exception:
-                                pass
+                                logger.debug("Failed to write directory entry to report file", exc_info=True)
                 except Exception:
                     errors += 1
 
@@ -271,13 +295,21 @@ def apply_permissions_recursive(base_path, file_mode=0o644, dir_mode=0o755, coll
                     if current_mode != file_mode:
                         os.chmod(p, file_mode)
                         files_changed += 1
-                        if collect_list and len(fixed_files) < max_samples:
+                        if collect_list and len(fixed_files) < _MAX_SAMPLES:
                             fixed_files.append(str(p))
                         if report_file:
                             try:
                                 report_file.write(f"F\t{p}\n")
+                                try:
+                                    report_file.flush()
+                                    try:
+                                        os.fsync(report_file.fileno())
+                                    except Exception:
+                                        pass
+                                except Exception:
+                                    logger.debug("Failed to flush/fsync report file after F write", exc_info=True)
                             except Exception:
-                                pass
+                                logger.debug("Failed to write file entry to report file", exc_info=True)
                 except Exception:
                     errors += 1
 
@@ -287,17 +319,25 @@ def apply_permissions_recursive(base_path, file_mode=0o644, dir_mode=0o755, coll
         if report_file:
             try:
                 report_file.write(f"# Completed: files_changed={files_changed} dirs_changed={dirs_changed} errors={errors}\n")
+                try:
+                    report_file.flush()
+                    try:
+                        os.fsync(report_file.fileno())
+                    except Exception:
+                        pass
+                except Exception:
+                    logger.debug("Failed to flush/fsync report file at completion", exc_info=True)
             except Exception:
-                pass
+                logger.debug("Failed to write completion line to report file", exc_info=True)
             try:
                 report_file.close()
             except Exception:
-                pass
+                logger.debug("Failed to close report file", exc_info=True)
 
     out = {'files_changed': files_changed, 'dirs_changed': dirs_changed, 'errors': errors}
-    if collect_list:
-        out['fixed_files'] = fixed_files
-        out['fixed_dirs'] = fixed_dirs
+    # Always include fixed_files/fixed_dirs keys for a stable return schema
+    out['fixed_files'] = fixed_files
+    out['fixed_dirs'] = fixed_dirs
     out['report_path'] = report_path
     return out
 

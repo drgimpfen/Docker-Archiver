@@ -631,12 +631,7 @@
                                 const msg = `Permissions fix completed: ${files} files, ${dirs} dirs fixed`;
                                 if(typeof showAlert === 'function'){
                                     // If there are sample fixes, include a small 'View fixes' link
-                                    if((d.fixed_files_sample && d.fixed_files_sample.length) || (d.fixed_dirs_sample && d.fixed_dirs_sample.length)){
-                                        const details = encodeURIComponent(JSON.stringify(d));
-                                        showAlert(`${msg} <a href='#' onclick="(function(){ try{ showFixResultModal(JSON.parse(decodeURIComponent('${details}'))); }catch(e){console.error(e);} return false; })()">View fixes</a>`, 'success');
-                                    } else {
-                                        showAlert(msg, 'success');
-                                    }
+                                    showAlert(msg, 'success');
                                 }
                                 // If permissions modal is open, refresh its contents
                                 const permModalEl = document.getElementById('permissionsModal');
@@ -655,78 +650,7 @@
                 } catch(e){ console.error('Failed to open global SSE:', e); }
             }
 
-            function showFixResultModal(data){
-                try{
-                    // Group samples by stack (archive/stack)
-                    const base = data.base || '';
-                    const groups = {};
-                    function keyForPath(p){
-                        let rel = p;
-                        try{
-                            if(base && p.startsWith(base)) rel = p.slice(base.length).replace(/^\//,'');
-                        }catch(e){}
-                        const parts = rel.split('/').filter(Boolean);
-                        const top = parts[0] || '';
-                        const stack = parts[1] || '<root>';
-                        return stack === '<root>' ? (top || base) : `${top}/${stack}`;
-                    }
-                    (data.fixed_files_sample || []).forEach(p=>{
-                        const k = keyForPath(p);
-                        groups[k] = groups[k] || {files: [], dirs: []};
-                        groups[k].files.push(p);
-                    });
-                    (data.fixed_dirs_sample || []).forEach(p=>{
-                        const k = keyForPath(p);
-                        groups[k] = groups[k] || {files: [], dirs: []};
-                        groups[k].dirs.push(p);
-                    });
 
-                    let inner = `<p class="mb-2">Summary: <strong>${data.files_changed || 0} files</strong>, <strong>${data.dirs_changed || 0} dirs</strong> fixed.</p>`;
-                    if(Object.keys(groups).length){
-                        inner += '<div class="row">';
-                    } else {
-                        inner += '<p><em>No fixes were necessary.</em></p>';
-                    }
-
-                    // Build per-stack HTML
-                    Object.keys(groups).sort().forEach(k=>{
-                        const g = groups[k];
-                        inner += `<div class="col-12">`;
-                        inner += `<h5 style="margin-top:8px;">${k} — ${g.files.length} files, ${g.dirs.length} dirs</h5>`;
-                        if(g.files.length){
-                            inner += `<div style="max-height:160px; overflow:auto; margin-bottom:8px;">${g.files.map(f=>`<div><code>${f}</code></div>`).join('')}</div>`;
-                        }
-                        if(g.dirs.length){
-                            inner += `<div style="max-height:160px; overflow:auto; margin-bottom:8px;">${g.dirs.map(f=>`<div><code>${f}</code></div>`).join('')}</div>`;
-                        }
-                        inner += `</div>`;
-                    });
-
-                    const modalHtml = `
-                    <div class="modal fade" id="fixResultModal" tabindex="-1">
-                      <div class="modal-dialog modal-lg modal-dialog-centered">
-                        <div class="modal-content">
-                          <div class="modal-header">
-                            <h5 class="modal-title">Permissions Fix Results</h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                          </div>
-                          <div class="modal-body">${inner}</div>
-                          <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>`;
-
-                    const wrapper = document.createElement('div');
-                    wrapper.innerHTML = modalHtml;
-                    document.body.appendChild(wrapper);
-                    const modalEl = document.getElementById('fixResultModal');
-                    const bs = new bootstrap.Modal(modalEl);
-                    bs.show();
-                    modalEl.addEventListener('hidden.bs.modal', function(){ wrapper.remove(); }, { once: true });
-                }catch(e){ console.error('Failed to show fixes modal', e); }
-            }
 
             // Start global SSE immediately on load
             try { startGlobalEventSource(); } catch(e) {}
