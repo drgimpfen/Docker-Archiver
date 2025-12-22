@@ -29,6 +29,10 @@ _redis_subscribers = {}  # job_id -> {'thread': Thread, 'stop': Event}
 _redis_global = None  # {'thread': Thread, 'stop': Event}
 _use_redis = False
 
+# In-memory global listeners for broadcast events
+_global_listeners = []  # list of Queue
+
+
 REDIS_URL = os.environ.get('REDIS_URL')
 # Verbose SSE job event debug will be gated by logger.isEnabledFor(logging.DEBUG)
 
@@ -69,6 +73,12 @@ if not _use_redis and REDIS_URL:
                     _use_redis = True
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.info("[SSE] Redis connected on retry")
+
+                    # Start global subscriber after successful connection
+                    try:
+                        _start_redis_global_subscriber()
+                    except Exception:
+                        pass
                     return
                 except Exception:
                     if logger.isEnabledFor(logging.DEBUG):
@@ -79,6 +89,13 @@ if not _use_redis and REDIS_URL:
     import threading
     t = threading.Thread(target=_redis_connector_loop, daemon=True)
     t.start()
+else:
+    # If redis is available at startup, start the global subscriber now
+    try:
+        if _use_redis:
+            _start_redis_global_subscriber()
+    except Exception:
+        pass
 
 
 def _start_redis_subscriber(job_id):
@@ -137,6 +154,32 @@ def _stop_redis_subscriber(job_id):
             pass
 
 
+def _start_redis_global_subscriber():
+    """Subscribe to the global jobs-events Redis channel and forward messages to global listeners."""
+    global _redis_global
+    if not _use_redis or _redis_global:
+        return
+
+    stop_event = threading.Event()
+
+    def run():
+        try:
+            pubsub = _redis_client.pubsub(ignore_subscribe_messages=True)
+            pubsub.subscribe('jobs-events')
+            while not stop_event.is_set():
+                msg = pubsub.get_message(timeout=1)
+                if msg and msg.get('data'):
+                    data = msg['data']
+                    # Forward to in-memory global listeners
+                    _publish_to_global_listeners(data)
+        except Exception:
+            pass
+
+    t = threading.Thread(target=run, daemon=True)
+    _redis_global = {'thread': t, 'stop': stop_event}
+    t.start()
+
+
 def register_event_listener(job_id):
     q = queue.Queue()
     with _lock:
@@ -193,6 +236,81 @@ def send_event(job_id, event_type, payload):
             _redis_client.publish(channel, data)
         except Exception:
             pass
+
+
+def register_global_listener():
+    """Register a queue listener for global events and return the Queue."""
+    q = queue.Queue()
+    with _lock:
+        _global_listeners.append(q)
+    return q
+
+
+def unregister_global_listener(q):
+    with _lock:
+        try:
+            _global_listeners.remove(q)
+        except Exception:
+            pass
+
+
+def _publish_to_global_listeners(data):
+    """Publish raw JSON string to all global listeners (best-effort)."""
+    with _lock:
+        queues = list(_global_listeners)
+    for q in queues:
+        try:
+            q.put_nowait(data)
+        except Exception:
+            pass
+
+
+def send_global_event(event_type, payload):
+    """Publish a JSON global event to Redis if configured.
+
+    Kept for compatibility with existing code paths that emit job metadata updates.
+    If Redis is not configured, this is a no-op (optionally logs when debug enabled).
+    Additionally, always forward to in-memory global listeners for same-process
+    listeners (useful in single-worker setups).
+    """
+    data = json.dumps({'type': event_type, 'data': payload}, default=str)
+
+    # Publish to in-memory global listeners
+    try:
+        _publish_to_global_listeners(data)
+    except Exception:
+        pass
+
+    # Publish to Redis global channel if enabled
+    if _use_redis and _redis_client:
+        try:
+            _redis_client.publish('jobs-events', data)
+            try:
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug("[SSE] Global event PUBLISHED to Redis: %s", data)
+            except Exception:
+                pass
+        except Exception as e:
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.exception("[SSE] Failed to publish global event to Redis: %s", e)
+        pass
+    else:
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.info("[SSE] Global events are disabled (no Redis configured)")
+    try:
+        status = {
+            'use_redis': bool(_use_redis),
+            'redis_url_set': bool(REDIS_URL),
+            'redis_connected': None
+        }
+        if _redis_client:
+            try:
+                status['redis_connected'] = _redis_client.ping()
+            except Exception:
+                status['redis_connected'] = False
+        return status
+    except Exception:
+        return {'error': 'could not retrieve status'}
 
 
 def send_global_event(event_type, payload):

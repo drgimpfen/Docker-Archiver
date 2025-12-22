@@ -181,14 +181,40 @@ def fix_permissions():
     try:
         import threading
         from app.utils import get_archives_path, apply_permissions_recursive, get_logger
+        from app.sse import send_global_event
+        from app.notifications import send_permissions_fix_notification
         logger = get_logger(__name__)
 
         def _run():
             try:
                 base = get_archives_path()
                 logger.info("[FixPerm] Starting permission fix on %s", base)
-                res = apply_permissions_recursive(base)
+                # Collect lists of fixed files/dirs (limit to 500 items to avoid memory blowup)
+                res = apply_permissions_recursive(base, collect_list=True, max_samples=500)
                 logger.info("[FixPerm] Completed: %s", res)
+
+                # Prepare payload for SSE/global event
+                payload = {
+                    'base': str(base),
+                    'files_changed': res.get('files_changed', 0),
+                    'dirs_changed': res.get('dirs_changed', 0),
+                    'errors': res.get('errors', 0),
+                    'fixed_files_sample': res.get('fixed_files', [])[:200],
+                    'fixed_dirs_sample': res.get('fixed_dirs', [])[:200]
+                }
+
+                try:
+                    send_global_event('permissions_fix_completed', payload)
+                except Exception:
+                    logger.exception('[FixPerm] Failed to send global SSE event')
+
+                # Send notification with list of fixed items
+                try:
+                    # pass sample lists from payload
+                    send_permissions_fix_notification(payload.get('fixed_files_sample', []), payload.get('fixed_dirs_sample', []), payload)
+                except Exception:
+                    logger.exception('[FixPerm] Failed to send permissions notification')
+
             except Exception as e:
                 logger.exception("[FixPerm] Failed: %s", e)
 

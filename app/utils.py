@@ -209,10 +209,11 @@ def filename_safe(name):
         return 'unnamed'
 
 
-def apply_permissions_recursive(base_path, file_mode=0o644, dir_mode=0o755):
+def apply_permissions_recursive(base_path, file_mode=0o644, dir_mode=0o755, collect_list=False, max_samples=1000):
     """Recursively apply permissions to files and directories under base_path.
 
     Returns a dict with counts: {'files_changed': int, 'dirs_changed': int, 'errors': int}.
+    If collect_list is True, also returns 'fixed_files' and 'fixed_dirs' lists (limited by max_samples).
     This is a best-effort operation and will continue on errors.
     """
     import os
@@ -221,19 +222,25 @@ def apply_permissions_recursive(base_path, file_mode=0o644, dir_mode=0o755):
     files_changed = 0
     dirs_changed = 0
     errors = 0
+    fixed_files = []
+    fixed_dirs = []
 
     try:
         base = Path(base_path)
         if not base.exists():
-            return {'files_changed': 0, 'dirs_changed': 0, 'errors': 0}
+            return {'files_changed': 0, 'dirs_changed': 0, 'errors': 0, 'fixed_files': [], 'fixed_dirs': []}
 
         for root, dirs, files in os.walk(str(base)):
             # Apply directory permissions
             for d in dirs:
                 p = os.path.join(root, d)
                 try:
-                    os.chmod(p, dir_mode)
-                    dirs_changed += 1
+                    current_mode = os.stat(p).st_mode & 0o777
+                    if current_mode != dir_mode:
+                        os.chmod(p, dir_mode)
+                        dirs_changed += 1
+                        if collect_list and len(fixed_dirs) < max_samples:
+                            fixed_dirs.append(str(p))
                 except Exception:
                     errors += 1
 
@@ -241,15 +248,26 @@ def apply_permissions_recursive(base_path, file_mode=0o644, dir_mode=0o755):
             for f in files:
                 p = os.path.join(root, f)
                 try:
-                    os.chmod(p, file_mode)
-                    files_changed += 1
+                    current_mode = os.stat(p).st_mode & 0o777
+                    if current_mode != file_mode:
+                        os.chmod(p, file_mode)
+                        files_changed += 1
+                        if collect_list and len(fixed_files) < max_samples:
+                            fixed_files.append(str(p))
                 except Exception:
                     errors += 1
 
     except Exception:
         errors += 1
 
-    return {'files_changed': files_changed, 'dirs_changed': dirs_changed, 'errors': errors}
+    out = {'files_changed': files_changed, 'dirs_changed': dirs_changed, 'errors': errors}
+    if collect_list:
+        out['fixed_files'] = fixed_files
+        out['fixed_dirs'] = fixed_dirs
+    return out
+
+    # NOTE: unreachable, kept for clarity
+
 
 
 def format_mode(mode):

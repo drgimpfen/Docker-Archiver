@@ -3,7 +3,11 @@ Notification system using Apprise.
 """
 import os
 from app.db import get_db
-from app.utils import format_bytes, format_duration, get_disk_usage, get_archives_path
+from app.utils import format_bytes, format_duration, get_disk_usage, get_archives_path, get_logger, setup_logging
+
+# Configure logging
+setup_logging()
+logger = get_logger(__name__)
 
 
 def get_setting(key, default=''):
@@ -372,7 +376,7 @@ def send_retention_notification(archive_name, deleted_count, reclaimed_bytes):
     """Send notification for retention job completion."""
     if not should_notify('success'):
         return
-    
+
     try:
         # Create Apprise instance with all configured URLs and emails
         apobj = get_apprise_instance()
@@ -413,6 +417,108 @@ def send_retention_notification(archive_name, deleted_count, reclaimed_bytes):
         
     except Exception as e:
         logger.exception("Failed to send notification: %s", e)
+
+
+def send_permissions_fix_notification(fixed_files, fixed_dirs, payload=None):
+    """Send notification after a permissions fix run.
+
+    fixed_files/fixed_dirs should be lists of file paths (may be truncated samples).
+    payload may include additional metadata like counts and base path.
+    Group the items by stack (archive/stack) for nicer presentation.
+    """
+    if not should_notify('success'):
+        return
+
+    try:
+        apobj = get_apprise_instance()
+        if not apobj:
+            return
+
+        base = None
+        try:
+            base = payload.get('base') if payload and payload.get('base') else get_archives_path()
+        except Exception:
+            base = get_archives_path()
+
+        # Group files/dirs by stack using same logic as check_permissions
+        from collections import defaultdict
+        stacks = defaultdict(lambda: {'files': [], 'dirs': []})
+
+        def _stack_key(p):
+            try:
+                rel = os.path.relpath(p, base)
+            except Exception:
+                rel = p
+            parts = rel.split(os.sep) if rel and not rel.startswith('..') else []
+            top = parts[0] if len(parts) >= 1 else ''
+            stack = parts[1] if len(parts) >= 2 else '<root>'
+            if stack == '<root>':
+                display = top or base
+            else:
+                display = f"{top}/{stack}"
+            return display
+
+        for p in (fixed_files or []):
+            stacks[_stack_key(p)]['files'].append(p)
+        for p in (fixed_dirs or []):
+            stacks[_stack_key(p)]['dirs'].append(p)
+
+        total_files = sum(len(v['files']) for v in stacks.values())
+        total_dirs = sum(len(v['dirs']) for v in stacks.values())
+
+        title = get_subject_with_tag(f"🔧 Permissions Fixed: {total_files} files, {total_dirs} dirs")
+
+        css = """
+        <style>
+        .da-table { width: 100%; border-collapse: collapse; font-family: monospace; }
+        .da-table th, .da-table td { padding: 6px 8px; border-bottom: 1px solid #eee; text-align: left; }
+        .da-small { font-size: 90%; color: #666; }
+        .da-stack { margin-bottom: 12px; }
+        </style>
+        """
+
+        body = f"""
+{css}
+<div style='font-family: Arial, Helvetica, sans-serif; max-width:800px; margin:0; text-align:left; color:#222;'>
+  <h2 style='margin-bottom:6px;'>🔧 Permissions Fix Completed</h2>
+  <p class='da-small'><strong>Files fixed:</strong> {total_files} &nbsp;|&nbsp; <strong>Dirs fixed:</strong> {total_dirs}</p>
+"""
+        # Per-stack sections
+        if stacks:
+            body += "\n  <h3>FIXED ITEMS BY STACK (sample)</h3>\n"
+            # Sort stacks alphabetically
+            for stack_name in sorted(stacks.keys()):
+                s = stacks[stack_name]
+                body += f"  <div class='da-stack'><h4 style='margin-bottom:4px;'>{stack_name} — {len(s['files'])} files, {len(s['dirs'])} dirs</h4>\n"
+                if s['files']:
+                    body += "    <table class='da-table'>\n      <thead><tr><th>Fixed files (sample)</th></tr></thead>\n      <tbody>\n"
+                    for p in s['files'][:200]:
+                        body += f"        <tr><td><code>{p}</code></td></tr>\n"
+                    body += "      </tbody></table>\n"
+                if s['dirs']:
+                    body += "    <table class='da-table mt-2'>\n      <thead><tr><th>Fixed dirs (sample)</th></tr></thead>\n      <tbody>\n"
+                    for p in s['dirs'][:200]:
+                        body += f"        <tr><td><code>{p}</code></td></tr>\n"
+                    body += "      </tbody></table>\n"
+                body += "  </div>\n"
+        else:
+            body += "  <p><em>No fixes were necessary.</em></p>\n"
+
+        body += "\n  <p class='da-small'>Docker Archiver</p>\n</div>\n"
+
+        # Send as HTML unless user prefers text
+        body_format = get_notification_format()
+        import apprise
+        if body_format == apprise.NotifyFormat.TEXT:
+            send_body = strip_html_tags(body)
+        else:
+            send_body = body
+
+        apobj.notify(title=title, body=send_body, body_format=body_format)
+    except Exception as e:
+        logger = get_logger(__name__)
+        logger.exception("Failed to send permissions notification: %s", e)
+
 
 
 def send_error_notification(archive_name, error_message):

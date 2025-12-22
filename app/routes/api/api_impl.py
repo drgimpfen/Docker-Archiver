@@ -107,4 +107,29 @@ def get_job_details(job_id):
         'metrics': metrics_out
     })
 
+
+@bp.route('/events')
+@api_auth_required
+def global_events():
+    """SSE endpoint for global events (e.g., permissions fix completion)."""
+    from app.sse import register_global_listener, unregister_global_listener
+
+    def gen():
+        q = register_global_listener()
+        try:
+            while True:
+                try:
+                    data = q.get(timeout=15)  # wait for up to 15s
+                    yield f"data: {data}\n\n"
+                except Exception:
+                    # Keep the connection alive by sending a comment every 15s
+                    yield ': keep-alive\n\n'
+        finally:
+            try:
+                unregister_global_listener(q)
+            except Exception:
+                pass
+
+    return Response(stream_with_context(gen()), mimetype='text/event-stream')
+
 # (omitted: rest of original file for brevity in this generated helper; the file includes full API handlers unchanged)
