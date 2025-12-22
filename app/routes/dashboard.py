@@ -158,7 +158,7 @@ def index():
 
         # Recent jobs
         cur.execute("""
-            SELECT j.*, a.name as archive_name, a.stacks as archive_stacks,
+            SELECT j.*, a.name as archive_name, a.stacks as archive_stacks, a.output_format as archive_output_format,
                    (SELECT STRING_AGG(stack_name, ',') FROM job_stack_metrics WHERE job_id = j.id) as stack_names,
                    CASE WHEN j.status = 'running' THEN NULL ELSE EXTRACT(EPOCH FROM (j.end_time - j.start_time))::integer END as duration_seconds
             FROM jobs j
