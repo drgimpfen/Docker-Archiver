@@ -12,7 +12,12 @@ import argparse
 import logging
 import re
 import shutil
+import sys
 from pathlib import Path
+
+# Ensure project root is on sys.path so 'app' package can be imported when running the script
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from app.utils import get_archives_path, setup_logging, get_logger
 
 setup_logging()
