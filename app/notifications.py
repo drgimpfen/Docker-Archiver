@@ -164,6 +164,11 @@ def _apprise_notify(apobj, title, body, body_format, attach=None, context=''):
 
 def send_archive_notification(archive_config, job_id, stack_metrics, duration, total_size):
     """Send notification for archive job completion."""
+    try:
+        logger.info("Notifications: send_archive_notification called for archive=%s job=%s", archive_config.get('name') if archive_config else None, job_id)
+    except Exception:
+        pass
+
     if not should_notify('success'):
         return
     
