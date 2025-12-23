@@ -211,6 +211,8 @@ def debug_sse():
         return jsonify({'error': str(e)}), 500
 
 
+
+
 @bp.route('/jobs/<int:job_id>/log/tail')
 @api_auth_required
 def tail_log(job_id):

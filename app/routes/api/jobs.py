@@ -281,22 +281,24 @@ def _prepare_folder_download(token, folder_path, stack_name, user_email):
             """, (str(archive_path), token))
             conn.commit()
         if user_email:
-            import apprise
-            apobj = apprise.Apprise()
-            smtp_server = os.environ.get('SMTP_SERVER')
-            smtp_user = os.environ.get('SMTP_USER')
-            smtp_password = os.environ.get('SMTP_PASSWORD')
-            smtp_port = os.environ.get('SMTP_PORT', '587')
-            smtp_from = os.environ.get('SMTP_FROM')
-            if all([smtp_server, smtp_user, smtp_password, smtp_from]):
-                mailto_url = f"mailtos://{smtp_user}:{smtp_password}@{smtp_server}:{smtp_port}/?from={smtp_from}&to={user_email}"
-                apobj.add(mailto_url)
-                base_url = _get_base_url()
-                download_url = f"{base_url}/download/{token}"
-                apobj.notify(title="📦 Archive Download Ready", body=f"""<h2>Your archive is ready for download</h2>
+            try:
+                from app.notifications import get_apprise_instance, get_notification_format, get_logger
+                logger = get_logger(__name__)
+                apobj = get_apprise_instance()
+                if apobj:
+                    base_url = _get_base_url()
+                    download_url = f"{base_url}/download/{token}"
+                    body = f"""<h2>Your archive is ready for download</h2>
 <p><strong>Stack:</strong> {stack_name}</p>
-<p><a href="{download_url}">Download Archive</a></p>
-<p><small>This link will expire in 24 hours</small></p>""", body_format='html')
+<p><a href=\"{download_url}\">Download Archive</a></p>
+<p><small>This link will expire in 24 hours</small></p>"""
+                    body_format = get_notification_format()
+                    ok = apobj._notify(apobj, "📦 Archive Download Ready", body, body_format, context=f'download_{token}')
+                    if not ok:
+                        logger.warning("Apprise: notify returned False for download token %s", token)
+            except Exception as e:
+                from app.utils import get_logger
+                get_logger(__name__).exception("Failed to send download notification: %s", e)
     except Exception as e:
         print(f"[ERROR] Failed to prepare download: {e}")
 

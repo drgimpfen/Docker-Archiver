@@ -73,30 +73,47 @@ def get_apprise_instance():
     
     apobj = apprise.Apprise()
     
-    # Add URLs from settings
+    # Add URLs from settings and log add status
     apprise_urls = get_setting('apprise_urls', '')
+    added = 0
     for url in apprise_urls.strip().split('\n'):
         url = url.strip()
-        if url:
-            apobj.add(url)
-    
-    # Add SMTP/Email if configured via environment variables
+        if not url:
+            continue
+        try:
+            ok = apobj.add(url)
+            if ok:
+                logger.info("Apprise: added URL: %s", url)
+                added += 1
+            else:
+                logger.warning("Apprise: failed to add URL: %s", url)
+        except Exception as e:
+            logger.exception("Apprise: exception while adding URL %s: %s", url, e)
+
+    # Add SMTP/Email if configured via environment variables (mailto scheme)
     smtp_server = os.environ.get('SMTP_SERVER')
     smtp_user = os.environ.get('SMTP_USER')
     smtp_password = os.environ.get('SMTP_PASSWORD')
     smtp_port = os.environ.get('SMTP_PORT', '587')
     smtp_from = os.environ.get('SMTP_FROM')
-    
+
     if smtp_server and smtp_user and smtp_password and smtp_from:
-        # Get user emails
         user_emails = get_user_emails()
-        
         for email in user_emails:
-            # Build mailto URL for Apprise
-            # Format: mailtos://user:pass@server:port/?from=sender&to=recipient
             mailto_url = f"mailtos://{smtp_user}:{smtp_password}@{smtp_server}:{smtp_port}/?from={smtp_from}&to={email}"
-            apobj.add(mailto_url)
-    
+            try:
+                ok = apobj.add(mailto_url)
+                if ok:
+                    logger.info("Apprise: added SMTP mailto for %s", email)
+                    added += 1
+                else:
+                    logger.warning("Apprise: failed to add SMTP mailto for %s", email)
+            except Exception as e:
+                logger.exception("Apprise: exception while adding SMTP mailto for %s: %s", email, e)
+
+    if added == 0:
+        logger.warning("Apprise: no services configured (apprise_urls empty and SMTP not configured) — notifications may be skipped")
+
     return apobj
 
 
@@ -105,6 +122,44 @@ def should_notify(event_type):
     key = f"notify_on_{event_type}"
     value = get_setting(key, 'false')
     return value.lower() == 'true'
+
+
+# Helper used to send notifications via Apprise with a retry and good logging
+def _apprise_notify(apobj, title, body, body_format, attach=None, context=''):
+    try:
+        try:
+            if attach:
+                res = apobj.notify(title=title, body=body, body_format=body_format, attach=attach)
+            else:
+                res = apobj.notify(title=title, body=body, body_format=body_format)
+        except Exception as e:
+            logger.exception("Apprise: exception during notify (%s): %s", context, e)
+            res = False
+
+        if res:
+            logger.info("Apprise: notification sent (%s)", context)
+            return True
+
+        # Retry once
+        try:
+            import time
+            time.sleep(1)
+            if attach:
+                res2 = apobj.notify(title=title, body=body, body_format=body_format, attach=attach)
+            else:
+                res2 = apobj.notify(title=title, body=body, body_format=body_format)
+            if res2:
+                logger.info("Apprise: notification succeeded on retry (%s)", context)
+                return True
+            else:
+                logger.error("Apprise: notification failed after retry (%s)", context)
+                return False
+        except Exception as e:
+            logger.exception("Apprise: exception during retry (%s): %s", context, e)
+            return False
+    except Exception as e:
+        logger.exception("Apprise: unexpected error in _apprise_notify (%s): %s", context, e)
+        return False
 
 
 def send_archive_notification(archive_config, job_id, stack_metrics, duration, total_size):
@@ -572,14 +627,20 @@ def send_permissions_fix_notification(result, report_path=None):
             attach_path = None
 
         if attach_path:
-            apobj.notify(title=title, body=send_body + "\n\n(Full report attached)", body_format=body_format, attach=attach_path)
-            # Remove the report file after sending (best-effort)
             try:
-                os.unlink(attach_path)
-            except Exception:
-                pass
+                sent = _apprise_notify(apobj, title, send_body + "\n\n(Full report attached)", body_format, attach=attach_path, context='permissions_fix')
+                if sent:
+                    try:
+                        os.unlink(attach_path)
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.exception("Failed to send permissions notification with attachment: %s", e)
         else:
-            apobj.notify(title=title, body=send_body, body_format=body_format)
+            try:
+                _ = _apprise_notify(apobj, title, send_body, body_format, context='permissions_fix')
+            except Exception as e:
+                logger.exception("Failed to send permissions notification: %s", e)
     except Exception as e:
         logger = get_logger(__name__)
         logger.exception("Failed to send permissions notification: %s", e)
