@@ -401,11 +401,20 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
 
         # Send notification using central Apprise helper with retry and logging
         try:
-            # Log available services for debugging
+            # Log available services (count and hosts) at INFO so it's visible in normal logs
             try:
-                logger.debug("Apprise services configured: %s", getattr(apobj, '_urls', []) or 'none')
+                urls = getattr(apobj, '_urls', []) or []
+                hosts = []
+                from urllib.parse import urlparse
+                for u in urls:
+                    try:
+                        p = urlparse(u)
+                        hosts.append(p.netloc or u[:40])
+                    except Exception:
+                        hosts.append(u[:40])
+                logger.info("Apprise services configured: count=%d hosts=%s", len(urls), hosts)
             except Exception:
-                pass
+                logger.info("Apprise services configured: unable to enumerate services")
 
             try:
                 sent = _apprise_notify(apobj, title, send_body, body_format, attach=attach_path, context=f'archive_{archive_name}_{job_id}')
