@@ -440,8 +440,7 @@ def run_retention_only(archive_id):
         def run_retention_job():
             logger.info("Retention thread started for archive_id=%s", archive_id)
             try:
-
-                
+                from app.retention import run_retention
                 # Create a job record with empty log
                 with get_db() as conn:
                     cur = conn.cursor()
@@ -475,6 +474,12 @@ def run_retention_only(archive_id):
                 log_message('INFO', f"Starting retention cleanup for '{archive_dict['name']}'")
                 
                 # Run retention with log callback
+                try:
+                    from app.retention import run_retention
+                except Exception as _e:
+                    logger.exception("Failed to import run_retention at execution time: %s", _e)
+                    raise
+
                 reclaimed = run_retention(archive_dict, job_id, is_dry_run=False, log_callback=log_message)
                 
                 log_message('INFO', f"Retention completed, reclaimed {reclaimed} bytes")
