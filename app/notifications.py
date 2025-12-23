@@ -399,21 +399,20 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
         except Exception as e:
             logger.exception("Failed to prepare log attachment: %s", e)
 
-        # Send notification (with optional attachment)
+        # Send notification using central Apprise helper with retry and logging
         try:
-            if attach_path:
-                apobj.notify(
-                    body=send_body,
-                    title=title,
-                    body_format=body_format,
-                    attach=attach_path
-                )
-            else:
-                apobj.notify(
-                    body=send_body,
-                    title=title,
-                    body_format=body_format
-                )
+            # Log available services for debugging
+            try:
+                logger.debug("Apprise services configured: %s", getattr(apobj, '_urls', []) or 'none')
+            except Exception:
+                pass
+
+            try:
+                sent = _apprise_notify(apobj, title, send_body, body_format, attach=attach_path, context=f'archive_{archive_name}_{job_id}')
+                if not sent:
+                    logger.error("Apprise: notification failed for archive=%s job=%s", archive_name, job_id)
+            except Exception as e:
+                logger.exception("Apprise: exception while sending archive notification for %s job %s: %s", archive_name, job_id, e)
         finally:
             # Cleanup temporary file if used
             try:
