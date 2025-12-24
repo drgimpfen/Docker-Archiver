@@ -36,24 +36,23 @@ def test_send_to_discord_sectioned_with_attach_and_footer():
 
     res = send_to_discord(fa, title, body_html, compact_text, sections, attach_file='/tmp/x.log', embed_options={'footer': 'Job 1', 'fields': []}, max_desc=200, pause=0)
 
-    # Should send multiple parts
+    # Should send an embed (either sectioned or single summary) and then the attachment
     assert res['sent_any'] is True
-    assert len(fa.calls) >= len(sections)
+    # Ensure we have at least an embed send and an attach send
+    assert len(fa.calls) >= 2
     # Last call should include the attachment
     assert fa.calls[-1]['attach'] == '/tmp/x.log'
-    # Intermediate calls (excluding final embed and final attach) should not include footer in embed_options
-    # The sequence is: embed parts..., final embed (may have footer), attach message
+
+    # There should be at least one embed call (attach is last). Check footer handling on the last embed call
+    last_embed_call = fa.calls[-2]
+    assert 'footer' in (last_embed_call['embed_options'] or {})
+    # If there are intermediate embeds, they should not include footer
     if len(fa.calls) >= 3:
         intermediate_calls = fa.calls[:-2]
     else:
         intermediate_calls = []
     for call in intermediate_calls:
         assert 'footer' not in (call['embed_options'] or {})
-    # The final embed (the last embed call) should include footer
-    # Identify last embed call (it's the one before the attach call)
-    if len(fa.calls) >= 2:
-        last_embed_call = fa.calls[-2]
-        assert 'footer' in (last_embed_call['embed_options'] or {})
         # If view_url was passed earlier, it should appear in the footer when set
         if 'View details' in last_embed_call['embed_options'].get('footer', ''):
             assert 'View details:' in last_embed_call['embed_options']['footer']

@@ -37,11 +37,10 @@ def send_to_discord(discord_adapter, title: str, body_html: str, compact_text: s
     errors = []
 
     try:
-        # Simple case: send full html once
+        # If compact_text fits within max_desc, send structured markdown built from sections.
+        # Do NOT fallback to a single truncated summary — prefer section splitting.
         if compact_text and len(compact_text) <= max_desc:
             try:
-                # Build a Markdown body from sections to encourage Apprise to create Embeds
-                # Use '## Title' style headers so apprise.extract_markdown_sections picks them up.
                 md_parts = []
                 for sec in sections:
                     first, rest = sec.split('\n', 1) if '\n' in sec else (sec, '')

@@ -97,6 +97,17 @@ class DiscordAdapter(AdapterBase):
     def send(self, title: str, body: str, body_format: object = None, attach: Optional[str] = None, context: str = '', embed_options: dict = None) -> AdapterResult:
         """Send Discord notification via Apprise. Uses HTML body to emulate embeds and passes attachments to Apprise."""
         normalized = [self._normalize(w) for w in self.webhooks]
+        # Deduplicate normalized webhook URLs while preserving order so we
+        # don't send the same message multiple times if a user configured
+        # identical URLs more than once.
+        seen = set()
+        deduped = []
+        for u in normalized:
+            if u and u not in seen:
+                seen.add(u)
+                deduped.append(u)
+        normalized = deduped
+
         apobj, added, err = _make_apobj(normalized)
         if apobj is None:
             logger.error("DiscordAdapter: apprise not available: %s", err)
