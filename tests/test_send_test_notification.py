@@ -25,5 +25,7 @@ def test_send_test_notification_includes_apprise_urls(monkeypatch):
     # Should not raise
     send_test_notification()
 
-    assert 'Configured Apprise URLs' in captured['body'] or 'discord' in captured['body']
-    assert 'mailto' in captured['body'] or 'mailtos' in captured['body']
+    # Ensure the test notification contains the human-friendly confirmation
+    assert 'notification configuration is working correctly' in captured['body'].lower()
+    # Ensure we do not include a 'Configured Apprise URLs' section
+    assert 'configured apprise urls' not in captured['body'].lower()
