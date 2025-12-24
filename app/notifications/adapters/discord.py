@@ -47,13 +47,13 @@ class DiscordAdapter(AdapterBase):
             if fields:
                 html += "<hr><table>"
                 for f in fields:
-                    name = f.get('name')
-                    value = f.get('value')
+                    name = str(f.get('name')) if f.get('name') is not None else ''
+                    value = str(f.get('value')) if f.get('value') is not None else ''
                     html += f"<tr><th style='text-align:left;padding-right:8px'>{name}</th><td>{value}</td></tr>"
                 html += "</table>"
             # footer
             footer = embed_options.get('footer')
-            if footer:
+            if footer is not None:
                 html += f"<p style='color: #666;font-size:90%'>" + str(footer) + "</p>"
         return html
 
@@ -72,4 +72,7 @@ class DiscordAdapter(AdapterBase):
         ok, detail = _notify_with_retry(apobj, title=title, body=html_body, body_format=__import__('apprise').NotifyFormat.HTML, attach=attach)
         if ok:
             return AdapterResult(channel='discord', success=True)
+
+        # No fallback: if HTML send fails, report the original HTML send error.
+        logger.error("DiscordAdapter: HTML send failed (context=%s): %s", context, detail)
         return AdapterResult(channel='discord', success=False, detail=f'notify exception: {detail}')
