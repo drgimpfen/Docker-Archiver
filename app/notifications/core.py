@@ -408,7 +408,8 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
                             try:
                                 from app.notifications.discord_dispatch import send_to_discord
                                 sections = build_sections(archive_name, lines, created_archives, total_size, stack_metrics, stacks_with_volumes, reclaimed, base_url, job_id)
-                                result = send_to_discord(discord_adapter, title, body_to_send, compact_text, sections, attach_for_non_email, embed_options=emb_opts, max_desc=NOTIFY_EMBED_DESC_MAX)
+                                view_url = f"{base_url}/history?job={job_id}"
+                                result = send_to_discord(discord_adapter, title, body_to_send, compact_text, sections, attach_for_non_email, embed_options=emb_opts, max_desc=NOTIFY_EMBED_DESC_MAX, view_url=view_url)
                                 if result.get('sent_any'):
                                     logger.info("Discord adapter: sent notifications to Discord for archive=%s job=%s", archive_name, job_id)
                                 else:

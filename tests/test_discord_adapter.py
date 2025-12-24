@@ -5,17 +5,14 @@ from app.notifications.adapters import generic
 
 
 def test_discord_adapter_sends_via_apprise(monkeypatch):
-    calls = {}
+    calls = {'urls': None, 'seq': []}
 
     def fake_make_apobj(urls=None):
         calls['urls'] = urls
         return object(), 1, None
 
     def fake_notify(apobj, title, body, body_format, attach=None, context=None):
-        calls['title'] = title
-        calls['body'] = body
-        calls['format'] = body_format
-        calls['attach'] = attach
+        calls['seq'].append({'title': title, 'body': body, 'format': body_format, 'attach': attach})
         return True, None
 
     # Patch both the generic module and the local adapter-imported references
@@ -28,11 +25,14 @@ def test_discord_adapter_sends_via_apprise(monkeypatch):
     title = 'Job Complete'
     body = '<h1>Result</h1>All stacks succeeded.'
     res = da.send(title, body, None, attach='path/to/file.log', embed_options={'footer':'Job 1','fields':[{'name':'Test','value':'Value','inline':True}]})
-    # because body contains HTML, we expect the adapter to preserve HTML and include the original structure
-    assert '<h1' in calls['body'] or '<table' in calls['body']
+    # because body contains HTML and an attachment, we expect two sends: embeds then attachment
+    assert len(calls['seq']) >= 2
+    first = calls['seq'][0]
+    second = calls['seq'][1]
+    assert first['attach'] is None
+    assert '<h1' in first['body'] or '<table' in first['body']
+    assert second['attach'] == 'path/to/file.log'
+    assert len(second['body']) <= 2000
     assert res.success is True
     # URLs are normalized to https webhook form
     assert 'discord.com/api/webhooks' in calls['urls'][0]
-    # body should be HTML (we send send_body as HTML to allow Apprise to render embeds)
-    assert '<h2>' in calls['body'] or '<p>' in calls['body']
-    assert calls['attach'] == 'path/to/file.log'

@@ -41,6 +41,16 @@ def test_send_to_discord_sectioned_with_attach_and_footer():
     assert len(fa.calls) >= len(sections)
     # Last call should include the attachment
     assert fa.calls[-1]['attach'] == '/tmp/x.log'
-    # Intermediate calls should not include footer in embed_options
-    for call in fa.calls[:-1]:
+    # Intermediate calls (excluding final embed and final attach) should not include footer in embed_options
+    # The sequence is: embed parts..., final embed (may have footer), attach message
+    if len(fa.calls) >= 3:
+        intermediate_calls = fa.calls[:-2]
+    else:
+        intermediate_calls = []
+    for call in intermediate_calls:
         assert 'footer' not in (call['embed_options'] or {})
+    # The final embed (the last embed call) should include footer
+    # Identify last embed call (it's the one before the attach call)
+    if len(fa.calls) >= 2:
+        last_embed_call = fa.calls[-2]
+        assert 'footer' in (last_embed_call['embed_options'] or {})

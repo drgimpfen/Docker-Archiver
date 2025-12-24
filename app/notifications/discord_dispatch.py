@@ -14,7 +14,7 @@ from .formatters import split_section_by_length, build_section_html
 logger = get_logger(__name__)
 
 
-def send_to_discord(discord_adapter, title: str, body_html: str, compact_text: str, sections: List[str], attach_file: Optional[str] = None, embed_options: dict = None, max_desc: int = 4000, pause: float = 0.2) -> dict:
+def send_to_discord(discord_adapter, title: str, body_html: str, compact_text: str, sections: List[str], attach_file: Optional[str] = None, embed_options: dict = None, max_desc: int = 4000, pause: float = 0.2, view_url: Optional[str] = None) -> dict:
     """Send a rich (HTML) message to Discord using the provided adapter.
 
     Behavior:
@@ -42,7 +42,32 @@ def send_to_discord(discord_adapter, title: str, body_html: str, compact_text: s
             try:
                 # Ensure we pass a string body to Apprise/Discord adapter
                 b_html = body_html if isinstance(body_html, str) else str(body_html)
-                res = discord_adapter.send(title, b_html, body_format=__import__('apprise').NotifyFormat.HTML, attach=attach_file, context='discord_single', embed_options=embed_options)
+                # If there's an attachment, perform a two-step send: first embeds (no attach), then a short attach message
+                if attach_file:
+                    res_embed = discord_adapter.send(title, b_html, body_format=__import__('apprise').NotifyFormat.HTML, attach=None, context='discord_single', embed_options=embed_options)
+                    # Prepare attach message content (plain text, include view_url if available)
+                    try:
+                        from app.notifications.formatters import strip_html_tags
+                        attach_body = strip_html_tags(b_html)
+                    except Exception:
+                        attach_body = compact_text or ''
+                    if view_url:
+                        attach_body = f"{attach_body}\n\nView details: {view_url}"
+                    # Truncate to Discord 2000 limit
+                    if len(attach_body) > 2000:
+                        attach_body = attach_body[:1950].rstrip() + '\n\n...(truncated, see attachment)'
+                    res_attach = discord_adapter.send(title, attach_body, body_format=None, attach=attach_file, context='discord_attach')
+                    # Evaluate
+                    if res_embed.success and res_attach.success:
+                        return {'sent_any': True}
+                    details = []
+                    if not res_embed.success:
+                        details.append(f"embed: {res_embed.detail}")
+                    if not res_attach.success:
+                        details.append(f"attach: {res_attach.detail}")
+                    return {'sent_any': res_embed.success or res_attach.success, 'details': details}
+                else:
+                    res = discord_adapter.send(title, b_html, body_format=__import__('apprise').NotifyFormat.HTML, attach=None, context='discord_single', embed_options=embed_options)
             except Exception as e:
                 logger.exception("send_to_discord: exception during single send (title=%s): %s -- body_type=%s embed_type=%s", title, e, type(body_html), type(embed_options))
                 return {'sent_any': False, 'details': str(e)}
@@ -74,7 +99,8 @@ def send_to_discord(discord_adapter, title: str, body_html: str, compact_text: s
                 sec_title = (part.split('\n', 1)[0] or title)[:250]
 
                 try:
-                    res = discord_adapter.send(sec_title, sec_html, body_format=__import__('apprise').NotifyFormat.HTML, attach=attach, context='discord_section', embed_options=sec_embed_opts)
+                    # Always send sections without the attach parameter. Attachment will be sent as a single follow-up message after sections.
+                    res = discord_adapter.send(sec_title, sec_html, body_format=__import__('apprise').NotifyFormat.HTML, attach=None, context='discord_section', embed_options=sec_embed_opts)
                 except Exception as e:
                     logger.exception("send_to_discord: exception during section send (title=%s): %s", sec_title, e)
                     errors.append(str(e))
@@ -90,6 +116,29 @@ def send_to_discord(discord_adapter, title: str, body_html: str, compact_text: s
                 # Small pause to reduce rate-limit risk
                 if pause:
                     time.sleep(pause)
+
+        # After sections: if an attachment is provided, send it as a single follow-up message
+        if attach_file:
+            try:
+                # Use the stripped HTML as the attach message content if available
+                try:
+                    from app.notifications.formatters import strip_html_tags
+                    attach_body = strip_html_tags(body_html)
+                except Exception:
+                    attach_body = compact_text or ''
+                if view_url:
+                    attach_body = f"{attach_body}\n\nView details: {view_url}"
+                if len(attach_body) > 2000:
+                    attach_body = attach_body[:1950].rstrip() + '\n\n...(truncated, see attachment)'
+
+                res_attach = discord_adapter.send(title, attach_body, body_format=None, attach=attach_file, context='discord_attach')
+                if res_attach.success:
+                    sent_any = True
+                else:
+                    errors.append(res_attach.detail)
+            except Exception as e:
+                logger.exception("send_to_discord: exception during attach send: %s", e)
+                errors.append(str(e))
 
         if sent_any:
             return {'sent_any': True}

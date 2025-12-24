@@ -106,7 +106,61 @@ class DiscordAdapter(AdapterBase):
 
         html_body = self._build_html_body(title, body, embed_options=embed_options or {})
 
-        ok, detail = _notify_with_retry(apobj, title=title, body=html_body, body_format=__import__('apprise').NotifyFormat.HTML, attach=attach)
+        # When attachments are provided Discord (and Apprise) will remove embeds and
+        # fall back to sending the message as `content`. Discord limits `content` to
+        # 2000 characters — ensure we never exceed that. If the message is too long
+        # or we're attaching files, send a concise summary as content and include
+        # the full details as an attachment (or let the caller attach them).
+        try:
+            apprise = __import__('apprise')
+            NotifyFormat = getattr(apprise, 'NotifyFormat', None)
+            NotifyFmtHTML = NotifyFormat.HTML if NotifyFormat is not None else None
+        except Exception:
+            NotifyFmtHTML = None
+
+        # Build a plain-text version of the HTML body
+        plain = strip_html_tags(html_body)
+
+        # If an attachment is present, send in two steps:
+        # 1) Send the HTML (embeds) first without the attachment so Discord
+        #    will render embeds correctly.
+        # 2) Send the attachment as a separate message with a short plain-text
+        #    summary (<=2000 chars) so the upload succeeds.
+        if attach:
+            # 1) attempt to post embeds (HTML) without attachment
+            embed_ok, embed_detail = _notify_with_retry(apobj, title=title, body=html_body, body_format=NotifyFmtHTML, attach=None)
+
+            # 2) prepare truncated plain content for the attachment post
+            plain = strip_html_tags(html_body)
+            if plain and len(plain) > 2000:
+                attach_body = (plain[:1950].rstrip() + '\n\n...(truncated, see attachment)') if len(plain) > 1950 else plain
+                logger.warning("DiscordAdapter: attachment content too long — truncating (len=%d)", len(plain))
+            else:
+                attach_body = plain
+
+            attach_ok, attach_detail = _notify_with_retry(apobj, title=title, body=attach_body, body_format=None, attach=attach)
+
+            # Evaluate results: prefer both succeed, but consider partial success
+            if embed_ok and attach_ok:
+                return AdapterResult(channel='discord', success=True)
+
+            # Partial successes: return success but log details
+            if attach_ok and not embed_ok:
+                logger.warning("DiscordAdapter: embeds failed but attachment succeeded (context=%s): %s", context, embed_detail)
+                return AdapterResult(channel='discord', success=True, detail=f'embed failed: {embed_detail}')
+
+            if embed_ok and not attach_ok:
+                logger.warning("DiscordAdapter: embeds sent but attachment failed (context=%s): %s", context, attach_detail)
+                return AdapterResult(channel='discord', success=True, detail=f'attachment failed: {attach_detail}')
+
+            # Both failed
+            detail = f'embed: {embed_detail} | attach: {attach_detail}'
+            logger.error("DiscordAdapter: both embed and attachment sends failed (context=%s): %s", context, detail)
+            return AdapterResult(channel='discord', success=False, detail=f'notify exception: {detail}')
+
+        # No attachment path: send normally (HTML/Embed preferred)
+        ok, detail = _notify_with_retry(apobj, title=title, body=html_body, body_format=NotifyFmtHTML, attach=None)
+
         if ok:
             return AdapterResult(channel='discord', success=True)
 
