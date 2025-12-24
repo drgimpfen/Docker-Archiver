@@ -764,9 +764,8 @@ def send_test_notification():
         # Simple test notification body (don't include configured Apprise URLs)
         body_html = f"""<h2>Test Notification from Docker Archiver</h2>
 <p>If you received this message, your notification configuration is working correctly!</p>
-<hr>
+<div style='border-top:1px solid #eee;margin:8px 0'></div>
 <p><small>Docker Archiver: <a href=\"{base_url}\">{base_url}</a></small></p>"""
-
         body_text = "Test Notification from Docker Archiver\n\n"
         body_text += "If you received this message, your notification configuration is working correctly!\n\n"
         body_text += f"Docker Archiver: {base_url}\n"

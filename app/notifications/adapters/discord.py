@@ -80,7 +80,8 @@ class DiscordAdapter(AdapterBase):
 
         fields = sopts.get('fields', [])
         if fields:
-            html += "<hr><table>"
+            # Use a styled divider instead of <hr> to avoid Apprise HTML->TEXT conversion edge cases
+            html += "<div style='border-top:1px solid #eee;margin:8px 0'></div><table>"
             for f in fields:
                 name = f.get('name', '')
                 value = f.get('value', '')

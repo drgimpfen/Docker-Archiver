@@ -259,7 +259,7 @@ def build_full_body(archive_name: str, status_emoji: str, success_count: int, st
 
     # Named volumes warning
     if stacks_with_volumes:
-        body += "\n  <hr>\n  <h4 style='color:orange;'>⚠️ Named Volumes Warning</h4>\n  <p class='da-small'>Named volumes are NOT included in the backup archives. Consider backing them up separately.</p>\n  <ul>\n"
+        body += "\n  <div style='border-top:1px solid #eee;margin:8px 0'></div>\n  <h4 style='color:orange;'>⚠️ Named Volumes Warning</h4>\n  <p class='da-small'>Named volumes are NOT included in the backup archives. Consider backing them up separately.</p>\n  <ul>\n"
         for metric in stacks_with_volumes:
             volumes = metric['named_volumes']
             body += f"    <li><strong>{metric['stack_name']}:</strong> {', '.join(volumes)}</li>\n"
@@ -269,7 +269,7 @@ def build_full_body(archive_name: str, status_emoji: str, success_count: int, st
     try:
         if job_log:
             if include_log_inline:
-                body += "\n  <hr>\n  <h3>Full job log</h3>\n  <pre style='background:#f7f7f7;padding:10px;border-radius:6px;white-space:pre-wrap;'>\n"
+                body += "\n  <div style='border-top:1px solid #eee;margin:8px 0'></div>\n  <h3>Full job log</h3>\n  <pre style='background:#f7f7f7;padding:10px;border-radius:6px;white-space:pre-wrap;'>\n"
                 body += (job_log or '') + "\n"
                 body += "  </pre>\n"
             else:
