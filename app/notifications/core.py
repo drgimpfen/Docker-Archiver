@@ -55,146 +55,8 @@ def get_notification_format():
     return apprise.NotifyFormat.HTML if html_enabled else apprise.NotifyFormat.TEXT
 
 
-def strip_html_tags(html_text):
-    """Convert HTML to plain text by removing tags and converting entities.
+from .formatters import strip_html_tags, build_compact_text, split_section_by_length
 
-    Also removes <style> and <script> blocks to avoid leaving CSS/JS content behind.
-    """
-    import re
-    if not html_text:
-        return ''
-    # Remove style/script blocks entirely
-    text = re.sub(r'<(script|style)[\s\S]*?>[\s\S]*?<\/\1>', '', html_text, flags=re.IGNORECASE)
-    # Remove HTML tags
-    text = re.sub(r'<[^>]+>', '', text)
-    # Convert common HTML entities
-    text = text.replace('&nbsp;', ' ')
-    text = text.replace('&lt;', '<')
-    text = text.replace('&gt;', '>')
-    text = text.replace('&amp;', '&')
-    # Normalize whitespace and clean up multiple newlines
-    text = re.sub(r'\r\n?', '\n', text)
-    text = re.sub(r'\n\s*\n', '\n\n', text)
-    text = re.sub(r'[ \t]+', ' ', text)
-    return text.strip()
-
-
-# Helper: build a compact plain-text summary for non-email services
-def build_compact_text(archive_name, stack_metrics, created_archives, total_size, size_str, duration_str, stacks_with_volumes, reclaimed, base_url):
-    lines = []
-    lines.append(f"{archive_name} completed")
-    lines.append(f"Stacks: {sum(1 for m in stack_metrics if m.get('status') == 'success')}/{len(stack_metrics)} successful  |  Total size: {size_str}  |  Duration: {duration_str}")
-    lines.append("")
-
-    if created_archives:
-        lines.append("SUMMARY OF CREATED ARCHIVES")
-        lines.append("")
-        for a in created_archives:
-            lines.append(f"{format_bytes(a['size'])} {a['path']}")
-        lines.append("")
-        lines.append(f"Total: {format_bytes(total_size)}")
-        lines.append("")
-
-    try:
-        disk = get_disk_usage()
-        if disk and disk['total']:
-            lines.append("DISK USAGE (on /archives)")
-            lines.append("")
-            lines.append(f"Total: {format_bytes(disk['total'])}   Used: {format_bytes(disk['used'])} ({disk['percent']:.0f}% used)")
-            try:
-                total_archives_size = 0
-                for root, dirs, files in __import__('os').walk(get_archives_path()):
-                    for fn in files:
-                        fp = __import__('os').path.join(root, fn)
-                        try:
-                            total_archives_size += __import__('os').path.getsize(fp)
-                        except Exception:
-                            continue
-                lines.append(f"Backup Content Size (/archives): {format_bytes(total_archives_size)}")
-            except Exception:
-                pass
-            lines.append("")
-    except Exception:
-        pass
-
-    # Retention
-    if reclaimed is None:
-        lines.append("RETENTION SUMMARY")
-        lines.append("")
-        lines.append("No retention information available.")
-        lines.append("")
-    elif reclaimed == 0:
-        lines.append("RETENTION SUMMARY")
-        lines.append("")
-        lines.append("No archives older than configured retention were deleted.")
-        lines.append("")
-    else:
-        lines.append("RETENTION SUMMARY")
-        lines.append("")
-        lines.append(f"Freed space: {format_bytes(reclaimed)}")
-        lines.append("")
-
-    if stack_metrics:
-        lines.append("STACKS PROCESSED")
-        lines.append("")
-        for metric in stack_metrics:
-            ok = '✓' if metric.get('status') == 'success' else '✗'
-            st_size = format_bytes(metric.get('archive_size_bytes') or 0)
-            archive_p = metric.get('archive_path') or 'N/A'
-            lines.append(f"{metric['stack_name']} {ok} {st_size} {archive_p}")
-        lines.append("")
-
-    if stacks_with_volumes:
-        lines.append("⚠️ Named Volumes Warning")
-        lines.append("Named volumes are NOT included in the backup archives. Consider backing them up separately.")
-        lines.append("")
-        for metric in stacks_with_volumes:
-            volumes = metric.get('named_volumes') or []
-            lines.append(f"{metric['stack_name']}: {', '.join(volumes)}")
-        lines.append("")
-
-    lines.append(f"View details: {base_url}/history?job=")
-
-    compact_text = "\n".join(lines)
-
-    # Truncate to safe size for chat services (Discord message limit ~2000 chars)
-    if len(compact_text) > NOTIFY_MAX_DISCORD_MSG:
-        compact_text = compact_text[:NOTIFY_MAX_DISCORD_MSG] + "\n\n[Message truncated; full log attached]"
-
-    return compact_text, lines
-
-
-# Helper: split a long section into chunks respecting max_len
-def split_section_by_length(text, max_len):
-    if not text:
-        return ['']
-    if len(text) <= max_len:
-        return [text]
-    parts = []
-    # Prefer splitting by double-newline paragraphs
-    paras = text.split('\n\n')
-    cur = []
-    cur_len = 0
-    for p in paras:
-        p_with_sep = (p + '\n\n') if p else '\n\n'
-        if cur_len + len(p_with_sep) <= max_len:
-            cur.append(p_with_sep)
-            cur_len += len(p_with_sep)
-        else:
-            if cur:
-                parts.append(''.join(cur).rstrip())
-            # If single paragraph too large, split by fixed chunk
-            if len(p) > max_len:
-                for i in range(0, len(p), max_len):
-                    parts.append(p[i:i+max_len])
-                cur = []
-                cur_len = 0
-            else:
-                cur = [p_with_sep]
-                cur_len = len(p_with_sep)
-    if cur:
-        parts.append(''.join(cur).rstrip())
-    return parts
 
 def get_apprise_instance():
     """
@@ -225,29 +87,10 @@ def get_apprise_instance():
             logger.exception("Apprise: exception while adding URL %s: %s", url, e)
 
 
-    # Add SMTP/Email if configured via environment variables (mailto scheme)
-    smtp_server = os.environ.get('SMTP_SERVER')
-    smtp_user = os.environ.get('SMTP_USER')
-    smtp_password = os.environ.get('SMTP_PASSWORD')
-    smtp_port = os.environ.get('SMTP_PORT', '587')
-    smtp_from = os.environ.get('SMTP_FROM')
-
-    if smtp_server and smtp_user and smtp_password and smtp_from:
-        user_emails = get_user_emails()
-        for email in user_emails:
-            mailto_url = f"mailtos://{smtp_user}:{smtp_password}@{smtp_server}:{smtp_port}/?from={smtp_from}&to={email}"
-            try:
-                ok = apobj.add(mailto_url)
-                if ok:
-                    logger.info("Apprise: added SMTP mailto for %s", email)
-                    added += 1
-                else:
-                    logger.warning("Apprise: failed to add SMTP mailto for %s", email)
-            except Exception as e:
-                logger.exception("Apprise: exception while adding SMTP mailto for %s: %s", email, e)
+    # NOTE: SMTP/email handling is moved to SMTPAdapter to avoid mixing concerns.
 
     if added == 0:
-        logger.warning("Apprise: no services configured (apprise_urls empty and SMTP not configured) — notifications may be skipped")
+        logger.warning("Apprise: no services configured (apprise_urls empty) — notifications may be skipped")
 
     return apobj
 
@@ -560,43 +403,17 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
                 else:
                     non_email_urls.append(u)
 
-            import apprise, tempfile
+            import tempfile
 
-            def build_apprise_for(urls, include_smtp=True):
-                a = apprise.Apprise()
-                added_count = 0
-                for u in urls:
-                    try:
-                        ok = a.add(u)
-                        if ok:
-                            logger.info("Apprise: added URL: %s", u)
-                            added_count += 1
-                        else:
-                            logger.warning("Apprise: failed to add URL: %s", u)
-                    except Exception as e:
-                        logger.exception("Apprise: exception while adding URL %s: %s", u, e)
-                if include_smtp:
-                    smtp_server = os.environ.get('SMTP_SERVER')
-                    smtp_user = os.environ.get('SMTP_USER')
-                    smtp_password = os.environ.get('SMTP_PASSWORD')
-                    smtp_port = os.environ.get('SMTP_PORT', '587')
-                    smtp_from = os.environ.get('SMTP_FROM')
-                    if smtp_server and smtp_user and smtp_password and smtp_from:
-                        user_emails = get_user_emails()
-                        for email in user_emails:
-                            try:
-                                mailto_url = f"mailtos://{smtp_user}:{smtp_password}@{smtp_server}:{smtp_port}/?from={smtp_from}&to={email}"
-                                ok = a.add(mailto_url)
-                                if ok:
-                                    logger.info("Apprise: added SMTP mailto for %s", email)
-                                    added_count += 1
-                                else:
-                                    logger.warning("Apprise: failed to add SMTP mailto for %s", email)
-                            except Exception as e:
-                                logger.exception("Apprise: exception while adding SMTP mailto for %s: %s", email, e)
-                if added_count == 0:
-                    logger.warning("Apprise: no services configured for this subset (urls=%s, include_smtp=%s)", urls, include_smtp)
-                return a
+            # Use adapters for sending to avoid duplicating apprise/smtp logic.
+            from app.notifications.adapters import GenericAdapter, DiscordAdapter, SMTPAdapter
+
+            # Instantiate adapters for the relevant URL sets
+            discord_adapter = DiscordAdapter(webhooks=discord_urls) if discord_urls else None
+            generic = GenericAdapter(urls=other_non_email_urls) if other_non_email_urls else None
+            smtp_adapter = GenericAdapter(urls=email_urls) if email_urls else None
+            smtp_present = bool(os.environ.get('SMTP_SERVER'))
+            smtp_email_adapter = SMTPAdapter() if smtp_present else None
 
             # Prepare a temp attachment (full job log preferred) for non-email services if needed
             attach_for_non_email = None
@@ -737,46 +554,16 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
                     discord_urls = [u for u in non_email_urls if 'discord' in u.lower()]
                     other_non_email_urls = [u for u in non_email_urls if u not in discord_urls]
 
-                    # Helper to split a long section into chunks respecting max_len
-                    def split_section_by_length(text, max_len):
-                        if len(text) <= max_len:
-                            return [text]
-                        parts = []
-                        # Prefer splitting by double-newline paragraphs
-                        paras = text.split('\n\n')
-                        cur = []
-                        cur_len = 0
-                        for p in paras:
-                            p_with_sep = (p + '\n\n') if p else '\n\n'
-                            if cur_len + len(p_with_sep) <= max_len:
-                                cur.append(p_with_sep)
-                                cur_len += len(p_with_sep)
-                            else:
-                                if cur:
-                                    parts.append(''.join(cur).rstrip())
-                                # If single paragraph too large, split by fixed chunk
-                                if len(p) > max_len:
-                                    for i in range(0, len(p), max_len):
-                                        parts.append(p[i:i+max_len])
-                                    cur = []
-                                    cur_len = 0
-                                else:
-                                    cur = [p_with_sep]
-                                    cur_len = len(p_with_sep)
-                        if cur:
-                            parts.append(''.join(cur).rstrip())
-                        return parts
 
                     try:
-                        if discord_urls:
-                            ap_disc = build_apprise_for(discord_urls, include_smtp=False)
+                        if discord_urls and discord_adapter:
                             max_len = 1800
                             if len(compact_text) <= max_len:
-                                sent_non = _apprise_notify(ap_disc, title, compact_text, apprise.NotifyFormat.TEXT, attach=attach_for_non_email, context=f'non_email_{archive_name}_{job_id}')
-                                if sent_non:
-                                    logger.info("Apprise: sent compact text notification with attachment to Discord for archive=%s job=%s", archive_name, job_id)
+                                res = discord_adapter.send(title, compact_text, body_format=__import__('apprise').NotifyFormat.TEXT, attach=attach_for_non_email, context=f'non_email_{archive_name}_{job_id}')
+                                if res.success:
+                                    logger.info("Discord adapter: sent compact text notification with attachment to Discord for archive=%s job=%s", archive_name, job_id)
                                 else:
-                                    logger.error("Apprise: Discord notification failed for archive=%s job=%s", archive_name, job_id)
+                                    logger.error("Discord adapter: send failed for archive=%s job=%s: %s", archive_name, job_id, res.detail)
                             else:
                                 # Build section blocks
                                 sections = []
@@ -841,144 +628,72 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
                                 sections.append(f"View details: {base_url}/history?job={job_id}")
 
                                 sent_any = False
-                                import time, requests, json
+                                try:
+                                    max_desc = NOTIFY_EMBED_DESC_MAX
+                                    for sec in sections:
+                                        parts = split_section_by_length(sec, max_desc)
+                                        for idx, part in enumerate(parts):
+                                            sec_lines = part.split('\n')
+                                            sec_title = sec_lines[0] if sec_lines else f"{archive_name}"
+                                            sec_body = '\n'.join(sec_lines[1:]).strip() if len(sec_lines) > 1 else ''
 
-                                # Helper: normalize possible discord apprise schemes to webhook URL
-                                def normalize_discord_webhook(u):
-                                    try:
-                                        low = u.lower()
-                                        if low.startswith('discord://'):
-                                            # apprise style: discord://<id>/<token>
-                                            return 'https://discord.com/api/webhooks/' + u.split('://', 1)[1].lstrip('/')
-                                        if 'discord' in low and '/webhooks/' in low:
-                                            # likely a full https url already
-                                            if low.startswith('http'):
-                                                return u
-                                            else:
-                                                return 'https://' + u
-                                        # Fallback: return original
-                                        return u
-                                    except Exception:
-                                        return u
+                                            # Attach log only on final part of final section
+                                            is_final = (sec == sections[-1] and idx == len(parts) - 1)
+                                            attach_file = attach_for_non_email if is_final else None
 
-                                # Build embeds from sections; each embed description <= 4096 chars, title <=256
-                                embeds = []
-                                for sec in sections:
-                                    sec_lines = sec.split('\n')
-                                    title_line = sec_lines[0] if sec_lines else ''
-                                    desc = '\n'.join(sec_lines[1:]).strip() if len(sec_lines) > 1 else ''
-                                    # Split desc into chunks of <= 4000 to be safe
-                                    max_desc = 4000
-                                    if not desc:
-                                        desc = ''
-                                    if len(desc) <= max_desc:
-                                        embeds.append({'title': title_line[:250], 'description': desc})
+                                            res = discord_adapter.send(sec_title[:250], sec_body or sec_title, body_format=__import__('apprise').NotifyFormat.TEXT, attach=attach_file, context=f'discord_section_{archive_name}_{job_id}')
+                                            if res.success:
+                                                sent_any = True
+                                            # small pause to reduce rate-limiting risk
+                                            import time
+                                            time.sleep(0.2)
+
+                                    if sent_any:
+                                        logger.info("Discord adapter: sent sectioned notifications to Discord for archive=%s job=%s", archive_name, job_id)
                                     else:
-                                        # Split by paragraphs
-                                        paras = desc.split('\n\n')
-                                        cur = ''
-                                        for p in paras:
-                                            piece = (p + '\n\n')
-                                            if len(cur) + len(piece) <= max_desc:
-                                                cur += piece
-                                            else:
-                                                if cur:
-                                                    embeds.append({'title': title_line[:250], 'description': cur.rstrip()})
-                                                # large single paragraph? split it raw
-                                                if len(piece) > max_desc:
-                                                    for i in range(0, len(piece), max_desc):
-                                                        chunk = piece[i:i+max_desc]
-                                                        embeds.append({'title': title_line[:250], 'description': chunk})
-                                                    cur = ''
-                                                else:
-                                                    cur = piece
-                                        if cur:
-                                            embeds.append({'title': title_line[:250], 'description': cur.rstrip()})
-
-                                # Send in batches of up to 10 embeds per webhook request
-                                for webhook in discord_urls:
-                                    wh_url = normalize_discord_webhook(webhook)
-                                    try:
-                                        batch_size = 10
-                                        total_sent = 0
-                                        for i in range(0, len(embeds), batch_size):
-                                            batch = embeds[i:i+batch_size]
-                                            payload = {'embeds': [{k: v for k, v in e.items() if v} for e in batch]}
-                                            # Attach log only on final batch
-                                            attach_file = attach_for_non_email if (i + batch_size >= len(embeds)) else None
-                                            headers = {'Content-Type': 'application/json'}
-                                            if attach_file:
-                                                # multipart: payload_json + file
-                                                try:
-                                                    with open(attach_file, 'rb') as fh:
-                                                        files = {'file': (attach_file.split('/')[-1], fh)}
-                                                        data = {'payload_json': json.dumps(payload)}
-                                                        r = requests.post(wh_url, data=data, files=files, timeout=10)
-                                                except Exception as fe:
-                                                    logger.exception("Apprise/Discord: failed to attach/send file to %s: %s", wh_url, fe)
-                                                    r = None
-                                            else:
-                                                try:
-                                                    r = requests.post(wh_url, json=payload, headers=headers, timeout=10)
-                                                except Exception as re:
-                                                    logger.exception("Apprise/Discord: request to %s failed: %s", wh_url, re)
-                                                    r = None
-
-                                            ok = False
-                                            if r is not None:
-                                                try:
-                                                    if 200 <= r.status_code < 300:
-                                                        ok = True
-                                                    else:
-                                                        logger.warning("Apprise/Discord: webhook %s returned status %s: %s", wh_url, r.status_code, getattr(r, 'text', ''))
-                                                except Exception:
-                                                    logger.exception("Apprise/Discord: could not interpret response from %s", wh_url)
-                                            if ok:
-                                                total_sent += 1
-                                            # small pause to avoid rate limits
-                                            time.sleep(0.25)
-                                        if total_sent > 0:
-                                            sent_any = True
-                                            logger.info("Apprise/Discord: sent %s embed batch messages to %s for archive=%s job=%s", total_sent, wh_url, archive_name, job_id)
-                                        else:
-                                            logger.error("Apprise/Discord: failed to send any embeds to %s for archive=%s job=%s", wh_url, archive_name, job_id)
-                                    except Exception as e:
-                                        logger.exception("Apprise/Discord: exception while sending embeds to %s: %s", webhook, e)
-
-                                if sent_any:
-                                    logger.info("Apprise: sent multipart embed notification to Discord for archive=%s job=%s (embeds=%s)", archive_name, job_id, len(embeds))
-                                else:
-                                    logger.error("Apprise: multipart embed Discord notification failed for archive=%s job=%s", archive_name, job_id)
+                                        logger.error("Discord adapter: sectioned sends failed for archive=%s job=%s", archive_name, job_id)
+                                except Exception as e:
+                                    logger.exception("Discord adapter: exception while sending sectioned notifications for %s job %s: %s", archive_name, job_id, e)
 
                         # Non-discord non-email services: send as a single message (truncate if needed)
-                        if other_non_email_urls:
-                            ap_non_other = build_apprise_for(other_non_email_urls, include_smtp=False)
+                        if other_non_email_urls and _adapter:
                             message_text = compact_text
                             max_len_other = 1500
                             if len(message_text) > max_len_other:
                                 message_text = message_text[:max_len_other] + "\n\n[Message truncated; full log attached]"
                             try:
-                                sent_other = _apprise_notify(ap_non_other, title, message_text, apprise.NotifyFormat.TEXT, attach=attach_for_non_email, context=f'non_email_other_{archive_name}_{job_id}')
-                                if sent_other:
-                                    logger.info("Apprise: sent compact text notification with attachment to non-email services (non-Discord) for archive=%s job=%s", archive_name, job_id)
+                                res = _adapter.send(title, message_text, body_format=__import__('apprise').NotifyFormat.TEXT, attach=attach_for_non_email, context=f'non_email_other_{archive_name}_{job_id}')
+                                if res.success:
+                                    logger.info("Generic adapter: sent compact text notification with attachment to non-email services (non-Discord) for archive=%s job=%s", archive_name, job_id)
                                 else:
-                                    logger.error("Apprise: non-email (non-Discord) notification failed for archive=%s job=%s", archive_name, job_id)
+                                    logger.error("Generic adapter: non-email (non-Discord) notification failed for archive=%s job=%s: %s", archive_name, job_id, res.detail)
                             except Exception as e:
-                                logger.exception("Apprise: exception while sending non-email (non-Discord) notification for %s job %s: %s", archive_name, job_id, e)
+                                logger.exception("Generic adapter: exception while sending non-email (non-Discord) notification for %s job %s: %s", archive_name, job_id, e)
                     except Exception as e:
                         logger.exception("Apprise: exception while sending non-email notification for %s job %s: %s", archive_name, job_id, e)
 
-                # Send full notification to email (SMTP) services
-                if email_urls or os.environ.get('SMTP_SERVER'):
-                    ap_email = build_apprise_for(email_urls, include_smtp=True)
-                    try:
-                        sent_email = _apprise_notify(ap_email, title, send_body, body_format, attach=attach_path, context=f'email_{archive_name}_{job_id}')
-                        if sent_email:
-                            logger.info("Apprise: sent full notification to email services for archive=%s job=%s", archive_name, job_id)
+                # Send full notification to email services.
+                email_sent_any = False
+                try:
+                    if smtp_adapter:
+                        res = smtp_adapter.send(title, send_body, body_format, attach=attach_path, context=f'email_explicit_{archive_name}_{job_id}')
+                        if res.success:
+                            email_sent_any = True
+                            logger.info("Generic adapter: sent full notification to explicit email URLs for archive=%s job=%s", archive_name, job_id)
                         else:
-                            logger.error("Apprise: email notification failed for archive=%s job=%s", archive_name, job_id)
-                    except Exception as e:
-                        logger.exception("Apprise: exception while sending email notification for %s job %s: %s", archive_name, job_id, e)
+                            logger.error("Generic adapter: explicit email URLs send failed for archive=%s job=%s: %s", archive_name, job_id, res.detail)
+                    if smtp_email_adapter:
+                        res = smtp_email_adapter.send(title, send_body, body_format, attach=attach_path, context=f'email_smtp_{archive_name}_{job_id}')
+                        if res.success:
+                            email_sent_any = True
+                            logger.info("SMTP adapter: sent full notification via SMTP for archive=%s job=%s", archive_name, job_id)
+                        else:
+                            logger.error("SMTP adapter: SMTP send failed for archive=%s job=%s: %s", archive_name, job_id, res.detail)
+
+                    if not email_sent_any:
+                        logger.warning("No email targets delivered for archive=%s job=%s", archive_name, job_id)
+                except Exception as e:
+                    logger.exception("Error while sending email notifications for %s job %s: %s", archive_name, job_id, e)
 
                 # If no services configured at all, fall back to original apobj send for compatibility
                 if not non_email_urls and not email_urls and not os.environ.get('SMTP_SERVER'):

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from app.db import get_db
 from app.notifications import get_setting, get_apprise_instance, get_subject_with_tag, get_notification_format, strip_html_tags
 from app import utils
-from app.utils import setup_logging, get_logger
+from app.utils import setup_logging, get_logger, format_bytes
 
 # Configure logging using centralized setup so LOG_LEVEL is respected
 setup_logging()
@@ -507,13 +507,7 @@ def get_directory_size(path):
     return total
 
 
-def format_bytes(size):
-    """Format bytes as human-readable string."""
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-        if size < 1024.0:
-            return f"{size:.2f} {unit}"
-        size /= 1024.0
-    return f"{size:.2f} PB"
+
 
 
 def _mark_archives_as_deleted_by_path(path_prefix, deleted_by='cleanup'):
