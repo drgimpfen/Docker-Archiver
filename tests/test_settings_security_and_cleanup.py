@@ -69,11 +69,11 @@ def test_manage_cleanup_post_valid_saves_and_schedules(monkeypatch):
                 return False
         monkeypatch.setattr('app.routes.settings.get_db', lambda: DummyConn())
 
-        # Monkeypatch schedule_cleanup_task to record calls
+        # Monkeypatch schedule_cleanup_task on the scheduler module to record calls
         called = {'scheduled': False}
         def dummy_schedule():
             called['scheduled'] = True
-        monkeypatch.setattr('app.routes.settings.schedule_cleanup_task', dummy_schedule)
+        monkeypatch.setattr('app.scheduler.schedule_cleanup_task', dummy_schedule)
 
         with client.session_transaction() as sess:
             sess['user_id'] = 1
