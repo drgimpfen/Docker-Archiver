@@ -1005,15 +1005,66 @@ def send_test_notification():
         base_url = get_setting('base_url', 'http://localhost:8080')
         
         title = get_subject_with_tag("🔔 Docker Archiver - Test Notification")
-        body = f"""<h2>Test Notification from Docker Archiver</h2>
+
+        # Gather configured Apprise URLs from settings and render human-readable list
+        raw_urls = [u.strip() for u in get_setting('apprise_urls', '').split('\n') if u.strip()]
+
+        def _mask_url_for_display(u):
+            from urllib.parse import urlparse
+            try:
+                p = urlparse(u)
+                scheme = (p.scheme or '').lower()
+                # Mask credentials in netloc for display
+                netloc = p.netloc or ''
+                if '@' in netloc:
+                    netloc = netloc.split('@', 1)[1]
+                # For mailto, the path is the address
+                if scheme.startswith('mailto'):
+                    human = f"mail to: {p.path}"
+                else:
+                    host = netloc or p.path or ''
+                    human = f"{scheme} to: {host}"
+                # Short masked URL for display (hide credentials)
+                display_url = u
+                if '@' in display_url:
+                    display_url = display_url.replace('@', '@', 1)
+                return human, display_url
+            except Exception:
+                return u, u
+
+        html_list = ''
+        text_lines = []
+        if raw_urls:
+            html_list = '<ul>'
+            for u in raw_urls:
+                human, display = _mask_url_for_display(u)
+                html_list += f"<li><code>{display}</code> — {human}</li>"
+                text_lines.append(f"- {human}: {display}")
+            html_list += '</ul>'
+        else:
+            html_list = '<p><em>No Apprise URLs configured.</em></p>'
+            text_lines.append('No Apprise URLs configured.')
+
+        # Compose HTML and plain-text bodies (plain text used when NotifyFormat.TEXT is selected)
+        body_html = f"""<h2>Test Notification from Docker Archiver</h2>
 <p>If you received this message, your notification configuration is working correctly!</p>
-<h3>Notification services configured:</h3>
-<ul>
-<li>Apprise URLs from settings</li>
-<li>User email addresses (when configured via Apprise mailto/mailtos URLs)</li>
-</ul>
+<h3>Configured Apprise URLs</h3>
+{html_list}
 <hr>
-<p><small>Docker Archiver: <a href="{base_url}">{base_url}</a></small></p>"""
+<p><small>Docker Archiver: <a href=\"{base_url}\">{base_url}</a></small></p>"""
+
+        body_text = "Test Notification from Docker Archiver\n\n"
+        body_text += "If you received this message, your notification configuration is working correctly!\n\n"
+        body_text += "Configured Apprise URLs:\n"
+        body_text += "\n".join(text_lines) + "\n\n"
+        body_text += f"Docker Archiver: {base_url}\n"
+
+        # Build the final body based on configured notification format
+        body = body_html
+        body_format = get_notification_format()
+        # If text is preferred, use the pre-built plain-text version for clarity
+        if body_format == __import__('apprise').NotifyFormat.TEXT:
+            body = body_text
         
         # Get format preference
         body_format = get_notification_format()
