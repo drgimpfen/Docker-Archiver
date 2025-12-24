@@ -41,9 +41,19 @@ def send_to_discord(discord_adapter, title: str, body_html: str, compact_text: s
         md_parts = []
         for sec in sections:
             first, rest = sec.split('\n', 1) if '\n' in sec else (sec, '')
-            md_parts.append(f"## {first}\n{rest}")
+            # Use bold titles instead of H2 headings to avoid Apprise splitting into multiple embeds
+            md_parts.append(f"**{first}**\n{rest}")
         md_body = '\n\n'.join(md_parts)
 
+        # Logging for debugging: sizes and section summaries
+        try:
+            logger.info("send_to_discord: md_body_len=%d sections=%d", len(md_body or ''), len(sections or []))
+            for idx, sec in enumerate(sections or []):
+                s_title = sec.split('\n', 1)[0] if sec else ''
+                s_len = len(sec or '')
+                logger.debug("send_to_discord: section %d title=%r len=%d", idx + 1, s_title, s_len)
+        except Exception:
+            pass
         # Prefer a single Markdown embed (borg-ui style). If content exceeds the per-embed limit,
         # pack sections into as few embeds as possible (no truncation).
         effective_limit = min(max_desc, 1800)
@@ -120,10 +130,18 @@ def send_to_discord(discord_adapter, title: str, body_html: str, compact_text: s
             batches.append(cur)
 
         # Send each batch as a single embed
+        logger.info("send_to_discord: sending %d batches (effective_max_desc=%d)", len(batches), effective_max_desc)
         for bidx, batch in enumerate(batches):
             is_final_batch = (bidx == len(batches) - 1)
             # build batch markdown
             md_body = '\n\n'.join(item[1] for item in batch)
+            # Log batch summary for debugging (length and prefix)
+            try:
+                snippet = md_body[:200].replace('\n', ' ')
+                logger.debug("send_to_discord: batch %d/%d length=%d prefix=%s", bidx + 1, len(batches), len(md_body), snippet)
+            except Exception:
+                pass
+
             sec_embed_opts = copy.deepcopy(embed_options or {})
             if not is_final_batch and 'footer' in sec_embed_opts:
                 sec_embed_opts.pop('footer', None)
@@ -143,6 +161,7 @@ def send_to_discord(discord_adapter, title: str, body_html: str, compact_text: s
 
             if res.success:
                 sent_any = True
+                logger.debug("send_to_discord: batch %d sent successfully", bidx + 1)
             else:
                 logger.error("send_to_discord: batch send failed - detail=%s", res.detail)
                 errors.append(res.detail)

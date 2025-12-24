@@ -59,40 +59,50 @@ class DiscordAdapter(AdapterBase):
         out['fields'] = out_fields
         return out
 
-    def _build_html_body(self, title: str, body: str, embed_options: dict = None) -> str:
-        """Construct an HTML body for Apprise/Discord that approximates an embed.
-        Apprise will translate this to a suitable Discord message.
+    def _build_md_body(self, title: str, body: str, embed_options: dict = None) -> str:
+        """Construct a Markdown body for Discord embeds.
 
-        If `body` already contains HTML tags we preserve it and inject a heading;
-        otherwise we convert text to a simple HTML paragraph.
+        - Uses bolded title (unless the body already starts with the title).
+        - Appends sanitized fields as simple `**Name**: Value` lines.
+        - Footer is **not** inlined here; footer is handled by `send_to_discord` via embed_options.
         """
-        import re
-        has_html = bool(re.search(r'<[^>]+>', body or ''))
-        if has_html:
-            desc_html = body
+        # Basic sanitization: if callers passed HTML, strip tags to a plain text fallback
+        body_text = body or ''
+        try:
+            if '<' in body_text and '>' in body_text:
+                body_text = strip_html_tags(body_text)
+        except Exception:
+            # If strip_html_tags fails, fall back to raw body
+            pass
+
+        # Avoid duplicating the title if body already begins with it
+        try:
+            body_starts_with_title = bool(body_text.strip().lower().startswith(str(title or '').strip().lower()))
+        except Exception:
+            body_starts_with_title = False
+
+        if body_starts_with_title:
+            md = body_text.strip()
         else:
-            desc_html = f"<p>{strip_html_tags(body)}</p>"
+            md = f"**{title}**\n\n{body_text.strip()}" if body_text.strip() else f"**{title}**"
 
-        html = f"<h2>{title}</h2>\n" + desc_html
-
-        # Use sanitized embed options for building the HTML
+        # Append fields (simple inline Markdown)
         sopts = self._sanitize_embed_options(embed_options or {})
-
         fields = sopts.get('fields', [])
         if fields:
-            # Use a styled divider instead of <hr> to avoid Apprise HTML->TEXT conversion edge cases
-            html += "<div style='border-top:1px solid #eee;margin:8px 0'></div><table>"
+            md += "\n\n"
             for f in fields:
                 name = f.get('name', '')
                 value = f.get('value', '')
-                html += f"<tr><th style='text-align:left;padding-right:8px'>{name}</th><td>{value}</td></tr>"
-            html += "</table>"
+                md += f"**{name}**: {value}\n"
 
+        # Append footer text inline for compatibility; send_to_discord may also
+        # enhance footer in the final embed footer when batching.
         footer = sopts.get('footer')
         if footer:
-            html += f"<p style='color: #666;font-size:90%'>{footer}</p>"
+            md += f"\n{footer}"
 
-        return html
+        return md
 
     def send(self, title: str, body: str, body_format: object = None, attach: Optional[str] = None, context: str = '', embed_options: dict = None) -> AdapterResult:
         """Send Discord notification via Apprise. Uses HTML body to emulate embeds and passes attachments to Apprise."""
@@ -122,35 +132,16 @@ class DiscordAdapter(AdapterBase):
         if added == 0:
             return AdapterResult(channel='discord', success=False, detail='no valid discord webhook URLs added')
 
-        html_body = self._build_html_body(title, body, embed_options=embed_options or {})
+        # Build a Markdown body directly (no HTML intermediate)
+        md_body = self._build_md_body(title, body, embed_options=embed_options or {})
 
-        # When attachments are provided Discord (and Apprise) will remove embeds and
-        # fall back to sending the message as `content`. Discord limits `content` to
-        # 2000 characters — ensure we never exceed that. If the message is too long
-        # or we're attaching files, send a concise summary as content and include
-        # the full details as an attachment (or let the caller attach them).
-        try:
-            apprise = __import__('apprise')
-            NotifyFormat = getattr(apprise, 'NotifyFormat', None)
-            NotifyFmtHTML = NotifyFormat.HTML if NotifyFormat is not None else None
-        except Exception:
-            NotifyFmtHTML = None
-
-        # Build a plain-text version of the HTML body
-        plain = strip_html_tags(html_body)
-
-        # Convert HTML body to plain/markdown when sending embeds: Apprise's
-        # Discord plugin uses NotifyFormat.MARKDOWN to build embeds. Sending
-        # plain text with MARKDOWN ensures an 'embeds' payload is used instead
-        # of a 'content' field which is subject to the 2000 char limit.
+        # Apprise notify formats
         try:
             apprise = __import__('apprise')
             NotifyFormat = getattr(apprise, 'NotifyFormat', None)
             NotifyFmtMarkdown = NotifyFormat.MARKDOWN if NotifyFormat is not None else None
         except Exception:
             NotifyFmtMarkdown = None
-
-        md_body = strip_html_tags(html_body)
 
         # If an attachment is present, send in two steps:
         # 1) Send the embed (MARKDOWN) first without the attachment so Discord
@@ -159,7 +150,14 @@ class DiscordAdapter(AdapterBase):
         #    summary (<=2000 chars) so the upload succeeds.
         if attach:
             # 1) attempt to post embeds (MARKDOWN) without attachment
-            embed_ok, embed_detail = _notify_with_retry(apobj, title=title, body=md_body, body_format=NotifyFmtMarkdown, attach=None)
+            try:
+                embed_ok, embed_detail = _notify_with_retry(apobj, title=title, body=md_body, body_format=NotifyFmtMarkdown, attach=None, capture_logs_on_success=True)
+            except TypeError:
+                # Older test fakes may not accept the new keyword; fall back gracefully
+                embed_ok, embed_detail = _notify_with_retry(apobj, title=title, body=md_body, body_format=NotifyFmtMarkdown, attach=None)
+            if embed_detail:
+                # Log captured Apprise debug output to help diagnose internal splitting
+                logger.debug("DiscordAdapter: apprise logs on embed send: %s", embed_detail)
 
             # 2) prepare truncated plain content for the attachment post
             plain = md_body
@@ -169,7 +167,12 @@ class DiscordAdapter(AdapterBase):
             else:
                 attach_body = plain
 
-            attach_ok, attach_detail = _notify_with_retry(apobj, title=title, body=attach_body, body_format=None, attach=attach)
+            try:
+                attach_ok, attach_detail = _notify_with_retry(apobj, title=title, body=attach_body, body_format=None, attach=attach, capture_logs_on_success=True)
+            except TypeError:
+                attach_ok, attach_detail = _notify_with_retry(apobj, title=title, body=attach_body, body_format=None, attach=attach)
+            if attach_detail:
+                logger.debug("DiscordAdapter: apprise logs on attach send: %s", attach_detail)
 
             # Evaluate results: prefer both succeed, but consider partial success
             if embed_ok and attach_ok:

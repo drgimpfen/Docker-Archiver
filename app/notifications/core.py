@@ -783,7 +783,7 @@ def send_test_notification():
 <p><small>Docker Archiver: <a href=\"{base_url}\">{base_url}</a></small></p>"""
 
         # Compose Markdown body for chat services
-        md_body = f"## Test Notification from Docker Archiver\n\nIf you received this message, your notification configuration is working correctly!\n\nDocker Archiver: [{base_url}]({base_url})"
+        md_body = f"**Test Notification from Docker Archiver**\n\nIf you received this message, your notification configuration is working correctly!\n\nDocker Archiver: [{base_url}]({base_url})"
 
         sent_any = False
         errors = []

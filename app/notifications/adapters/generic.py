@@ -19,10 +19,13 @@ def _make_apobj(urls: Optional[List[str]] = None) -> Tuple[Optional[object], int
     return apobj, added, None
 
 
-def _notify_with_retry(apobj: object, title: str, body: str, body_format: object = None, attach: Optional[str] = None) -> Tuple[bool, Optional[str]]:
+def _notify_with_retry(apobj: object, title: str, body: str, body_format: object = None, attach: Optional[str] = None, capture_logs_on_success: bool = False) -> Tuple[bool, Optional[str]]:
     """Notify via Apprise. Capture DEBUG logs from the Apprise logger to provide
-    detailed diagnostic information (response bodies, debug output) when
-    notifications fail (returns False) or raise an exception.
+    detailed diagnostic information (response bodies, debug output).
+
+    By default debug logs are only returned on failure. Set
+    `capture_logs_on_success=True` to also return the captured logs when the
+    notification succeeded (useful for debugging how many embeds Apprise posted).
     """
     import traceback, time, logging, io
 
@@ -46,6 +49,10 @@ def _notify_with_retry(apobj: object, title: str, body: str, body_format: object
     try:
         res = apobj.notify(title=title, body=body, body_format=body_format, attach=attach)
         if bool(res):
+            # If requested, return the captured logs even on success
+            if capture_logs_on_success:
+                logs = buf.getvalue().strip()
+                return True, logs if logs else None
             return True, None
 
         # Notification returned False (one or more services failed). Return
