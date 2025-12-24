@@ -9,7 +9,7 @@ from app.notifications import get_setting
 import os
 import time
 import threading
-from app.utils import setup_logging, get_logger, get_display_timezone, get_jobs_log_dir, get_sentinel_path, local_now, filename_safe
+from app.utils import setup_logging, get_logger, get_display_timezone, get_log_dir, get_sentinel_path, local_now, filename_safe
 from app.downloads import cleanup_expired_tokens
 from app.cleanup import run_cleanup
 from app.notifications import send_error_notification
@@ -337,11 +337,10 @@ def run_scheduled_archive(archive_config):
     try:
         # Start the scheduled archive as a detached subprocess to avoid blocking the scheduler
         import subprocess, sys, os
-        jobs_dir = get_jobs_log_dir()
+        jobs_dir = os.path.join(get_log_dir(), 'jobs')
         os.makedirs(jobs_dir, exist_ok=True)
-        timestamp = local_now().strftime('%Y%m%d_%H%M%S')
         safe_name = filename_safe(archive_config['name'])
-        log_name = f"{timestamp}_scheduled_{safe_name}.log"
+        log_name = f"{archive_config['id']}_{safe_name}.log"
         log_path = os.path.join(jobs_dir, log_name)
         cmd = [sys.executable, '-m', 'app.run_job', '--archive-id', str(archive_config['id']), '--log-path', log_path]
         subprocess.Popen(cmd, start_new_session=True)

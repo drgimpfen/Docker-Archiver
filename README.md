@@ -195,8 +195,6 @@ Discovery follows these rules:
 
 **Behavior for non-mounted stacks:** If a stack directory is not available via a bind mount, the archiver will use the path as it appears inside the container (the container-side path) when running compose commands; it will not attempt to use host-only paths that are not mounted into the container.
 
-**Fallback & compatibility**: If no bind mounts are detected the legacy `/local` path will be scanned to maintain compatibility with older deployments.
-
 **Important:** Host and container paths must match for bind mounts (e.g. `- /opt/stacks:/opt/stacks`). The archiver uses the container-side path it detects as the working directory for `docker compose` commands.
 
 <a name="troubleshooting-bind-mount-warnings"></a>
@@ -278,13 +276,19 @@ For more details and troubleshooting tips, see the dashboard warning messages or
 
 > **Note:** Port (8080) and mount paths are configured in `docker-compose.yml`, not via environment variables.
 
-> **Note:** The application uses fixed internal paths for archive output and job logs:
+> **Note:** The application uses fixed internal paths for archive output and logs. To ensure log files are persisted on the host, mount a directory to `/var/log/archiver` (e.g. `./logs:/var/log/archiver` in `docker-compose.yml`). The relevant internal paths are:
 > - Archives directory: `/archives` (used for storing generated archives)
-> - Job logs directory: `/var/log/archiver` (stdout/stderr from job subprocesses)
+> - Logs directory: `/var/log/archiver/` (contains the central app log at `/var/log/archiver/app.log` and job logs under `/var/log/archiver/jobs/`, e.g. `/var/log/archiver/jobs/123_myarchive.log`)
 
 ### Logging & Debugging 🔧
 
 Control application-wide logging using the `LOG_LEVEL` environment variable (recommended values: `DEBUG`, `INFO`, `WARNING`, `ERROR`). Setting `LOG_LEVEL=DEBUG` enables detailed diagnostic messages across components (scheduler, SSE, executor, etc.).
+
+File logging is always enabled and organized as follows:
+- Central app log: `/var/log/archiver/app.log` (rotated daily at midnight).
+- Job logs: `/var/log/archiver/jobs/<archive_id>_<archive_name>.log` for archive runs and `/var/log/archiver/jobs/cleanup_<job_id>.log` for cleanup runs (these contain full run output and are suitable for download/attachment).
+
+Rotation (daily) applies to the app and job logs; long-term retention/deletion of rotated files is handled by the application's cleanup job (configured via **Settings → Cleanup log retention days**).
 
 Important: a logger set to a given level will **also include messages at higher-severity levels**. For example:
 
@@ -302,9 +306,20 @@ echo "LOG_LEVEL=DEBUG" >> .env
 docker compose up -d
 ```
 
-Notes:
+Tips:
 - Use `DEBUG` for troubleshooting; use `INFO` for normal production verbosity.
 - Expensive debug-only work is guarded by `logger.isEnabledFor(logging.DEBUG)` to avoid runtime overhead unless debug is explicitly enabled.
+
+Deployment note: ensure the container can persist and write logs by mounting a host directory into `/var/log/archiver`. Example in `docker-compose.yml`:
+
+```yaml
+services:
+  app:
+    volumes:
+      - ./logs:/var/log/archiver   # persist app and job logs on the host
+```
+
+This ensures job logs and cleanup summaries are available on the host for inspection and backups.
 
 > **Note:** Redis is required for reliable cross‑worker SSE propagation. Set `REDIS_URL` (e.g., `redis://redis:6379/0`) and ensure the `redis` Python package is available. The app assumes Redis is present for real‑time streaming and global event propagation.
 
@@ -313,9 +328,9 @@ Notes:
 
 ### Troubleshooting — Logs & Notifications 🔧
 
-If you cannot find notification output (e.g., Discord, Email) in the normal container logs, check the per-job log files — scheduled and detached jobs write their stdout/stderr to per-job files under `/var/log/archiver`.
+If you cannot find notification output (e.g., Discord, Email) in the normal container logs, check the job log files under `/var/log/archiver` — scheduled and detached jobs write their stdout/stderr to job log files there.
 
-Why? Scheduled archive jobs are executed as detached subprocesses (see `app.run_job`) and their stdout/stderr are redirected into a job-specific log file so the job can run independently of the web worker process. For this reason you will often find the notification traces (Apprise logs) in the per-job log rather than in the central `docker compose logs` output.
+Why? Scheduled archive jobs are executed as detached subprocesses (see `app.run_job`) and their stdout/stderr are redirected into separate log files so the job can run independently of the web worker process. For this reason you will often find the notification traces (Apprise logs) in those logs rather than in the central `docker compose logs` output.
 
 Quick commands (run on host):
 
@@ -339,7 +354,7 @@ docker compose logs -f --tail=200 app
 docker compose exec -T app journalctl -u docker -n 200  # if you use systemd/journald integration
 ```
 
-- Run a manual in-container test (writes to container logs and/or per-job files depending on context):
+- Run a manual in-container test (writes to container logs and/or job log files depending on context):
 
 ```bash
 docker compose exec -T app python -c "from app.main import app; ctx=app.app_context(); ctx.push(); from app.notifications import send_archive_notification; send_archive_notification({'name':'Test-Archive'}, 9999, [], 1, 0); ctx.pop()"
@@ -355,7 +370,7 @@ What to look for in logs:
 Tips:
 
 - Set `LOG_LEVEL=DEBUG` in `.env` if you need more detailed debugging output. Restart the `app` service after changing env vars.
-- `docker compose run --rm` spawns a short-lived container and its logs may not appear in `docker compose logs`; prefer `docker compose exec` or inspect the per-job log files for scheduled runs.
+- `docker compose run --rm` spawns a short-lived container and its logs may not appear in `docker compose logs`; prefer `docker compose exec` or inspect the logs under `/var/log/archiver` for scheduled runs.
 - If you want important job summaries to also appear in the container's central logs, consider running a short command at the end of a job to emit a compact summary to stderr (this is a safe, small change we can help implement).
 
 ---

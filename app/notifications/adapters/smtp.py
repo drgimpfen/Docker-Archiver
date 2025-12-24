@@ -1,6 +1,13 @@
 from typing import List, Optional
+import logging
 from .generic import _make_apobj, _notify_with_retry
 from .base import AdapterBase, AdapterResult
+from app.utils import get_logger
+
+# Reduce Apprise's noisy info messages which say "Sent Email notification ...".
+# We prefer our own explicit SMTP adapter logging.
+logging.getLogger('apprise').setLevel(logging.WARNING)
+logger = get_logger(__name__)
 
 
 class SMTPAdapter(AdapterBase):
@@ -32,11 +39,13 @@ class SMTPAdapter(AdapterBase):
         smtp_from = self.smtp_from or os.environ.get('SMTP_FROM')
 
         if not (smtp_server and smtp_user and smtp_password and smtp_from):
-            return AdapterResult(channel='email', success=False, detail='smtp configuration incomplete')
+            logger.warning("SMTP adapter: smtp configuration incomplete")
+            return AdapterResult(channel='smtp', success=False, detail='smtp configuration incomplete')
 
         recipients = self._gather_recipients()
         if not recipients:
-            return AdapterResult(channel='email', success=False, detail='no recipients found')
+            logger.warning("SMTP adapter: no recipients found")
+            return AdapterResult(channel='smtp', success=False, detail='no recipients found')
 
         mailtos = []
         for email in recipients:
@@ -48,11 +57,15 @@ class SMTPAdapter(AdapterBase):
 
         apobj, added, err = _make_apobj(mailtos)
         if apobj is None:
-            return AdapterResult(channel='email', success=False, detail=err)
+            logger.error("SMTP adapter: apprise not available: %s", err)
+            return AdapterResult(channel='smtp', success=False, detail=err)
         if added == 0:
-            return AdapterResult(channel='email', success=False, detail='no valid mailto URLs added')
+            logger.warning("SMTP adapter: no valid mailto URLs added")
+            return AdapterResult(channel='smtp', success=False, detail='no valid mailto URLs added')
 
         ok, detail = _notify_with_retry(apobj, title=title, body=body, body_format=body_format, attach=attach)
         if ok:
-            return AdapterResult(channel='email', success=True)
-        return AdapterResult(channel='email', success=False, detail=f'notify exception: {detail}')
+            logger.info("SMTP adapter: notification sent via SMTP (recipients=%s) (%s)", recipients, context)
+            return AdapterResult(channel='smtp', success=True)
+        logger.error("SMTP adapter: notify failed (%s)", detail)
+        return AdapterResult(channel='smtp', success=False, detail=f'notify exception: {detail}')

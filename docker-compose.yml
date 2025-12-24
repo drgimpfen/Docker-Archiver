@@ -50,8 +50,8 @@ services:
       # GUNICORN_THREADS: "2" # threads per worker (default 2)
       # GUNICORN_TIMEOUT: "300" # worker timeout in seconds (default 300)
       # Example environment variables (recommended: place in a .env file or set in your environment)
-      # LOG_LEVEL=INFO                     # Global log level: DEBUG, INFO, WARNING, ERROR
-      # DB_PASSWORD=changeme123            # Optional: used by DATABASE_URL when referenced
+      # LOG_LEVEL=INFO                         # Global log level: DEBUG, INFO, WARNING, ERROR
+      # DB_PASSWORD=changeme123                # Optional: used by DATABASE_URL when referenced
 
       # SHOW_ONDISK_ARCHIVE_SIZE=1         # Enable showing on-disk archive sizes in Dashboard
       # SCHEDULE_MISFIRE_GRACE=300         # seconds to consider a misfire grace window
@@ -64,7 +64,7 @@ services:
       - ./archives:/archives
       # Job logs (detached subprocess stdout/stderr) - optional host bind mount
       # Map a host folder into the container so job logs persist outside the container
-      - ./job-logs:/var/log/archiver
+      - ./logs:/var/log/archiver
       # Stack directories - automatically detected from volume mounts
       # Add bind mounts for your stack directories here
       # The container will automatically scan these for Docker Compose files

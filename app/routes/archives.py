@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from croniter import croniter
 from app import utils
 from app.notifications import get_setting, send_retention_notification
-from app.utils import setup_logging, get_logger, get_jobs_log_dir, format_bytes, format_duration, get_disk_usage, to_iso_z, now, local_now, filename_safe
+from app.utils import setup_logging, get_logger, get_log_dir, format_bytes, format_duration, get_disk_usage, to_iso_z, now, local_now, filename_safe
 
 # Configure logging using centralized setup so LOG_LEVEL is respected
 setup_logging()
@@ -543,13 +543,14 @@ def run(archive_id):
 
         # Start archive as detached subprocess and log to file
         import sys
-        jobs_dir = get_jobs_log_dir()
+        jobs_dir = os.path.join(get_log_dir(), 'jobs')
         os.makedirs(jobs_dir, exist_ok=True)
-        log_path = os.path.join(jobs_dir, f"archive_{archive_id}.log")
+        safe_name = utils.filename_safe(archive['name'])
+        log_name = f"{archive_id}_{safe_name}.log"
+        log_path = os.path.join(jobs_dir, log_name)
         cmd = [sys.executable, '-m', 'app.run_job', '--archive-id', str(archive_id), '--job-id', str(job_id)]
         try:
-            with open(log_path, 'ab') as fh:
-                subprocess.Popen(cmd, stdout=fh, stderr=fh, start_new_session=True)
+            subprocess.Popen(cmd + ['--log-path', log_path], start_new_session=True)
             flash(f'Archive job for "{archive["name"]}" started', 'info')
         except Exception as e:
             flash(f'Failed to start job: {e}', 'danger')
@@ -592,11 +593,10 @@ def dry_run(archive_id):
         if not run_retention:
             cmd.append('--no-run-retention')
 
-        jobs_dir = get_jobs_log_dir()
+        jobs_dir = os.path.join(get_log_dir(), 'jobs')
         os.makedirs(jobs_dir, exist_ok=True)
-        timestamp = utils.local_now().strftime('%Y%m%d_%H%M%S')
         safe_name = utils.filename_safe(archive['name'])
-        log_name = f"{timestamp}_dryrun_{safe_name}.log"
+        log_name = f"{archive_id}_dryrun_{safe_name}.log"
         log_path = os.path.join(jobs_dir, log_name)
         try:
             subprocess.Popen(cmd + ['--log-path', log_path], start_new_session=True)

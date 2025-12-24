@@ -48,6 +48,16 @@ def run_cleanup(dry_run_override=None, job_id=None):
         timestamp = utils.local_now().strftime('%Y-%m-%d %H:%M:%S')
         log_line = f"[{timestamp}] [{level}] {message}\n"
         log_lines.append(log_line)
+        # Also write into the per-cleanup logfile when available
+        if job_log_fh:
+            try:
+                job_log_fh.write(log_line)
+                try:
+                    job_log_fh.flush()
+                except Exception:
+                    pass
+            except Exception:
+                logger.exception("[Cleanup] Failed to write to cleanup job log file")
         if level == 'ERROR':
             logger.error("[Cleanup] %s", message)
         elif level == 'WARNING':
@@ -55,6 +65,9 @@ def run_cleanup(dry_run_override=None, job_id=None):
         else:
             logger.info("[Cleanup] %s", message)
     
+    # Create a DB job record if not provided by the caller. We also create a
+    # per-run cleanup log file at LOG_DIR/jobs/cleanup_<jobid>.log (or a
+    # timestamped fallback when no job_id is available).
     if not job_id:
         try:
             with get_db() as conn:
@@ -69,6 +82,25 @@ def run_cleanup(dry_run_override=None, job_id=None):
         except Exception as e:
             logger.exception("[Cleanup] Failed to create job record: %s", e)
             # Continue anyway
+
+    # Prepare a per-cleanup logfile (persisted under LOG_DIR/jobs)
+    job_log_fh = None
+    job_log_path = None
+    try:
+        jobs_dir = os.path.join(utils.get_log_dir(), 'jobs')
+        os.makedirs(jobs_dir, exist_ok=True)
+        if job_id:
+            job_log_path = os.path.join(jobs_dir, f"cleanup_{job_id}.log")
+        else:
+            ts = utils.local_now().strftime('%Y%m%d_%H%M%S')
+            job_log_path = os.path.join(jobs_dir, f"cleanup_{ts}.log")
+        job_log_fh = open(job_log_path, 'a', encoding='utf-8')
+    except Exception as e:
+        logger.exception("[Cleanup] Failed to create cleanup job log file: %s", e)
+        job_log_fh = None
+
+    # Rotating cleanup summary was removed: prefer per-job logs under LOG_DIR/jobs/
+    summary_logger = None
     
     log_message('INFO', f"Starting cleanup task ({mode})")
     
@@ -129,6 +161,8 @@ def run_cleanup(dry_run_override=None, job_id=None):
         # Send notification if enabled
         if notify_cleanup:
             send_cleanup_notification(orphaned_stats, log_stats, unreferenced_dirs_stats, uf_stats, total_reclaimed, is_dry_run, job_id=job_id)
+
+
             
     except Exception as e:
         log_message('ERROR', f"Cleanup failed: {str(e)}")
@@ -144,6 +178,15 @@ def run_cleanup(dry_run_override=None, job_id=None):
                     WHERE id = %s;
                 """, (end_time, str(e), ''.join(log_lines), job_id))
                 conn.commit()
+
+
+
+        # Ensure the per-cleanup logfile is closed
+        try:
+            if job_log_fh:
+                job_log_fh.close()
+        except Exception:
+            pass
         
         raise
 
@@ -212,7 +255,11 @@ def cleanup_orphaned_archives(is_dry_run=False, log_callback=None):
 
 
 def cleanup_old_logs(retention_days, is_dry_run=False, log_callback=None):
-    """Delete old job records from database."""
+    """Delete old job records from database and rotated log files.
+
+    Returns a dict with keys: 'count' (DB rows deleted), 'log_files_deleted' (int),
+    and 'deleted_files' (list of file paths removed).
+    """
     def log(message):
         if log_callback:
             log_callback('INFO', message)
@@ -221,13 +268,14 @@ def cleanup_old_logs(retention_days, is_dry_run=False, log_callback=None):
     
     if retention_days <= 0:
         log("Log retention disabled (retention_days <= 0)")
-        return {'count': 0}
+        return {'count': 0, 'log_files_deleted': 0, 'deleted_files': []}
     
     log(f"Checking for logs older than {retention_days} days...")
-    
+    import time
+    import os
+
     with get_db() as conn:
         cur = conn.cursor()
-        
         # Count jobs to delete
         cur.execute("""
             SELECT COUNT(*) as count 
@@ -235,11 +283,18 @@ def cleanup_old_logs(retention_days, is_dry_run=False, log_callback=None):
             WHERE start_time < NOW() - INTERVAL '%s days';
         """, (retention_days,))
         count = cur.fetchone()['count']
-        
+
         if count == 0:
             log("No old logs to delete")
-            return {'count': 0}
-        
+            # Still run file cleanup for completeness
+            try:
+                log_dir = utils.get_log_dir()
+                result = cleanup_rotated_log_files(retention_days, log_dir, is_dry_run, log_callback=log_callback)
+                return {'count': 0, 'log_files_deleted': result.get('log_files_deleted', 0), 'deleted_files': result.get('deleted_files', [])}
+            except Exception as e:
+                log(f"Exception while cleaning log files: {e}")
+                return {'count': 0, 'log_files_deleted': 0, 'deleted_files': []}
+
         if is_dry_run:
             log(f"Would delete {count} old job record(s)")
         else:
@@ -249,8 +304,122 @@ def cleanup_old_logs(retention_days, is_dry_run=False, log_callback=None):
             """, (retention_days,))
             conn.commit()
             log(f"Deleted {count} old job record(s)")
-    
-    return {'count': count}
+
+    # Delegate rotated log file cleanup to a dedicated, testable function
+    log_files_deleted = 0
+    deleted_files = []
+    try:
+        log_dir = utils.get_log_dir()
+        result = cleanup_rotated_log_files(retention_days, log_dir, is_dry_run, log_callback=log_callback)
+        log_files_deleted = result.get('log_files_deleted', 0)
+        deleted_files = result.get('deleted_files', [])
+    except Exception as e:
+        log(f"Exception while cleaning log files: {e}")
+
+    return {'count': count, 'log_files_deleted': log_files_deleted, 'deleted_files': deleted_files}
+
+
+def cleanup_rotated_log_files(retention_days, log_dir, is_dry_run=False, log_callback=None):
+    """Delete rotated log files older than `retention_days` in `log_dir`.
+
+    This function is standalone and testable. It reports actions via an optional
+    `log_callback` (callable accepting level and message) so callers can capture
+    messages into the cleanup job log. Returns a dict: {
+      'log_files_deleted': int,
+      'deleted_files': [<paths>]
+    }
+    Signature: cleanup_rotated_log_files(retention_days, log_dir, is_dry_run, log_callback=None)
+    """
+    import time
+    import os
+
+    def log(message, level='INFO'):
+        if log_callback:
+            try:
+                log_callback(level, message)
+            except Exception:
+                logger.exception("[Cleanup] log_callback raised an exception")
+        else:
+            if level == 'ERROR':
+                logger.error("[Cleanup] %s", message)
+            elif level == 'WARNING':
+                logger.warning("[Cleanup] %s", message)
+            else:
+                logger.info("[Cleanup] %s", message)
+
+    log_files_deleted = 0
+    deleted_files = []
+
+    if retention_days <= 0:
+        log("Log file retention disabled (retention_days <= 0)")
+        return {'log_files_deleted': 0, 'deleted_files': []}
+
+    cutoff = int(retention_days) * 86400
+
+    try:
+        if os.path.isdir(log_dir):
+            log(f"Checking for log files in {log_dir} older than {retention_days} days...")
+            log_file_name = getattr(utils, 'LOG_FILE_NAME', 'app.log')
+            # Scan top-level log files (app log rotations)
+            # Scan top-level log files (app log rotations)
+            for fn in os.listdir(log_dir):
+                # Match files that start with the configured log filename
+                if not fn.startswith(log_file_name):
+                    continue
+                fp = os.path.join(log_dir, fn)
+                try:
+                    # Skip the active app log file (exact match)
+                    if fn == log_file_name:
+                        continue
+                    mtime = os.path.getmtime(fp)
+                    age = time.time() - mtime
+                    if age > cutoff:
+                        if is_dry_run:
+                            log(f"Would delete old log file: {fp}")
+                        else:
+                            try:
+                                os.unlink(fp)
+                                log_files_deleted += 1
+                                deleted_files.append(fp)
+                                log(f"Deleted old log file: {fp}")
+                            except Exception as e:
+                                log(f"Failed to delete log file {fp}: {e}", level='WARNING')
+                except Exception:
+                    # Best-effort: ignore files we can't stat
+                    continue
+
+            # Also scan job-specific logs under LOG_DIR/jobs
+            jobs_dir = os.path.join(log_dir, 'jobs')
+            try:
+                if os.path.isdir(jobs_dir):
+                    for root, _, files in os.walk(jobs_dir):
+                        for fn in files:
+                            fp = os.path.join(root, fn)
+                            try:
+                                mtime = os.path.getmtime(fp)
+                                age = time.time() - mtime
+                                if age > cutoff:
+                                    if is_dry_run:
+                                        log(f"Would delete old job log file: {fp}")
+                                    else:
+                                        try:
+                                            os.unlink(fp)
+                                            log_files_deleted += 1
+                                            deleted_files.append(fp)
+                                            log(f"Deleted old job log file: {fp}")
+                                        except Exception as e:
+                                            log(f"Failed to delete job log file {fp}: {e}", level='WARNING')
+                            except Exception:
+                                continue
+            except Exception:
+                # Best-effort: ignore
+                pass
+        else:
+            log(f"Log directory {log_dir} does not exist; skipping file cleanup")
+    except Exception as e:
+        log(f"Exception while cleaning log files: {e}", level='ERROR')
+
+    return {'log_files_deleted': log_files_deleted, 'deleted_files': deleted_files}
 
 
 def cleanup_unreferenced_dirs(is_dry_run=False, log_callback=None):
@@ -655,13 +824,71 @@ def send_cleanup_notification(orphaned_stats, log_stats, unreferenced_dirs_stats
     <li><strong>Total Reclaimed:</strong> {format_bytes(total_reclaimed)}</li>
 </ul>
 """
-        
+
+        # If the cleanup removed individual log files, append a concise list
+        deleted_files = log_stats.get('deleted_files', []) or []
+        if deleted_files:
+            # Optionally group deleted job logs by archive for clearer notifications
+            group_logs = get_setting('notify_group_deleted_logs', 'false').lower() == 'true'
+
+            if group_logs:
+                # Group by archive id and name when possible. Expected filename format:
+                # <archive_id>_<archive_name>.log (possibly with rotation suffixes)
+                groups = {}
+                others = []
+                import re
+                for p in deleted_files:
+                    base = os.path.basename(p)
+                    m = re.match(r'^(?P<archive_id>\d+)_(?P<rest>.+)$', base)
+                    if m:
+                        aid = m.group('archive_id')
+                        rest = m.group('rest')
+                        # strip rotation suffixes and file extensions
+                        name = rest.split('.')[0]
+                        # strip common prefixes like 'dryrun_'
+                        name = name.replace('dryrun_', '').replace('scheduled_', '')
+                        key = f"{aid}_{name}"
+                        groups.setdefault(key, []).append(p)
+                    else:
+                        others.append(p)
+
+                body += "\n<h3>Deleted Log Files (grouped by archive)</h3>\n"
+                total_shown = 0
+                for key, files in sorted(groups.items(), key=lambda kv: kv[0]):
+                    if total_shown >= 50:
+                        break
+                    aid, aname = key.split('_', 1)
+                    body += f"\n<h4>Archive {aid} — {aname} ({len(files)})</h4>\n<ul>"
+                    for p in files:
+                        if total_shown >= 50:
+                            break
+                        body += f"\n  <li>{p}</li>"
+                        total_shown += 1
+                    if len(files) > 0:
+                        body += "\n</ul>"
+                # If any ungrouped files remain, show them under 'Other'
+                if others and total_shown < 50:
+                    body += "\n<h4>Other deleted files</h4>\n<ul>"
+                    for p in others[:max(0, 50 - total_shown)]:
+                        body += f"\n  <li>{p}</li>"
+                    if len(others) > max(0, 50 - total_shown):
+                        body += f"\n  <li>...and {len(others) - (50 - total_shown)} more</li>"
+                    body += "\n</ul>"
+            else:
+                body += "\n<h3>Deleted Log Files</h3>\n<ul>"
+                for p in deleted_files[:50]:
+                    # limit the list to 50 items to avoid huge messages
+                    body += f"\n  <li>{p}</li>"
+                if len(deleted_files) > 50:
+                    body += f"\n  <li>...and {len(deleted_files)-50} more</li>"
+                body += "\n</ul>"
+
         if is_dry_run:
             body += "\n<p><em>⚠️ This was a dry run - no files were actually deleted.</em></p>"
         
         body += f"""
 <hr>
-<p><small>Docker Archiver: <a href="{base_url}">{base_url}</a></small></p>"""
+<p><small>Docker Archiver: <a href=\"{base_url}\">{base_url}</a></small></p>"""
         
         # Append full job log if available
         job_log = ''
@@ -683,6 +910,16 @@ def send_cleanup_notification(orphaned_stats, log_stats, unreferenced_dirs_stats
             except Exception:
                 # Fallback: attach as plain text
                 body += "\n\nFull Cleanup Log:\n" + job_log
+
+        # If a per-cleanup job log file exists, add a quick reference (file path) so
+        # recipients know where to download the raw log if needed.
+        try:
+            jobs_dir = os.path.join(utils.get_log_dir(), 'jobs')
+            file_path = os.path.join(jobs_dir, f"cleanup_{job_id}.log") if job_id else None
+            if file_path and os.path.exists(file_path):
+                body += f"\n<p>Full cleanup job log file: <code>{file_path}</code></p>"
+        except Exception:
+            pass
 
         # Get format preference from notifications module
         body_format = get_notification_format()

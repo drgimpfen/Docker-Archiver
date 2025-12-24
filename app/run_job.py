@@ -58,15 +58,15 @@ def main(argv=None):
             'run_retention': not args.no_run_retention,
         }
 
-    # Ensure job log dir exists
-    jobs_dir = Path(utils.get_jobs_log_dir())
+    # Ensure job log dir exists under LOG_DIR/jobs
+    jobs_dir = Path(utils.get_log_dir()) / 'jobs'
     try:
         jobs_dir.mkdir(parents=True, exist_ok=True)
     except Exception:
         pass
 
     # Determine log path: allow parent to pass a path via --log-path, otherwise
-    # create a per-run timestamped filename using the same convention as before.
+    # create a per-run timestamped filename (keeps logs rotating by name)
     timestamp = utils.local_now().strftime('%Y%m%d_%H%M%S')
     archive_name = archive['name']
     safe_name = utils.filename_safe(archive_name)
@@ -94,24 +94,58 @@ def main(argv=None):
     import contextlib
     executor = ArchiveExecutor(dict(archive), is_dry_run=args.dry_run, dry_run_config=dry_run_config)
 
+    # Build desired log_path: prefer provided --log-path, else per-archive filename
+    log_path = None
     try:
-        # If stdout is not a TTY, it is likely redirected by the parent (file/pipe)
-        if not sys.stdout.isatty():
-            # Reuse inherited stdout/stderr
+        if cli_log_path:
+            log_path = Path(cli_log_path)
+        else:
+            jobs_dir = Path(utils.get_log_dir()) / 'jobs'
+            try:
+                jobs_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            # Use <archive_id>_<archive_name>.log as requested
+            archive_id = args.archive_id
+            log_path = jobs_dir / f"{archive_id}_{safe_name}.log"
+    except Exception:
+        log_path = Path(default_log_path)
+
+    # Set up logging using centralized helper from utils
+    try:
+        job_logger, handler = utils.get_job_logger(args.archive_id, archive_name, log_path=str(log_path))
+        # Redirect stdout/stderr to this logger if handler is available
+        if handler is not None:
+            import sys as _sys
+            _sys_stdout = _sys.stdout
+            _sys_stderr = _sys.stderr
+            _sys.stdout = utils.StreamToLogger(job_logger, level=logging.INFO)
+            _sys.stderr = utils.StreamToLogger(job_logger, level=logging.ERROR)
             try:
                 executor.run(triggered_by='subprocess', job_id=args.job_id)
             finally:
                 try:
-                    sys.stdout.flush()
+                    _sys.stdout.flush()
+                except Exception:
+                    pass
+                try:
+                    _sys.stderr.flush()
+                except Exception:
+                    pass
+                _sys.stdout = _sys_stdout
+                _sys.stderr = _sys_stderr
+                try:
+                    if handler:
+                        handler.flush()
                 except Exception:
                     pass
         else:
-            # No inherited redirection - create our own per-run log file
+            # Fallback: write directly to the log file
             with open(log_path, 'a', encoding='utf-8', errors='replace') as fh:
                 with contextlib.redirect_stdout(fh), contextlib.redirect_stderr(fh):
                     executor.run(triggered_by='subprocess', job_id=args.job_id)
     except Exception as e:
-        # Ensure exceptions are visible in the job log and app logs
+        # Final fallback: ensure errors are visible
         try:
             with open(log_path, 'a', encoding='utf-8', errors='replace') as fh:
                 fh.write((str(e) + '\n'))
@@ -119,7 +153,6 @@ def main(argv=None):
             pass
         logger.exception("Job run for archive id=%s failed", args.archive_id)
         raise
-
 
 if __name__ == '__main__':
     main()

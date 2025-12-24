@@ -9,27 +9,137 @@ import logging
 
 # Central logging helpers
 def setup_logging():
-    """Configure root logger from environment LOG_LEVEL.
+    """Configure root logger from environment.
 
-    Intended to be called early during application startup (e.g., from main.py).
-    Uses LOG_LEVEL env var (e.g., DEBUG, INFO, WARNING, ERROR); defaults to INFO.
+    - Uses LOG_LEVEL env var (e.g., DEBUG, INFO); defaults to INFO.
+    - If no handlers exist, installs a StreamHandler and a TimedRotatingFileHandler
+      to write daily log files into the fixed JOBS_LOG_DIR.
+
+    Note: File logging is always enabled. The jobs log directory and filename are
+    fixed to `JOBS_LOG_DIR` and `LOG_FILE_NAME` respectively; rotation backup
+    counts are not used because retention is managed by the cleanup job.
+    - JOBS_LOG_DIR: '/var/log/archiver'
+    - LOG_FILE_NAME: 'app.log'
     """
     level_name = os.environ.get('LOG_LEVEL', 'INFO').upper()
     try:
         level = getattr(logging, level_name)
     except Exception:
         level = logging.INFO
-    # Only configure basicConfig if no handlers are present so tests or other
+
+    root = logging.getLogger()
+
+    # Only configure handlers if none are present so tests or other
     # environments can configure logging differently
-    if not logging.getLogger().handlers:
-        logging.basicConfig(level=level, format='[%(levelname)s] %(asctime)s %(name)s: %(message)s')
-    logging.getLogger().setLevel(level)
+    if not root.handlers:
+        # Stream handler (stdout/stderr -> container logs)
+        sh = logging.StreamHandler()
+        sh.setLevel(level)
+        sh.setFormatter(logging.Formatter('[%(levelname)s] %(asctime)s %(name)s: %(message)s'))
+        root.addHandler(sh)
+
+        # Always add a daily rotating file handler; paths and filename are fixed.
+        log_dir = get_log_dir()
+        log_file_name = LOG_FILE_NAME
+        try:
+            os.makedirs(log_dir, exist_ok=True)
+            from logging.handlers import TimedRotatingFileHandler
+            fh = TimedRotatingFileHandler(
+                filename=os.path.join(log_dir, log_file_name),
+                when='midnight',
+                backupCount=0,
+                encoding='utf-8'
+            )
+            fh.setLevel(level)
+            fh.setFormatter(logging.Formatter('[%(levelname)s] %(asctime)s %(name)s: %(message)s'))
+            root.addHandler(fh)
+        except Exception as e:
+            # If file logging cannot be set up, log a warning to the stream handler
+            root.warning("Failed to configure file logging (LOG_DIR=%s): %s", log_dir, e)
+
+    root.setLevel(level)
 
 
 def get_logger(name=None):
     """Return a logger for the given name (or the module logger if none)."""
     return logging.getLogger(name if name else __name__)
 
+
+# Helpers for per-job logging
+class StreamToLogger:
+    """File-like object that redirects writes to a logger instance.
+
+    Usage:
+        job_logger, handler = get_job_logger(archive_id, archive_name)
+        sys.stdout = StreamToLogger(job_logger, level=logging.INFO)
+        sys.stderr = StreamToLogger(job_logger, level=logging.ERROR)
+    """
+    def __init__(self, logger, level=logging.INFO):
+        self.logger = logger
+        self.level = level
+        self._buf = ''
+
+    def write(self, buf):
+        try:
+            if not buf:
+                return
+            self._buf += str(buf)
+            while '\n' in self._buf:
+                line, self._buf = self._buf.split('\n', 1)
+                if line:
+                    self.logger.log(self.level, line)
+        except Exception:
+            pass
+
+    def flush(self):
+        if self._buf:
+            try:
+                self.logger.log(self.level, self._buf)
+            except Exception:
+                pass
+            self._buf = ''
+
+
+def get_job_logger(archive_id, archive_name, log_path: str | None = None, level=logging.INFO):
+    """Create or return a per-archive job logger.
+
+    - Default log path: <LOG_DIR>/jobs/<archive_id>_<archive_name>.log
+    - Returns (logger, handler) where handler may be None if an existing handler
+      for the same path was already attached.
+    """
+    import os
+    from logging.handlers import TimedRotatingFileHandler
+
+    safe_name = filename_safe(archive_name)
+    jobs_dir = os.path.join(get_log_dir(), 'jobs')
+    try:
+        os.makedirs(jobs_dir, exist_ok=True)
+    except Exception:
+        pass
+
+    if not log_path:
+        log_path = os.path.join(jobs_dir, f"{archive_id}_{safe_name}.log")
+
+    logger = logging.getLogger(f"job.{archive_id}_{safe_name}")
+    logger.setLevel(level)
+
+    # Check if a handler with the same filename is already present
+    abspath = os.path.abspath(log_path)
+    for h in list(logger.handlers):
+        try:
+            if getattr(h, 'baseFilename', None) == abspath:
+                return logger, None
+        except Exception:
+            continue
+
+    try:
+        handler = TimedRotatingFileHandler(filename=log_path, when='midnight', backupCount=0, encoding='utf-8')
+        handler.setFormatter(logging.Formatter('[%(levelname)s] %(asctime)s %(name)s: %(message)s'))
+        logger.addHandler(handler)
+        return logger, handler
+    except Exception:
+        # If handler creation fails, return logger with no handler (caller should fallback)
+        return logger, None
 
 
 def now():
@@ -129,9 +239,10 @@ def format_duration(seconds):
 # adjusted in one place if needed. They are intentionally NOT controlled via
 # environment variables to avoid accidental misconfiguration at runtime.
 ARCHIVES_PATH = '/archives'
-JOBS_LOG_DIR = '/var/log/archiver'
+LOG_FILE_NAME = 'app.log'
+LOG_DIR = '/var/log/archiver'
 DOWNLOADS_PATH = '/tmp/downloads'
-SENTINEL_DIR = '/tmp'
+SENTINEL_DIR = '/tmp'  
 
 
 def get_archives_path():
@@ -139,9 +250,13 @@ def get_archives_path():
     return ARCHIVES_PATH
 
 
-def get_jobs_log_dir():
-    """Return the canonical jobs log directory used by the application."""
-    return JOBS_LOG_DIR
+def get_log_dir():
+    """Return the canonical log directory used by the application.
+
+    The log directory is fixed to the constant `LOG_DIR` to avoid runtime
+    misconfiguration at runtime.
+    """
+    return LOG_DIR
 
 
 def get_downloads_path():
