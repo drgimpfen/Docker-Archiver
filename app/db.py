@@ -261,7 +261,6 @@ def init_db():
         cur.execute("""
             INSERT INTO settings (key, value) VALUES 
                 ('base_url', 'http://localhost:8080'),
-                ('apprise_urls', ''),
                 ('notify_on_success', 'true'),
                 ('notify_on_error', 'true'),
                 ('maintenance_mode', 'false'),
@@ -273,6 +272,12 @@ def init_db():
                 ('notify_on_cleanup', 'false'),
                 ('notify_attach_log', 'false'),
                 ('notify_attach_log_on_failure', 'false'),
+                ('smtp_server', ''),
+                ('smtp_port', '587'),
+                ('smtp_user', ''),
+                ('smtp_password', ''),
+                ('smtp_from', ''),
+                ('smtp_use_tls', 'true'),
                 ('apply_permissions', 'false'),
                 ('app_version', '0.7.0')
             ON CONFLICT (key) DO NOTHING;

@@ -71,23 +71,37 @@
             <div class="alert alert-warning">
                 <i class="bi bi-exclamation-triangle me-2"></i>
                 <strong>Email notifications not configured</strong><br>
-                To enable email notifications, add Apprise mailto/mailtos URLs in <strong>Apprise URLs</strong> (e.g., <code>mailto://user@example.com</code> or <code>mailtos://user:pass@smtp.example.com:587/?from=sender@example.com&amp;to=user@example.com</code>).
+                To enable email notifications, configure SMTP settings below and save the form. These values are stored in the application settings and persisted to the database.
+                See <a href="/README.md">README</a> for examples and deployment tips.
             </div>
             {% endif %}
-            
-            <div class="mb-3">
-                <label for="appriseUrls" class="form-label">Apprise URLs</label>
-                <textarea class="form-control" id="appriseUrls" name="apprise_urls" 
-                          rows="5" placeholder="One URL per line&#10;discord://webhook_id/webhook_token&#10;telegram://bot_token/chat_id">{{ settings.get('apprise_urls', '') }}</textarea>
-                <div class="form-text">
-                    Enter notification service URLs (one per line). See 
-                    <a href="https://github.com/caronc/apprise#supported-notifications" target="_blank">Apprise documentation</a> 
-                    for supported services.<br>
-                    <strong>Note:</strong> You can add <code>mailto://</code> or <code>mailtos://</code> URLs here to send email via Apprise (recommended for email delivery). Duplicate URLs will be automatically removed.
-                    Duplicate URLs will be automatically removed.<br>
-                    <em>If you need duplicate URLs or email via Apprise, please open an 
-                    <a href="https://github.com/drgimpfen/Docker-Archiver/issues" target="_blank">Issue</a> or 
-                    <a href="https://github.com/drgimpfen/Docker-Archiver/discussions" target="_blank">Discussion</a> on GitHub.</em>
+
+            <div class="row g-3 mb-3">
+                <div class="col-12 col-md-6">
+                    <label for="smtpServer" class="form-label">SMTP Server</label>
+                    <input type="text" class="form-control" id="smtpServer" name="smtp_server" value="{{ settings.get('smtp_server', '') }}">
+                </div>
+                <div class="col-6 col-md-2">
+                    <label for="smtpPort" class="form-label">SMTP Port</label>
+                    <input type="text" class="form-control" id="smtpPort" name="smtp_port" value="{{ settings.get('smtp_port', '587') }}">
+                </div>
+                <div class="col-12 col-md-4">
+                    <label for="smtpFrom" class="form-label">From (sender)</label>
+                    <input type="email" class="form-control" id="smtpFrom" name="smtp_from" value="{{ settings.get('smtp_from', '') }}">
+                </div>
+                <div class="col-12 col-md-6">
+                    <label for="smtpUser" class="form-label">SMTP User (optional)</label>
+                    <input type="text" class="form-control" id="smtpUser" name="smtp_user" value="{{ settings.get('smtp_user', '') }}">
+                </div>
+                <div class="col-12 col-md-6">
+                    <label for="smtpPassword" class="form-label">SMTP Password (optional)</label>
+                    <input type="password" class="form-control" id="smtpPassword" name="smtp_password" value="{{ settings.get('smtp_password', '') }}">
+                </div>
+                <div class="col-12">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="smtpUseTls" name="smtp_use_tls" {% if settings.get('smtp_use_tls', 'true') == 'true' %}checked{% endif %}>
+                        <label class="form-check-label" for="smtpUseTls">Use TLS (STARTTLS)</label>
+                    </div>
                 </div>
             </div>
 

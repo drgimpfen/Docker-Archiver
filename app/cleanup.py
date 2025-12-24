@@ -6,7 +6,8 @@ import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
 from app.db import get_db
-from app.notifications import get_setting, get_apprise_instance, get_subject_with_tag, strip_html_tags
+from app.notifications import get_setting, get_subject_with_tag, strip_html_tags
+from app.notifications.core import get_user_emails
 from app import utils
 from app.utils import setup_logging, get_logger, format_bytes
 
@@ -799,12 +800,6 @@ def send_cleanup_notification(orphaned_stats, log_stats, unreferenced_dirs_stats
         # Debug log to assist with dry-run notification troubleshooting
         logger.info("[Cleanup] Sending cleanup notification (%s)", 'DRY RUN' if is_dry_run else 'LIVE')
 
-        apobj = get_apprise_instance()
-        if not apobj:
-            logger.info("[Cleanup] No apprise URLs configured; skipping notification")
-            return
-
-        import apprise
         mode = "🧪 DRY RUN" if is_dry_run else "✅"
         
         # Build message
@@ -825,6 +820,18 @@ def send_cleanup_notification(orphaned_stats, log_stats, unreferenced_dirs_stats
 </ul>
 """
 
+        # Send via SMTP
+        try:
+            from app.notifications.adapters import SMTPAdapter
+            smtp_adapter = SMTPAdapter() if get_setting('smtp_server') else None
+            if not smtp_adapter:
+                logger.info("[Cleanup] SMTP not configured; skipping notification")
+                return
+            res = smtp_adapter.send(title, body, body_format=None, attach=None, recipients=get_user_emails(), context='cleanup')
+            if not res.success:
+                logger.error("[Cleanup] SMTP send failed: %s", res.detail)
+        except Exception as e:
+            logger.exception("Failed to send cleanup notification: %s", e)
         # If the cleanup removed individual log files, append a concise list
         deleted_files = log_stats.get('deleted_files', []) or []
         if deleted_files:
@@ -921,21 +928,6 @@ def send_cleanup_notification(orphaned_stats, log_stats, unreferenced_dirs_stats
         except Exception:
             pass
 
-        # Get format preference from notifications module
-        body_format = get_notification_format()
-        
-        # Convert to plain text if needed
-        if body_format == apprise.NotifyFormat.TEXT:
-            body = strip_html_tags(body)
-        
-        apobj.notify(
-            body=body,
-            title=title,
-            body_format=body_format
-        )
-        
-    except Exception as e:
-        logger.exception("[Cleanup] Failed to send notification: %s", e)
 
 
 if __name__ == '__main__':

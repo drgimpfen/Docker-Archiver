@@ -96,6 +96,14 @@ docker compose up -d --build
 1. Browse to http://your-server:8080
 2. Create admin account
 3. Configure first archive
+4. Configure SMTP for notifications
+
+   * Go to **Settings → Notifications** in the web UI
+   * Set **SMTP Server**, **SMTP Port**, **SMTP Username/Password** (if required), **From address** and toggle **Use TLS** as needed
+   * Optionally add recipient addresses in user profiles or in the Notifications defaults
+   * Use the **Send Test Notification** button to validate delivery
+
+   Note: SMTP settings are stored in the application database (Settings) and are not configured via environment variables. This avoids leaking credentials in the environment and makes runtime changes available via the web UI.
 
 ## Production Hardening
 

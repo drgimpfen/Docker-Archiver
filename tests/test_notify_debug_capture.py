@@ -3,9 +3,9 @@ from app.notifications.adapters.generic import _notify_with_retry
 
 class FakeAp:
     def notify(self, **kwargs):
-        # Simulate an Apprise plugin that logs debug about the response
-        import apprise
-        apprise.logger.debug("Response Details:\n{'error':'unsupported_parameter','detail':'field X is not supported'}")
+        # Simulate a plugin that logs debug about the response using the 'apprise' logger name
+        import logging
+        logging.getLogger('apprise').debug("Response Details:\n{'error':'unsupported_parameter','detail':'field X is not supported'}")
         return False
 
 

@@ -15,7 +15,7 @@ bcrypt==4.1.2
 APScheduler==3.10.4
 
 # Notifications
-apprise==1.7.1
+# Apprise removed; email delivery uses built-in SMTP configured in the app Settings (stored in the DB)
 
 # Docker client (for status checks)
 docker==7.0.0

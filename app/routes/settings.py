@@ -13,35 +13,6 @@ from app.utils import format_mode
 bp = Blueprint('settings', __name__, url_prefix='/settings')
 
 
-def validate_apprise_urls(urls_text):
-    """
-    Validate and clean Apprise URLs:
-    - Remove duplicate URLs
-    - Return tuple: (cleaned_urls_string, blocked_count, duplicate_count)
-    """
-    if not urls_text:
-        return '', 0, 0
-    
-    valid_urls = []
-    seen_urls = set()
-    blocked_count = 0
-    duplicate_count = 0
-    
-    for url in urls_text.strip().split('\n'):
-        url = url.strip()
-        if not url:
-            continue
-        
-        # Check for duplicates (case-insensitive)
-        url_lower = url.lower()
-        if url_lower in seen_urls:
-            duplicate_count += 1
-            continue
-        
-        seen_urls.add(url_lower)
-        valid_urls.append(url)
-    
-    return '\n'.join(valid_urls), blocked_count, duplicate_count
 
 
 @bp.route('/', methods=['GET', 'POST'])
@@ -52,7 +23,6 @@ def manage_settings():
         try:
             # Update settings
             base_url = request.form.get('base_url', 'http://localhost:8080')
-            apprise_urls_raw = request.form.get('apprise_urls', '')
             notification_subject_tag = request.form.get('notification_subject_tag', '')
             notify_success = request.form.get('notify_success') == 'on'
             notify_error = request.form.get('notify_error') == 'on'
@@ -61,13 +31,6 @@ def manage_settings():
             notify_attach_log = request.form.get('notify_attach_log') == 'on'
             notify_attach_log_on_failure = request.form.get('notify_attach_log_on_failure') == 'on'
             apply_permissions = request.form.get('apply_permissions') == 'on'
-            
-            # Validate and clean Apprise URLs
-            apprise_urls, blocked_count, duplicate_count = validate_apprise_urls(apprise_urls_raw)
-            
-            # Inform user about duplicates removed
-            if duplicate_count > 0:
-                flash(f'ℹ️ {duplicate_count} duplicate URL(s) removed.', 'info')
             
             maintenance_mode = request.form.get('maintenance_mode') == 'on'
             max_token_downloads = request.form.get('max_token_downloads', '3')
@@ -88,9 +51,16 @@ def manage_settings():
 
             with get_db() as conn:
                 cur = conn.cursor()
+                # Read SMTP settings from form
+                smtp_server = request.form.get('smtp_server', '').strip()
+                smtp_port = request.form.get('smtp_port', '').strip()
+                smtp_user = request.form.get('smtp_user', '').strip()
+                smtp_password = request.form.get('smtp_password', '').strip()
+                smtp_from = request.form.get('smtp_from', '').strip()
+                smtp_use_tls = 'true' if request.form.get('smtp_use_tls') == 'on' else 'false'
+
                 settings_to_update = [
                     ('base_url', base_url),
-                    ('apprise_urls', apprise_urls),
                     ('notification_subject_tag', notification_subject_tag),
                     ('notify_on_success', 'true' if notify_success else 'false'),
                     ('notify_on_error', 'true' if notify_error else 'false'),
@@ -103,6 +73,12 @@ def manage_settings():
                     ('notify_on_cleanup', 'true' if notify_cleanup else 'false'),
                     ('notify_attach_log', 'true' if notify_attach_log else 'false'),
                     ('notify_attach_log_on_failure', 'true' if notify_attach_log_on_failure else 'false'),
+                    ('smtp_server', smtp_server),
+                    ('smtp_port', smtp_port),
+                    ('smtp_user', smtp_user),
+                    ('smtp_password', smtp_password),
+                    ('smtp_from', smtp_from),
+                    ('smtp_use_tls', smtp_use_tls),
                     ('apply_permissions', 'true' if apply_permissions else 'false'),
                 ]
                 
@@ -140,10 +116,8 @@ def manage_settings():
         for row in cur.fetchall():
             settings_dict[row['key']] = row['value']
     
-    # Check if email is configured via Apprise mailto/mailtos URLs in settings
-    apprise_urls = settings_dict.get('apprise_urls', '')
-    email_configured = any((u.strip().lower().startswith('mailto') or u.strip().lower().startswith('mailtos')) for u in apprise_urls.split('\n') if u.strip())
-
+    # Check if email is configured via SMTP settings stored in DB
+    email_configured = bool(settings_dict.get('smtp_server') and settings_dict.get('smtp_from'))
     return render_template(
         'settings.html',
         settings=settings_dict,

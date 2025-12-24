@@ -282,20 +282,24 @@ def _prepare_folder_download(token, folder_path, stack_name, user_email):
             conn.commit()
         if user_email:
             try:
-                from app.notifications import get_apprise_instance, get_notification_format, get_logger
+                # Send direct email via SMTP to the provided user_email
+                from app.notifications.adapters import SMTPAdapter
+                from app.utils import get_logger
                 logger = get_logger(__name__)
-                apobj = get_apprise_instance()
-                if apobj:
+                from app.notifications.core import get_setting
+                smtp_adapter = SMTPAdapter() if get_setting('smtp_server') else None
+                if not smtp_adapter:
+                    logger.warning('SMTP not configured; cannot send download notification to %s', user_email)
+                else:
                     base_url = _get_base_url()
                     download_url = f"{base_url}/download/{token}"
                     body = f"""<h2>Your archive is ready for download</h2>
 <p><strong>Stack:</strong> {stack_name}</p>
 <p><a href=\"{download_url}\">Download Archive</a></p>
 <p><small>This link will expire in 24 hours</small></p>"""
-                    body_format = get_notification_format()
-                    ok = apobj._notify(apobj, "📦 Archive Download Ready", body, body_format, context=f'download_{token}')
-                    if not ok:
-                        logger.warning("Apprise: notify returned False for download token %s", token)
+                    res = smtp_adapter.send("📦 Archive Download Ready", body, body_format=None, attach=None, recipients=[user_email], context=f'download_{token}')
+                    if not res.success:
+                        logger.error('Failed to send download email to %s: %s', user_email, res.detail)
             except Exception as e:
                 from app.utils import get_logger
                 get_logger(__name__).exception("Failed to send download notification: %s", e)

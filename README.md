@@ -19,7 +19,7 @@
 - 🧹 **Automatic Cleanup** - Scheduled cleanup of orphaned archives, old logs, and temp files
 - 🎯 **Dry Run Mode** - Test archive operations without making changes
 - 📊 **Job History & Live Logs** - Detailed logs and metrics for all archive/retention runs; **Job Details** includes live log tailing (polls `/api/jobs/<id>/log/tail`) and supports EventSource streaming for near real-time updates. The modal offers terminal-like controls (search, **Pause/Resume**, **Copy**, **Download**, **Line numbers**) for easier log inspection and troubleshooting.
-- 🔔 **Smart Notifications** - Apprise integration with customizable subject tags and HTML/text format
+- 🔔 **Smart Notifications** - Email via SMTP (configured in **Settings → Notifications**; settings are stored in the database)
 - 🌓 **Dark/Light Mode** - Modern Bootstrap UI with theme toggle
 - 🔐 **User Authentication** - Secure login system (role-based access coming soon)
 - 💾 **Multiple Formats** - Support for tar, tar.gz, tar.zst, or folder output
@@ -324,7 +324,7 @@ This ensures job logs and cleanup summaries are available on the host for inspec
 
 If you cannot find notification output (e.g., Discord, Email) in the normal container logs, check the job log files under `/var/log/archiver` — scheduled and detached jobs write their stdout/stderr to job log files there.
 
-Why? Scheduled archive jobs are executed as detached subprocesses (see `app.run_job`) and their stdout/stderr are redirected into separate log files so the job can run independently of the web worker process. For this reason you will often find the notification traces (Apprise logs) in those logs rather than in the central `docker compose logs` output.
+Why? Scheduled archive jobs are executed as detached subprocesses (see `app.run_job`) and their stdout/stderr are redirected into separate log files so the job can run independently of the web worker process. For this reason you will often find notification traces in those logs rather than in the central `docker compose logs` output.
 
 Quick commands (run on host):
 
@@ -337,7 +337,7 @@ docker compose exec -T app ls -ltr /var/log/archiver | tail -n 10
 - Tail a specific job log and filter for notification entries:
 
 ```bash
-docker compose exec -T app tail -n 300 /var/log/archiver/<JOB_LOG_FILE>.log | grep -E "Notifications:|Apprise:|Sent Discord|Sent Email"
+docker compose exec -T app tail -n 300 /var/log/archiver/<JOB_LOG_FILE>.log | grep -E "Notifications:|Sent Email"
 ```
 
 - Follow central app logs (shows what the web worker emits):
@@ -357,9 +357,9 @@ docker compose exec -T app python -c "from app.main import app; ctx=app.app_cont
 What to look for in logs:
 
 - `Notifications: send_archive_notification called ...` — entry point from the archiver into the notifications code
-- `Apprise: added URL: ...` — Apprise service URL(s) that were configured and accepted
-- `apprise: Sent Discord notification.` and `apprise: Sent Email notification ...` — service-level success messages
-- `Apprise: notification failed` / exception traces — indicates a problem sending to one or more services (check webhook validity, network access, rate limits)
+- `Notifications: added target ...` — notification targets that were configured and accepted
+- `Notifications: Sent Email ...` — email delivery success messages
+- `Notifications: notification failed` / exception traces — indicates a problem sending an email (check SMTP credentials, network access, recipient validity)
 
 Tips:
 
@@ -391,51 +391,28 @@ Examples:
 
 ## Notifications
 
-Docker Archiver uses [Apprise](https://github.com/caronc/apprise) for notifications.
+Docker Archiver sends notifications via **email (SMTP)** only. SMTP settings are configured in the web UI under **Settings → Notifications** and are stored in the application database (not via environment variables).
 
-### Supported Services
+### SMTP Settings (in the UI)
 
-- Discord
-- Telegram
-- Email (via Apprise mailto/mailtos)
-- Slack
-- Pushover
-- Gotify
-- And [100+ more](https://github.com/caronc/apprise#supported-notifications)
+- **SMTP Server** — Hostname or IP of your SMTP server (`smtp_server`)
+- **SMTP Port** — TCP port for SMTP (`smtp_port`, commonly `587`)
+- **SMTP Username** — Username for SMTP authentication (optional)
+- **SMTP Password** — Password for SMTP authentication (optional)
+- **From address** — The sender `From:` address used for outgoing messages (`smtp_from`)
+- **Use TLS** — Toggle to use STARTTLS for the SMTP connection (`smtp_use_tls`)
 
-### Setup
+Recipients are taken from user profile email addresses or from configured default recipient settings in the Notifications page.
 
-**Option 1: Apprise URLs (Recommended)**
-1. Go to **Settings** → **Notifications**
-2. Add Apprise URLs (one per line):
-   ```
-   discord://webhook_id/webhook_token
-   telegram://bot_token/chat_id
-   mailto://user@example.com
-   mailtos://user:pass@smtp.example.com:587/?from=sender@example.com&to=user@example.com
-   ```
-   **Note:** `mailto://` and `mailtos://` URLs are supported — add them here to send email via Apprise. 
-3. Select which events to notify:
-   - Archive Success
-   - Archive Error
-   - Retention Cleanup
-   - Cleanup Task
-4. Optional: Add subject tag prefix (e.g., `[Production]`, `[TEST]`)
-5. Optional: Toggle between HTML and Plain Text format
-6. Test your configuration with the "Send Test Notification" button
-7. Save settings
+### Notification Options
 
-**Notification options**
+- **Report verbosity** — Choose **Full** (default) or **Short** reports. Full includes a detailed HTML report with tables; Short sends a concise summary suitable for chat-like channels.
+- **Attach full job log** — When enabled, the full job log will be attached as a downloadable `.log` file instead of being inlined in the message.
+- **Attach log on failures only** — When enabled, the log is attached only when the job had failures.
+- **Subject tag** — Optional prefix (e.g., `[Production]`, `[TEST]`) to add to the message subject.
+- **Send Test Notification** — Use this button on the Notifications page to validate your SMTP settings and recipient delivery.
 
-- **Report verbosity** — Choose between **Full** (default) and **Short** reports. Full includes the detailed HTML report with tables and (optionally) the full job log; Short sends a concise summary suitable for chat notifications.
-- **Attach full job log** — When enabled, the full job log will be attached as a downloadable `.log` file instead of inlining it in the email. Useful for very large logs or when you prefer attachments.
-- **Attach log on failures only** — If enabled, the log will only be attached when the job had failures (overrides attaching-on-success behavior). These settings are configurable on the Notifications settings page and default to `Full` verbosity with no attachment.
-
-**Email delivery (via Apprise mailto URLs)**
-1. Add email delivery URLs (e.g., `mailto://user@example.com` or `mailtos://user:pass@smtp.example.com:587/?from=sender@example.com&to=user@example.com`) to **Settings → Notifications → Apprise URLs**.
-2. Optionally add recipient email addresses in user profiles if you want per-user delivery targets (these must be added to Apprise URLs to be used).
-
-**Note:** For email delivery, prefer Apprise `mailto://` or `mailtos://` URLs. Avoid adding duplicate recipients via multiple transport URLs to prevent duplicate notifications.
+**Note:** Non-email transports (Apprise, Discord, etc.) are no longer supported — the app sends notifications via SMTP only. If you previously used Apprise URLs, migrate those recipient addresses into user profiles or the Notifications page accordingly.
 
 ## API Documentation
 
@@ -579,7 +556,7 @@ Docker-Archiver/
 │   ├── stacks.py            # Stack discovery
 │   ├── scheduler.py         # APScheduler integration
 │   ├── downloads.py         # Download token system
-│   ├── notifications.py     # Apprise/SMTP notifications
+│   ├── notifications.py     # Notifications (SMTP-only)
 │   ├── utils.py             # Utility functions
 │   ├── templates/           # Jinja2 templates
 │   │   ├── base.html        # Base layout with navigation
