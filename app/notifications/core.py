@@ -55,7 +55,15 @@ def get_notification_format():
     return apprise.NotifyFormat.HTML if html_enabled else apprise.NotifyFormat.TEXT
 
 
-from .formatters import strip_html_tags, build_compact_text, split_section_by_length
+from .formatters import (
+    strip_html_tags,
+    build_compact_text,
+    split_section_by_length,
+    build_short_body,
+    build_full_body,
+    build_sections,
+    build_section_html,
+)
 
 
 def get_apprise_instance():
@@ -179,24 +187,6 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
         # Check if any stacks have named volumes
         stacks_with_volumes = [m for m in stack_metrics if m.get('named_volumes')]
         
-        # Header & visual styles
-        css = """
-        <style>
-        .da-table { width: 100%; border-collapse: collapse; font-family: monospace; }
-        .da-table th, .da-table td { padding: 6px 8px; border-bottom: 1px solid #eee; text-align: left; }
-        .da-badge-ok { color: #155724; background: #d4edda; padding: 2px 6px; border-radius: 4px; }
-        .da-badge-fail { color: #721c24; background: #f8d7da; padding: 2px 6px; border-radius: 4px; }
-        .da-small { font-size: 90%; color: #666; }
-        </style>
-        """
-
-        body = f"""
-{css}
-<div style='font-family: Arial, Helvetica, sans-serif; max-width:800px; margin:0; text-align:left; color:#222;'>
-  <h2 style='margin-bottom:6px;'>{status_emoji} Archive job completed: <strong>{archive_name}</strong></h2>
-  <p class='da-small'><strong>Stacks:</strong> {success_count}/{stack_count} successful &nbsp;|&nbsp; <strong>Total size:</strong> {size_str} &nbsp;|&nbsp; <strong>Duration:</strong> {duration_str}</p>
-"""
-
         # Created archives table (alphabetical by filename)
         created_archives = []
         for m in stack_metrics:
@@ -205,47 +195,7 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
             if path:
                 created_archives.append({'path': str(path), 'size': size})
 
-        if created_archives:
-            created_archives.sort(key=lambda x: x['path'].split('/')[-1].lower())
-            body += """
-  <h3>SUMMARY OF CREATED ARCHIVES</h3>
-  <table class='da-table'>
-    <thead><tr><th style='width:110px;'>Size</th><th>Filename</th></tr></thead>
-    <tbody>
-"""
-            for a in created_archives:
-                body += f"    <tr><td>{format_bytes(a['size'])}</td><td><code>{a['path']}</code></td></tr>\n"
-            body += f"  </tbody></table>\n  <p class='da-small'><strong>Total:</strong> {format_bytes(total_size)}</p>\n"
-        else:
-            body += "  <p><em>No archives were created.</em></p>\n"
-
-        # Disk usage
-        try:
-            disk = get_disk_usage()
-            if disk and disk['total']:
-                body += """
-  <h3>DISK USAGE (on /archives)</h3>
-  <p class='da-small'>
-"""
-                body += f"    Total: <strong>{format_bytes(disk['total'])}</strong> &nbsp; Used: <strong>{format_bytes(disk['used'])}</strong> ({disk['percent']:.0f}% used)\n"
-                try:
-                    import os
-                    total_archives_size = 0
-                    for root, dirs, files in os.walk(get_archives_path()):
-                        for fn in files:
-                            fp = os.path.join(root, fn)
-                            try:
-                                total_archives_size += os.path.getsize(fp)
-                            except Exception:
-                                continue
-                    body += f"  <br>Backup Content Size (/archives): <strong>{format_bytes(total_archives_size)}</strong>\n"
-                except Exception:
-                    pass
-                body += "  </p>\n"
-        except Exception:
-            pass
-
-        # Retention summary
+        # Fetch job retention/log info
         try:
             with get_db() as conn:
                 cur = conn.cursor()
@@ -253,79 +203,29 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
                 job_row = cur.fetchone()
                 reclaimed = job_row.get('reclaimed_bytes') if job_row else None
                 job_log = job_row.get('log') if job_row else ''
-
-            body += """
-  <h3>RETENTION SUMMARY</h3>
-  <p class='da-small'>
-"""
-            if reclaimed is None:
-                body += "    No retention information available.\n"
-            elif reclaimed == 0:
-                import re
-                m = re.search(r"Local cleanup finished\.[^\n]*", job_log or '')
-                if m:
-                    body += f"    {m.group(0)}\n"
-                else:
-                    body += "    No archives older than configured retention were deleted.\n"
-            else:
-                body += f"    Freed space: <strong>{format_bytes(reclaimed)}</strong>\n"
-            body += "  </p>\n"
         except Exception:
-            pass
+            reclaimed = None
+            job_log = ''
 
-        # Stacks processed table
-        body += """
-  <h3>STACKS PROCESSED</h3>
-  <table class='da-table'>
-    <thead><tr><th>Stack</th><th>Status</th><th>Size</th><th>Archive</th></tr></thead>
-    <tbody>
-"""
-        for metric in stack_metrics:
-            stack_name = metric['stack_name']
-            status_ok = metric['status'] == 'success'
-            status_html = f"<span class='{'da-badge-ok' if status_ok else 'da-badge-fail'}'>{'✓' if status_ok else '✗'}</span>"
-            stack_size_str = format_bytes(metric.get('archive_size_bytes') or 0)
-            archive_path = metric.get('archive_path') or ''
-            body += f"    <tr><td>{stack_name}</td><td>{status_html}</td><td>{stack_size_str}</td><td><code>{archive_path or 'N/A'}</code></td></tr>\n"
-        body += "  </tbody></table>\n"
+        # Build HTML body using helpers
+        body = build_full_body(
+            archive_name=archive_name,
+            status_emoji=status_emoji,
+            success_count=success_count,
+            stack_count=stack_count,
+            size_str=size_str,
+            duration_str=duration_str,
+            stack_metrics=stack_metrics,
+            created_archives=created_archives,
+            total_size=total_size,
+            reclaimed=reclaimed,
+            job_log=job_log,
+            base_url=base_url,
+            stacks_with_volumes=stacks_with_volumes,
+            job_id=job_id,
+            include_log_inline=True,
+        )
 
-        # Named volumes warning block
-        if stacks_with_volumes:
-            body += """
-  <hr>
-  <h4 style='color:orange;'>⚠️ Named Volumes Warning</h4>
-  <p class='da-small'>Named volumes are NOT included in the backup archives. Consider backing them up separately.</p>
-  <ul>
-"""
-            for metric in stacks_with_volumes:
-                volumes = metric['named_volumes']
-                body += f"    <li><strong>{metric['stack_name']}:</strong> {', '.join(volumes)}</li>\n"
-            body += "  </ul>\n"
-
-        # Full log (always expanded unless log will be attached)
-        try:
-            if job_row and job_row.get('log'):
-                # Determine if the log will be attached instead of inlined
-                attach_log_setting = get_setting('notify_attach_log', 'false').lower() == 'true'
-                attach_on_failure_setting = get_setting('notify_attach_log_on_failure', 'false').lower() == 'true'
-                should_attach_log = attach_log_setting or (attach_on_failure_setting and failed_count > 0)
-
-                if not should_attach_log:
-                    body += """
-  <hr>
-  <h3>Full job log</h3>
-  <pre style='background:#f7f7f7;padding:10px;border-radius:6px;white-space:pre-wrap;'>\n"""
-                    body += (job_row.get('log') or '') + "\n"
-                    body += "  </pre>\n"
-                else:
-                    # If log will be attached, omit the inline log to avoid duplication
-                    body += "\n"
-        except Exception:
-            pass
-
-        # Footer
-        body += f"<p class='da-small'><a href=\"{base_url}/history?job={job_id}\">View details</a> &nbsp;|&nbsp; Docker Archiver: <a href=\"{base_url}\">{base_url}</a></p>"
-        
         # Get format preference and user settings
         body_format = get_notification_format()
         verbosity = get_setting('notify_report_verbosity', 'full')
@@ -334,22 +234,37 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
 
         # If user chose short verbosity, construct compact message
         if verbosity == 'short':
-            short_body = f"<h2>{status_emoji} Archive: <strong>{archive_name}</strong></h2>\n"
-            short_body += f"<p class='da-small'><strong>Stacks:</strong> {success_count}/{stack_count} successful &nbsp;|&nbsp; <strong>Total:</strong> {size_str} &nbsp;|&nbsp; <strong>Duration:</strong> {format_duration(duration)}</p>\n"
-            # concise per-stack list
-            short_body += "<p>"
-            short_body += ", ".join([f"{m['stack_name']} ({format_bytes(m.get('archive_size_bytes') or 0)})" for m in stack_metrics])
-            short_body += "</p>\n"
-            short_body += f"<p><a href=\"{base_url}/history?job={job_id}\">View details</a></p>\n"
-            body_to_send = short_body
+            body_to_send = build_short_body(archive_name, status_emoji, success_count, stack_count, size_str, format_duration(duration), stack_metrics, base_url, job_id)
         else:
-            body_to_send = body
+            # If we will attach the full log, do not inline it in the HTML body
+            should_attach_log = attach_log_setting or (attach_on_failure_setting and failed_count > 0)
+            if should_attach_log:
+                body_to_send = build_full_body(
+                    archive_name=archive_name,
+                    status_emoji=status_emoji,
+                    success_count=success_count,
+                    stack_count=stack_count,
+                    size_str=size_str,
+                    duration_str=duration_str,
+                    stack_metrics=stack_metrics,
+                    created_archives=created_archives,
+                    total_size=total_size,
+                    reclaimed=reclaimed,
+                    job_log=job_log,
+                    base_url=base_url,
+                    stacks_with_volumes=stacks_with_volumes,
+                    job_id=job_id,
+                    include_log_inline=False,
+                )
+            else:
+                body_to_send = body
 
         # Convert to plain text if needed
         import apprise
         if body_format == apprise.NotifyFormat.TEXT:
             send_body = strip_html_tags(body_to_send)
         else:
+            send_body = body_to_send
             send_body = body_to_send
 
         # Optionally attach full job log as a file instead of inlining it
@@ -406,6 +321,11 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
             import tempfile
 
             # Use adapters for sending to avoid duplicating apprise logic.
+            # Detect Discord endpoints so we can instantiate a DiscordAdapter and
+            # separate them from other non-email services.
+            discord_urls = [u for u in non_email_urls if 'discord' in u.lower()]
+            other_non_email_urls = [u for u in non_email_urls if u not in discord_urls]
+
             from app.notifications.adapters import GenericAdapter, DiscordAdapter, MailtoAdapter
 
             # Instantiate adapters for the relevant URL sets
@@ -457,97 +377,12 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
                             finally:
                                 tf.close()
 
-                    # Build structured plain-text summary from available data (avoid CSS remnants)
+                    # Build structured plain-text summary using helper
                     try:
-                        lines = []
-                        lines.append(f"{status_emoji} Archive job completed: {archive_name}")
-                        lines.append(f"Stacks: {success_count}/{stack_count} successful  |  Total size: {size_str}  |  Duration: {duration_str}")
-                        lines.append("")
-
-                        # SUMMARY OF CREATED ARCHIVES
-                        if created_archives:
-                            lines.append("SUMMARY OF CREATED ARCHIVES")
-                            lines.append("")
-                            for a in created_archives:
-                                lines.append(f"{format_bytes(a['size'])} {a['path']}")
-                            lines.append("")
-                            lines.append(f"Total: {format_bytes(total_size)}")
-                            lines.append("")
-
-                        # DISK USAGE
-                        try:
-                            disk = get_disk_usage()
-                            if disk and disk['total']:
-                                lines.append("DISK USAGE (on /archives)")
-                                lines.append("")
-                                lines.append(f"Total: {format_bytes(disk['total'])}   Used: {format_bytes(disk['used'])} ({disk['percent']:.0f}% used)")
-                                # Attempt to compute backup content size if available
-                                try:
-                                    total_archives_size = 0
-                                    for root, dirs, files in __import__('os').walk(get_archives_path()):
-                                        for fn in files:
-                                            fp = __import__('os').path.join(root, fn)
-                                            try:
-                                                total_archives_size += __import__('os').path.getsize(fp)
-                                            except Exception:
-                                                continue
-                                    lines.append(f"Backup Content Size (/archives): {format_bytes(total_archives_size)}")
-                                except Exception:
-                                    pass
-                                lines.append("")
-                        except Exception:
-                            pass
-
-                        # RETENTION SUMMARY
-                        try:
-                            if reclaimed is None:
-                                lines.append("RETENTION SUMMARY")
-                                lines.append("")
-                                lines.append("No retention information available.")
-                                lines.append("")
-                            elif reclaimed == 0:
-                                lines.append("RETENTION SUMMARY")
-                                lines.append("")
-                                lines.append("No archives older than configured retention were deleted.")
-                                lines.append("")
-                            else:
-                                lines.append("RETENTION SUMMARY")
-                                lines.append("")
-                                lines.append(f"Freed space: {format_bytes(reclaimed)}")
-                                lines.append("")
-                        except Exception:
-                            pass
-
-                        # STACKS PROCESSED
-                        if stack_metrics:
-                            lines.append("STACKS PROCESSED")
-                            lines.append("")
-                            for metric in stack_metrics:
-                                ok = '✓' if metric.get('status') == 'success' else '✗'
-                                st_size = format_bytes(metric.get('archive_size_bytes') or 0)
-                                archive_p = metric.get('archive_path') or 'N/A'
-                                lines.append(f"{metric['stack_name']} {ok} {st_size} {archive_p}")
-                            lines.append("")
-
-                        # Named volumes warning
-                        if stacks_with_volumes:
-                            lines.append("⚠️ Named Volumes Warning")
-                            lines.append("Named volumes are NOT included in the backup archives. Consider backing them up separately.")
-                            lines.append("")
-                            for metric in stacks_with_volumes:
-                                volumes = metric.get('named_volumes') or []
-                                lines.append(f"{metric['stack_name']}: {', '.join(volumes)}")
-                            lines.append("")
-
-                        compact_text = "\n".join(lines)
-
-                        # Truncate to safe size for chat services (Discord message limit ~2000 chars)
-                        max_len = 1800
-                        if len(compact_text) > max_len:
-                            compact_text = compact_text[:max_len] + "\n\n[Message truncated; full log attached]"
-
+                        compact_text, lines = build_compact_text(archive_name, stack_metrics, created_archives, total_size, size_str, duration_str, stacks_with_volumes, reclaimed, base_url)
                     except Exception:
                         compact_text = f"Archive job completed: {archive_name}. See details: {base_url}/history?job={job_id}"
+                        lines = [compact_text]
 
                     # Send plain-text + attachment to non-email services
                     # Detect Discord endpoints so we can split into multipart messages by section when needed
@@ -568,108 +403,17 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
                             emb_opts = {'color': status_color, 'footer': footer_text, 'fields': embed_fields}
 
                             max_len = 1800
-                            if len(compact_text) <= max_len:
-                                # Send the full HTML body via Discord adapter to ensure Apprise renders rich embeds
-                                res = discord_adapter.send(title, send_body, body_format=__import__('apprise').NotifyFormat.HTML, attach=attach_for_non_email, context=f'non_email_{archive_name}_{job_id}', embed_options=emb_opts)
-                                if res.success:
-                                    logger.info("Discord adapter: sent embed notification to Discord for archive=%s job=%s", archive_name, job_id)
+                            # Delegate all Discord sending to the centralized helper (handles single and sectioned sends)
+                            try:
+                                from app.notifications.discord_dispatch import send_to_discord
+                                sections = build_sections(archive_name, lines, created_archives, total_size, stack_metrics, stacks_with_volumes, reclaimed, base_url, job_id)
+                                result = send_to_discord(discord_adapter, title, body_to_send, compact_text, sections, attach_for_non_email, embed_options=emb_opts, max_desc=NOTIFY_EMBED_DESC_MAX)
+                                if result.get('sent_any'):
+                                    logger.info("Discord adapter: sent notifications to Discord for archive=%s job=%s", archive_name, job_id)
                                 else:
-                                    logger.error("Discord adapter: embed send failed for archive=%s job=%s: %s", archive_name, job_id, res.detail)
-                            else:
-                                # Build section blocks
-                                sections = []
-                                # Header and summary
-                                sections.append('\n'.join(lines[0:2]))
-                                # Optional blocks
-                                idx = 2
-                                if created_archives:
-                                    s = ['SUMMARY OF CREATED ARCHIVES', '']
-                                    for a in created_archives:
-                                        s.append(f"{format_bytes(a['size'])} {a['path']}")
-                                    s.append('')
-                                    s.append(f"Total: {format_bytes(total_size)}")
-                                    sections.append('\n'.join(s))
-                                # Disk usage block
-                                try:
-                                    disk = get_disk_usage()
-                                    if disk and disk['total']:
-                                        s = ['DISK USAGE (on /archives)', '', f"Total: {format_bytes(disk['total'])}   Used: {format_bytes(disk['used'])} ({disk['percent']:.0f}% used)"]
-                                        try:
-                                            total_archives_size = 0
-                                            for root, dirs, files in __import__('os').walk(get_archives_path()):
-                                                for fn in files:
-                                                    fp = __import__('os').path.join(root, fn)
-                                                    try:
-                                                        total_archives_size += __import__('os').path.getsize(fp)
-                                                    except Exception:
-                                                        continue
-                                            s.append(f"Backup Content Size (/archives): {format_bytes(total_archives_size)}")
-                                        except Exception:
-                                            pass
-                                        sections.append('\n'.join(s))
-                                except Exception:
-                                    pass
-                                # Retention
-                                try:
-                                    if reclaimed is None:
-                                        sections.append('RETENTION SUMMARY\n\nNo retention information available.')
-                                    elif reclaimed == 0:
-                                        sections.append('RETENTION SUMMARY\n\nNo archives older than configured retention were deleted.')
-                                    else:
-                                        sections.append(f'RETENTION SUMMARY\n\nFreed space: {format_bytes(reclaimed)}')
-                                except Exception:
-                                    pass
-                                # Stacks processed
-                                if stack_metrics:
-                                    s = ['STACKS PROCESSED', '']
-                                    for metric in stack_metrics:
-                                        ok = '✓' if metric.get('status') == 'success' else '✗'
-                                        st_size = format_bytes(metric.get('archive_size_bytes') or 0)
-                                        archive_p = metric.get('archive_path') or 'N/A'
-                                        s.append(f"{metric['stack_name']} {ok} {st_size} {archive_p}")
-                                    sections.append('\n'.join(s))
-                                # Named volumes
-                                if stacks_with_volumes:
-                                    s = ['⚠️ Named Volumes Warning', 'Named volumes are NOT included in the backup archives. Consider backing them up separately.', '']
-                                    for metric in stacks_with_volumes:
-                                        volumes = metric.get('named_volumes') or []
-                                        s.append(f"{metric['stack_name']}: {', '.join(volumes)}")
-                                    sections.append('\n'.join(s))
-                                # Footer
-                                sections.append(f"View details: {base_url}/history?job={job_id}")
-
-                                sent_any = False
-                                try:
-                                    max_desc = NOTIFY_EMBED_DESC_MAX
-                                    for sec in sections:
-                                        parts = split_section_by_length(sec, max_desc)
-                                        for idx, part in enumerate(parts):
-                                            sec_lines = part.split('\n')
-                                            sec_title = sec_lines[0] if sec_lines else f"{archive_name}"
-                                            sec_body = '\n'.join(sec_lines[1:]).strip() if len(sec_lines) > 1 else ''
-
-                                            # Attach log only on final part of final section
-                                            is_final = (sec == sections[-1] and idx == len(parts) - 1)
-                                            attach_file = attach_for_non_email if is_final else None
-
-                                            # For sectioned embeds, only include footer on final part
-                                            sec_embed_opts = dict(emb_opts)
-                                            if not is_final:
-                                                sec_embed_opts.pop('footer', None)
-
-                                            res = discord_adapter.send(sec_title[:250], sec_body or sec_title, body_format=__import__('apprise').NotifyFormat.TEXT, attach=attach_file, context=f'discord_section_{archive_name}_{job_id}', embed_options=sec_embed_opts)
-                                            if res.success:
-                                                sent_any = True
-                                            # small pause to reduce rate-limiting risk
-                                            import time
-                                            time.sleep(0.2)
-
-                                    if sent_any:
-                                        logger.info("Discord adapter: sent sectioned notifications to Discord for archive=%s job=%s", archive_name, job_id)
-                                    else:
-                                        logger.error("Discord adapter: sectioned sends failed for archive=%s job=%s", archive_name, job_id)
-                                except Exception as e:
-                                    logger.exception("Discord adapter: exception while sending sectioned notifications for %s job %s: %s", archive_name, job_id, e)
+                                    logger.error("Discord adapter: sends failed for archive=%s job=%s: %s", archive_name, job_id, result.get('details'))
+                            except Exception as e:
+                                logger.exception("Discord adapter: exception while sending notifications for %s job %s: %s", archive_name, job_id, e)
 
                         # Non-discord non-email services: send as a single message (truncate if needed)
                         if other_non_email_urls and _adapter:
