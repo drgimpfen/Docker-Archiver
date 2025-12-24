@@ -53,7 +53,21 @@
             <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard.index') }}"><i class="bi bi-house-door me-2"></i>Dashboard</a></li>
             <li class="nav-item"><a class="nav-link" href="{{ url_for('history.list_history') }}"><i class="bi bi-clock-history me-2"></i>History</a></li>
             <li class="nav-item"><a class="nav-link" href="{{ url_for('profile.manage_profile') }}"><i class="bi bi-person me-2"></i>Profile</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('settings.manage_settings') }}"><i class="bi bi-gear me-2"></i>Settings</a></li>
+            {% set _current_path = request.path %}
+            {% set _settings_open = _current_path.startswith(url_for('settings.manage_settings')) or _current_path.startswith(url_for('settings.manage_notifications')) %}
+            <li class="nav-item">
+                <a class="nav-link d-flex justify-content-between align-items-center" data-bs-toggle="collapse" href="#sidebarSettings" role="button" aria-expanded="" aria-controls="sidebarSettings">
+                    <span><i class="bi bi-gear me-2"></i>Settings</span>
+                    <i class="bi bi-chevron-down small"></i>
+                </a>
+                <div class="collapse {% if _settings_open %}show{% endif %}" id="sidebarSettings">
+                    <ul class="nav flex-column ms-3">
+                        <li class="nav-item"><a class="nav-link{% if _current_path.startswith(url_for('settings.manage_settings')) %} active{% endif %}" href="{{ url_for('settings.manage_settings') }}">General</a></li>
+                        <li class="nav-item"><a class="nav-link{% if _current_path.startswith(url_for('settings.manage_notifications')) %} active{% endif %}" href="{{ url_for('settings.manage_notifications') }}">Notifications</a></li>
+                        <li class="nav-item"><a class="nav-link{% if _current_path.startswith(url_for('settings.manage_settings')) and _current_path.endswith('#security') %} active{% endif %}" href="{{ url_for('settings.manage_settings') }}#security">Security</a></li>
+                    </ul>
+                </div>
+            </li>
         </ul>
 
         <!-- Sidebar Bottom -->
