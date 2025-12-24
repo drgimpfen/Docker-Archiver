@@ -25,10 +25,10 @@ from pathlib import Path
 
 # Import blueprints
 # Core routes and blueprints
-from app.routes import history, settings, profile, api, dashboard, archives
+from app.routes import history, settings, profile, api, dashboard
 # Import API-specific archives blueprint from new location
 from app.routes.api import archives as api_archives
-# Legacy redirects are provided by `app.routes.archives` (legacy_bp)
+# Legacy redirects removed — `/archives/*` legacy endpoints were deprecated and are no longer registered.
 
 
 app = Flask(__name__)

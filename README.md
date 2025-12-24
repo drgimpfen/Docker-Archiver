@@ -544,7 +544,7 @@ python app/main.py
 Docker-Archiver/
 ├── app/
 │   ├── routes/              # Flask Blueprints
-│   │   ├── archives.py      # Archive CRUD routes
+│   │   ├── api/archives.py   # Archive CRUD routes (API)
 │   │   ├── history.py       # Job history routes
 │   │   ├── settings.py      # Settings routes
 │   │   └── profile.py       # User profile routes
