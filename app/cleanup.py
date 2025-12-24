@@ -801,7 +801,7 @@ def send_cleanup_notification(orphaned_stats, log_stats, unreferenced_dirs_stats
 
         apobj = get_apprise_instance()
         if not apobj:
-            logger.info("[Cleanup] No apprise URLs or SMTP configured; skipping notification")
+            logger.info("[Cleanup] No apprise URLs configured; skipping notification")
             return
 
         import apprise

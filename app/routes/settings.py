@@ -16,8 +16,7 @@ bp = Blueprint('settings', __name__, url_prefix='/settings')
 def validate_apprise_urls(urls_text):
     """
     Validate and clean Apprise URLs:
-    - Remove mailto/mailtos URLs (email should be configured via SMTP environment)
-    - Remove duplicates
+    - Remove duplicate URLs
     - Return tuple: (cleaned_urls_string, blocked_count, duplicate_count)
     """
     if not urls_text:
@@ -25,19 +24,12 @@ def validate_apprise_urls(urls_text):
     
     valid_urls = []
     seen_urls = set()
-    blocked_protocols = ['mailto://', 'mailtos://']
     blocked_count = 0
     duplicate_count = 0
     
     for url in urls_text.strip().split('\n'):
         url = url.strip()
         if not url:
-            continue
-        
-        # Check if URL uses blocked protocols
-        is_blocked = any(url.lower().startswith(proto) for proto in blocked_protocols)
-        if is_blocked:
-            blocked_count += 1
             continue
         
         # Check for duplicates (case-insensitive)
@@ -73,9 +65,7 @@ def manage_settings():
             # Validate and clean Apprise URLs
             apprise_urls, blocked_count, duplicate_count = validate_apprise_urls(apprise_urls_raw)
             
-            # Inform user about blocked/removed URLs
-            if blocked_count > 0:
-                flash(f'⚠️ {blocked_count} mailto URL(s) removed. Please use SMTP environment variables for email notifications.', 'warning')
+            # Inform user about duplicates removed
             if duplicate_count > 0:
                 flash(f'ℹ️ {duplicate_count} duplicate URL(s) removed.', 'info')
             
@@ -152,14 +142,15 @@ def manage_settings():
         for row in cur.fetchall():
             settings_dict[row['key']] = row['value']
     
-    # Check if SMTP is configured via environment variables
-    smtp_configured = bool(os.environ.get('SMTP_SERVER') and os.environ.get('SMTP_USER'))
-    
+    # Check if email is configured via Apprise mailto/mailtos URLs in settings
+    apprise_urls = settings_dict.get('apprise_urls', '')
+    email_configured = any((u.strip().lower().startswith('mailto') or u.strip().lower().startswith('mailtos')) for u in apprise_urls.split('\n') if u.strip())
+
     return render_template(
         'settings.html',
         settings=settings_dict,
         current_user=get_current_user(),
-        smtp_configured=smtp_configured
+        email_configured=email_configured
     )
 
 

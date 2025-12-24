@@ -67,11 +67,11 @@
             <h5 class="mb-0"><i class="bi bi-bell me-2"></i> Notifications</h5>
         </div>
         <div class="card-body">
-            {% if not smtp_configured %}
+            {% if not email_configured %}
             <div class="alert alert-warning">
                 <i class="bi bi-exclamation-triangle me-2"></i>
                 <strong>Email notifications not configured</strong><br>
-                To enable email notifications, set SMTP environment variables: SMTP_SERVER, SMTP_USER, SMTP_PASSWORD, SMTP_FROM
+                To enable email notifications, add Apprise mailto/mailtos URLs in <strong>Apprise URLs</strong> (e.g., <code>mailto://user@example.com</code> or <code>mailtos://user:pass@smtp.example.com:587/?from=sender@example.com&amp;to=user@example.com</code>).
             </div>
             {% endif %}
             
@@ -83,14 +83,11 @@
                     Enter notification service URLs (one per line). See 
                     <a href="https://github.com/caronc/apprise#supported-notifications" target="_blank">Apprise documentation</a> 
                     for supported services.<br>
-                    <strong>Note:</strong> <code>mailto://</code> URLs are not allowed here. Use SMTP environment variables for email notifications.
+                    <strong>Note:</strong> You can add <code>mailto://</code> or <code>mailtos://</code> URLs here to send email via Apprise (recommended for email delivery). Duplicate URLs will be automatically removed.
                     Duplicate URLs will be automatically removed.<br>
                     <em>If you need duplicate URLs or email via Apprise, please open an 
                     <a href="https://github.com/drgimpfen/Docker-Archiver/issues" target="_blank">Issue</a> or 
                     <a href="https://github.com/drgimpfen/Docker-Archiver/discussions" target="_blank">Discussion</a> on GitHub.</em>
-                    {% if smtp_configured %}
-                    <br><strong>Note:</strong> User emails will be automatically added via configured SMTP settings.
-                    {% endif %}
                 </div>
             </div>
 

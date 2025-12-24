@@ -59,7 +59,6 @@ cp docker-compose.override.yml.example docker-compose.override.yml
 Edit `.env` and set:
 - `DB_PASSWORD` - PostgreSQL password (required)
 - `SECRET_KEY` - Flask session secret (required)
-- `SMTP_*` - Email/SMTP configuration (optional)
 
 ### 2. Start Services
 
@@ -266,11 +265,6 @@ For more details and troubleshooting tips, see the dashboard warning messages or
 | `TZ` | Europe/Berlin | No | Timezone for the application (e.g., America/New_York, Asia/Tokyo) |
 | `DB_PASSWORD` | changeme123 | Yes | PostgreSQL password |
 | `SECRET_KEY` | (dev key) | Yes | Flask session secret (change in production!) |
-| `SMTP_SERVER` | - | No | SMTP server for email notifications (e.g., smtp.gmail.com) |
-| `SMTP_PORT` | 587 | No | SMTP port |
-| `SMTP_USER` | - | No | SMTP username |
-| `SMTP_PASSWORD` | - | No | SMTP password/app-password |
-| `SMTP_FROM` | - | No | Email sender address |
 | `REDIS_URL` | - | No | Optional Redis URL (e.g., `redis://localhost:6379/0`) to enable cross-worker SSE event streaming |
 | `LOG_LEVEL` | INFO | No | Global log level for application logging (DEBUG, INFO, WARNING, ERROR). Set `LOG_LEVEL=DEBUG` to enable debug-level output for troubleshooting. |
 
@@ -403,7 +397,7 @@ Docker Archiver uses [Apprise](https://github.com/caronc/apprise) for notificati
 
 - Discord
 - Telegram
-- Email (SMTP)
+- Email (via Apprise mailto/mailtos)
 - Slack
 - Pushover
 - Gotify
@@ -417,8 +411,10 @@ Docker Archiver uses [Apprise](https://github.com/caronc/apprise) for notificati
    ```
    discord://webhook_id/webhook_token
    telegram://bot_token/chat_id
+   mailto://user@example.com
+   mailtos://user:pass@smtp.example.com:587/?from=sender@example.com&to=user@example.com
    ```
-   **Note:** `mailto://` URLs are not allowed. Use SMTP environment variables for email notifications.
+   **Note:** `mailto://` and `mailtos://` URLs are supported — add them here to send email via Apprise. 
 3. Select which events to notify:
    - Archive Success
    - Archive Error
@@ -435,12 +431,11 @@ Docker Archiver uses [Apprise](https://github.com/caronc/apprise) for notificati
 - **Attach full job log** — When enabled, the full job log will be attached as a downloadable `.log` file instead of inlining it in the email. Useful for very large logs or when you prefer attachments.
 - **Attach log on failures only** — If enabled, the log will only be attached when the job had failures (overrides attaching-on-success behavior). These settings are configurable on the Notifications settings page and default to `Full` verbosity with no attachment.
 
-**Option 2: SMTP/Email (Automatic)**
-1. Configure SMTP in `.env` file (see Environment Variables above)
-2. Add email address in **Profile** page
-3. All users with configured email addresses automatically receive notifications
+**Email delivery (via Apprise mailto URLs)**
+1. Add email delivery URLs (e.g., `mailto://user@example.com` or `mailtos://user:pass@smtp.example.com:587/?from=sender@example.com&to=user@example.com`) to **Settings → Notifications → Apprise URLs**.
+2. Optionally add recipient email addresses in user profiles if you want per-user delivery targets (these must be added to Apprise URLs to be used).
 
-**Important:** Do not use both SMTP environment variables AND Apprise `mailto://` URLs for the same email address, as this will result in duplicate notifications. Use SMTP environment variables for email, and Apprise for other services (Discord, Telegram, etc.).
+**Note:** For email delivery, prefer Apprise `mailto://` or `mailtos://` URLs. Avoid adding duplicate recipients via multiple transport URLs to prevent duplicate notifications.
 
 ## API Documentation
 

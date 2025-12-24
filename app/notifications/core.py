@@ -60,8 +60,8 @@ from .formatters import strip_html_tags, build_compact_text, split_section_by_le
 
 def get_apprise_instance():
     """
-    Create and configure Apprise instance with URLs from settings and environment.
-    Automatically includes user emails if SMTP is configured via environment.
+    Create and configure Apprise instance with URLs from settings.
+    Email delivery should be configured via Apprise mailto/mailtos URLs in settings (Settings → Notifications).
     """
     import apprise
     
@@ -87,7 +87,7 @@ def get_apprise_instance():
             logger.exception("Apprise: exception while adding URL %s: %s", url, e)
 
 
-    # NOTE: SMTP/email handling is moved to SMTPAdapter to avoid mixing concerns.
+    # NOTE: Email sending is handled by MailtoAdapter (uses mailto/mailtos Apprise URLs defined in settings).
 
     if added == 0:
         logger.warning("Apprise: no services configured (apprise_urls empty) — notifications may be skipped")
@@ -405,15 +405,15 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
 
             import tempfile
 
-            # Use adapters for sending to avoid duplicating apprise/smtp logic.
-            from app.notifications.adapters import GenericAdapter, DiscordAdapter, SMTPAdapter
+            # Use adapters for sending to avoid duplicating apprise logic.
+            from app.notifications.adapters import GenericAdapter, DiscordAdapter, MailtoAdapter
 
             # Instantiate adapters for the relevant URL sets
             discord_adapter = DiscordAdapter(webhooks=discord_urls) if discord_urls else None
             generic = GenericAdapter(urls=other_non_email_urls) if other_non_email_urls else None
-            smtp_adapter = GenericAdapter(urls=email_urls) if email_urls else None
-            smtp_present = bool(os.environ.get('SMTP_SERVER'))
-            smtp_email_adapter = SMTPAdapter() if smtp_present else None
+            explicit_email_adapter = GenericAdapter(urls=email_urls) if email_urls else None
+            # MailtoAdapter handles sending to configured mailto/mailtos/smtp-like Apprise URLs (reads settings)
+            mailto_adapter = MailtoAdapter()
 
             # Prepare a temp attachment (full job log preferred) for non-email services if needed
             attach_for_non_email = None
@@ -675,20 +675,20 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
                 # Send full notification to email services.
                 email_sent_any = False
                 try:
-                    if smtp_adapter:
-                        res = smtp_adapter.send(title, send_body, body_format, attach=attach_path, context=f'email_explicit_{archive_name}_{job_id}')
+                    if explicit_email_adapter:
+                        res = explicit_email_adapter.send(title, send_body, body_format, attach=attach_path, context=f'email_explicit_{archive_name}_{job_id}')
                         if res.success:
                             email_sent_any = True
                             logger.info("Generic adapter: sent full notification to explicit email URLs for archive=%s job=%s", archive_name, job_id)
                         else:
                             logger.error("Generic adapter: explicit email URLs send failed for archive=%s job=%s: %s", archive_name, job_id, res.detail)
-                    if smtp_email_adapter:
-                        res = smtp_email_adapter.send(title, send_body, body_format, attach=attach_path, context=f'email_smtp_{archive_name}_{job_id}')
+                    if mailto_adapter:
+                        res = mailto_adapter.send(title, send_body, body_format, attach=attach_path, context=f'email_mailto_{archive_name}_{job_id}')
                         if res.success:
                             email_sent_any = True
-                            logger.info("SMTP adapter: sent full notification via SMTP for archive=%s job=%s", archive_name, job_id)
+                            logger.info("Mailto adapter: sent full notification via mailto/mailtos for archive=%s job=%s", archive_name, job_id)
                         else:
-                            logger.error("SMTP adapter: SMTP send failed for archive=%s job=%s: %s", archive_name, job_id, res.detail)
+                            logger.error("Mailto adapter: mailto send failed for archive=%s job=%s: %s", archive_name, job_id, res.detail)
 
                     if not email_sent_any:
                         logger.warning("No email targets delivered for archive=%s job=%s", archive_name, job_id)
@@ -696,7 +696,7 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
                     logger.exception("Error while sending email notifications for %s job %s: %s", archive_name, job_id, e)
 
                 # If no services configured at all, fall back to original apobj send for compatibility
-                if not non_email_urls and not email_urls and not os.environ.get('SMTP_SERVER'):
+                if not non_email_urls and not email_urls:
                     try:
                         sent = _apprise_notify(apobj, title, send_body, body_format, attach=attach_path, context=f'archive_{archive_name}_{job_id}')
                         if not sent:
@@ -1010,7 +1010,7 @@ def send_test_notification():
 <h3>Notification services configured:</h3>
 <ul>
 <li>Apprise URLs from settings</li>
-<li>User email addresses (if SMTP is configured)</li>
+<li>User email addresses (when configured via Apprise mailto/mailtos URLs)</li>
 </ul>
 <hr>
 <p><small>Docker Archiver: <a href="{base_url}">{base_url}</a></small></p>"""
