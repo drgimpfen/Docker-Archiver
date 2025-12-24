@@ -20,22 +20,73 @@ def _make_apobj(urls: Optional[List[str]] = None) -> Tuple[Optional[object], int
 
 
 def _notify_with_retry(apobj: object, title: str, body: str, body_format: object = None, attach: Optional[str] = None) -> Tuple[bool, Optional[str]]:
+    """Notify via Apprise. Capture DEBUG logs from the Apprise logger to provide
+    detailed diagnostic information (response bodies, debug output) when
+    notifications fail (returns False) or raise an exception.
+    """
+    import traceback, time, logging, io
+
+    # Prepare a temporary debug handler that captures Apprise logs to a buffer
+    buf = io.StringIO()
+    handler = logging.StreamHandler(buf)
+    handler.setLevel(logging.DEBUG)
+
+    ap_log = getattr(__import__('apprise'), 'logger', None)
+    prev_level = None
+    attached = False
+    if ap_log:
+        try:
+            prev_level = ap_log.level
+            ap_log.addHandler(handler)
+            ap_log.setLevel(logging.DEBUG)
+            attached = True
+        except Exception:
+            attached = False
+
     try:
         res = apobj.notify(title=title, body=body, body_format=body_format, attach=attach)
-        return bool(res), None
-    except Exception as e:
+        if bool(res):
+            return True, None
+
+        # Notification returned False (one or more services failed). Return
+        # the captured debug output if any to aid diagnostics.
+        logs = buf.getvalue().strip()
+        return False, logs if logs else None
+
+    except Exception:
         # Log the full exception for improved diagnostics and attempt one retry
-        import traceback, time
         traceback_str = traceback.format_exc()
         try:
             time.sleep(0.5)
             res = apobj.notify(title=title, body=body, body_format=body_format, attach=attach)
-            return bool(res), None
-        except Exception as re:
-            # Include the original traceback and retry exception in the returned detail
+            if bool(res):
+                return True, None
             retry_tb = traceback.format_exc()
+            logs = buf.getvalue().strip()
             detail = f"first: {traceback_str.strip()} | retry: {retry_tb.strip()}"
+            if logs:
+                detail = f"{detail} | logs: {logs}"
             return False, detail
+        except Exception:
+            retry_tb = traceback.format_exc()
+            logs = buf.getvalue().strip()
+            detail = f"first: {traceback_str.strip()} | retry: {retry_tb.strip()}"
+            if logs:
+                detail = f"{detail} | logs: {logs}"
+            return False, detail
+    finally:
+        # Restore logger state and clean up
+        try:
+            if ap_log and attached:
+                ap_log.removeHandler(handler)
+                if prev_level is not None:
+                    ap_log.setLevel(prev_level)
+        except Exception:
+            pass
+        try:
+            buf.close()
+        except Exception:
+            pass
 
 
 from .base import AdapterBase, AdapterResult
