@@ -776,21 +776,11 @@ def send_test_notification():
         body_text += "If you received this message, your notification configuration is working correctly!\n\n"
         body_text += f"Docker Archiver: {base_url}\n"
 
-        # Build the final body based on configured notification format
-        body = body_html
-        body_format = get_notification_format()
-        # If text is preferred, use the plain-text version
-        if body_format == __import__('apprise').NotifyFormat.TEXT:
-            body = body_text
-        
-        # Get format preference
-        body_format = get_notification_format()
-        
-        # Convert to plain text if needed
+        # For test notifications we always send HTML so recipients see the rich test message
         import apprise
-        if body_format == apprise.NotifyFormat.TEXT:
-            body = strip_html_tags(body)
-        
+        body = body_html
+        body_format = apprise.NotifyFormat.HTML
+
         # Send notification via centralized helper
         try:
             _ = _apprise_notify(apobj, title, body, body_format, context='test_notification')

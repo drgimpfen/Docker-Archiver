@@ -29,3 +29,8 @@ def test_send_test_notification_includes_apprise_urls(monkeypatch):
     assert 'notification configuration is working correctly' in captured['body'].lower()
     # Ensure we do not include a 'Configured Apprise URLs' section
     assert 'configured apprise urls' not in captured['body'].lower()
+
+    # Ensure HTML is sent for test notification
+    import apprise
+    assert captured['format'] == apprise.NotifyFormat.HTML
+    assert '<h2>' in captured['body'] or '<p>' in captured['body']
