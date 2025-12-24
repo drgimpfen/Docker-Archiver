@@ -83,47 +83,69 @@ def send_to_discord(discord_adapter, title: str, body_html: str, compact_text: s
             return {'sent_any': False, 'details': res.detail}
 
         # Otherwise send sectioned messages
-        last_section = sections[-1] if sections else None
+        # Build parts for all sections first (so we can batch them into larger embeds)
         per_part_limit = min(max_desc, 1000)
+        parts = []
         for sec in sections:
-            parts = split_section_by_length(sec, per_part_limit)
             sec_title = (sec.split('\n', 1)[0] or title)[:250]
-            for idx, part in enumerate(parts):
-                is_final = (sec == last_section and idx == len(parts) - 1)
+            body_part = sec.split('\n', 1)[1] if '\n' in sec else ''
+            sec_parts = split_section_by_length(body_part, per_part_limit)
+            for i, part in enumerate(sec_parts):
+                parts.append({'title': sec_title, 'part': part, 'is_first': i == 0})
 
-                # Per-part embed options: remove footer for intermediate parts
-                sec_embed_opts = copy.deepcopy(embed_options or {})
-                if not is_final and 'footer' in sec_embed_opts:
-                    sec_embed_opts.pop('footer', None)
+        # Batch parts into embeddable groups respecting max_desc and a batch size by unique sections
+        batch_size = 10  # max unique sections per embed
+        batches = []
+        cur = []
+        cur_len = 0
+        cur_sections = set()
+        for p in parts:
+            formatted = f"## {p['title']}\n{p['part']}"
+            extra_section = 1 if (p['is_first'] and p['title'] not in cur_sections) else 0
+            next_len = cur_len + (2 if cur_len else 0) + len(formatted)
+            if cur and (next_len > max_desc or len(cur_sections) + extra_section > batch_size):
+                batches.append(cur)
+                cur = []
+                cur_len = 0
+                cur_sections = set()
+            # append
+            cur.append((p['title'], formatted, p['is_first']))
+            cur_len += (2 if cur_len else 0) + len(formatted)
+            if p['is_first']:
+                cur_sections.add(p['title'])
+        if cur:
+            batches.append(cur)
 
-                # If this is the final embed part and a view_url is provided, append it to the footer
-                if is_final and view_url:
-                    footer = sec_embed_opts.get('footer')
-                    if footer:
-                        sec_embed_opts['footer'] = f"{footer} | View details: {view_url}"
-                    else:
-                        sec_embed_opts['footer'] = f"View details: {view_url}"
-
-                # Build markdown for this part so Apprise will convert it into an embed field
-                sec_md = f"## {sec_title}\n{part}"
-
-                try:
-                    res = discord_adapter.send(sec_title, sec_md, body_format=__import__('apprise').NotifyFormat.MARKDOWN, attach=None, context='discord_section', embed_options=sec_embed_opts)
-                except Exception as e:
-                    logger.exception("send_to_discord: exception during section send (title=%s): %s", sec_title, e)
-                    errors.append(str(e))
-                    continue
-
-                if res.success:
-                    sent_any = True
+        # Send each batch as a single embed
+        for bidx, batch in enumerate(batches):
+            is_final_batch = (bidx == len(batches) - 1)
+            # build batch markdown
+            md_body = '\n\n'.join(item[1] for item in batch)
+            sec_embed_opts = copy.deepcopy(embed_options or {})
+            if not is_final_batch and 'footer' in sec_embed_opts:
+                sec_embed_opts.pop('footer', None)
+            if is_final_batch and view_url:
+                footer = sec_embed_opts.get('footer')
+                if footer:
+                    sec_embed_opts['footer'] = f"{footer} | View details: {view_url}"
                 else:
-                    # Log parameter types for debugging
-                    logger.error("send_to_discord: section send failed - types: title=%s body=%s attach=%s embed_options=%s detail=%s", type(sec_title), type(sec_md), None, type(sec_embed_opts), res.detail)
-                    errors.append(res.detail)
+                    sec_embed_opts['footer'] = f"View details: {view_url}"
 
-                # Small pause to reduce rate-limit risk
-                if pause:
-                    time.sleep(pause)
+            try:
+                res = discord_adapter.send(title, md_body, body_format=__import__('apprise').NotifyFormat.MARKDOWN, attach=None, context='discord_section', embed_options=sec_embed_opts)
+            except Exception as e:
+                logger.exception("send_to_discord: exception during batch send (title=%s): %s", title, e)
+                errors.append(str(e))
+                continue
+
+            if res.success:
+                sent_any = True
+            else:
+                logger.error("send_to_discord: batch send failed - detail=%s", res.detail)
+                errors.append(res.detail)
+
+            if pause:
+                time.sleep(pause)
 
         # After sections: if an attachment is provided, send it as a single follow-up message
         if attach_file:
