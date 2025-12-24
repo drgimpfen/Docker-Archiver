@@ -121,17 +121,30 @@ class DiscordAdapter(AdapterBase):
         # Build a plain-text version of the HTML body
         plain = strip_html_tags(html_body)
 
+        # Convert HTML body to plain/markdown when sending embeds: Apprise's
+        # Discord plugin uses NotifyFormat.MARKDOWN to build embeds. Sending
+        # plain text with MARKDOWN ensures an 'embeds' payload is used instead
+        # of a 'content' field which is subject to the 2000 char limit.
+        try:
+            apprise = __import__('apprise')
+            NotifyFormat = getattr(apprise, 'NotifyFormat', None)
+            NotifyFmtMarkdown = NotifyFormat.MARKDOWN if NotifyFormat is not None else None
+        except Exception:
+            NotifyFmtMarkdown = None
+
+        md_body = strip_html_tags(html_body)
+
         # If an attachment is present, send in two steps:
-        # 1) Send the HTML (embeds) first without the attachment so Discord
+        # 1) Send the embed (MARKDOWN) first without the attachment so Discord
         #    will render embeds correctly.
         # 2) Send the attachment as a separate message with a short plain-text
         #    summary (<=2000 chars) so the upload succeeds.
         if attach:
-            # 1) attempt to post embeds (HTML) without attachment
-            embed_ok, embed_detail = _notify_with_retry(apobj, title=title, body=html_body, body_format=NotifyFmtHTML, attach=None)
+            # 1) attempt to post embeds (MARKDOWN) without attachment
+            embed_ok, embed_detail = _notify_with_retry(apobj, title=title, body=md_body, body_format=NotifyFmtMarkdown, attach=None)
 
             # 2) prepare truncated plain content for the attachment post
-            plain = strip_html_tags(html_body)
+            plain = md_body
             if plain and len(plain) > 2000:
                 attach_body = (plain[:1950].rstrip() + '\n\n...(truncated, see attachment)') if len(plain) > 1950 else plain
                 logger.warning("DiscordAdapter: attachment content too long — truncating (len=%d)", len(plain))
@@ -158,8 +171,8 @@ class DiscordAdapter(AdapterBase):
             logger.error("DiscordAdapter: both embed and attachment sends failed (context=%s): %s", context, detail)
             return AdapterResult(channel='discord', success=False, detail=f'notify exception: {detail}')
 
-        # No attachment path: send normally (HTML/Embed preferred)
-        ok, detail = _notify_with_retry(apobj, title=title, body=html_body, body_format=NotifyFmtHTML, attach=None)
+        # No attachment path: send normally (MARKDOWN/Embed preferred)
+        ok, detail = _notify_with_retry(apobj, title=title, body=md_body, body_format=NotifyFmtMarkdown, attach=None)
 
         if ok:
             return AdapterResult(channel='discord', success=True)

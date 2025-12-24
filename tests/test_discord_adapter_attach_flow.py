@@ -23,7 +23,8 @@ def test_embeds_then_attachment(monkeypatch):
     # two calls: first should be the HTML/embed send (attach None), second the attachment send
     assert len(calls) == 2
     assert calls[0]['attach'] is None
-    assert '<h1' in calls[0]['body'] or '<table' in calls[0]['body']
+    # We now convert HTML->plain/markdown before sending so expect title text
+    assert 'Title' in calls[0]['body']
     assert calls[1]['attach'] == '/tmp/fake.log'
     assert isinstance(calls[1]['body'], str)
     assert len(calls[1]['body']) <= 2000

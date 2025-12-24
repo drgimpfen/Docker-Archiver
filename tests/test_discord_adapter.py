@@ -30,7 +30,8 @@ def test_discord_adapter_sends_via_apprise(monkeypatch):
     first = calls['seq'][0]
     second = calls['seq'][1]
     assert first['attach'] is None
-    assert '<h1' in first['body'] or '<table' in first['body']
+    # The HTML body is converted to plain/markdown before sending; ensure title text is present
+    assert 'Result' in first['body']
     assert second['attach'] == 'path/to/file.log'
     assert len(second['body']) <= 2000
     assert res.success is True
