@@ -14,7 +14,8 @@ from app import utils
 from app.stacks import validate_stack, find_compose_file, discover_stacks
 from app.utils import setup_logging, get_logger, get_archives_path, get_display_timezone
 from app.sse import send_global_event
-from app.notifications import get_setting, send_archive_notification, send_archive_failure_notification
+from app.notifications.helpers import get_setting
+from app.notifications.handlers import send_archive_notification, send_archive_failure_notification
 
 # Configure logging using centralized setup so LOG_LEVEL is respected
 setup_logging()
@@ -1018,7 +1019,7 @@ def _create_archive(self, stack_name, stack_path):
             output_dir.mkdir(parents=True, exist_ok=True)
             # If configured, apply directory permissions (0755) for the output directory
             try:
-                from app.notifications import get_setting
+                from app.notifications.helpers import get_setting
                 if get_setting('apply_permissions', 'false').lower() == 'true':
                     try:
                         output_dir.chmod(0o755)
@@ -1060,7 +1061,7 @@ def _create_archive(self, stack_name, stack_path):
                 try:
                     apply_perms = False
                     try:
-                        from app.notifications import get_setting
+                        from app.notifications.helpers import get_setting
                         apply_perms = get_setting('apply_permissions', 'false').lower() == 'true'
                     except Exception:
                         apply_perms = False
@@ -1117,7 +1118,7 @@ def _create_archive(self, stack_name, stack_path):
                 try:
                     apply_perms = False
                     try:
-                        from app.notifications import get_setting
+                        from app.notifications.helpers import get_setting
                         apply_perms = get_setting('apply_permissions', 'false').lower() == 'true'
                     except Exception:
                         apply_perms = False

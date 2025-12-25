@@ -1,5 +1,5 @@
 import re
-from app.notifications import send_archive_notification
+from app.notifications.handlers import send_archive_notification
 from app.notifications.adapters.base import AdapterResult
 
 

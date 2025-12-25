@@ -9,7 +9,7 @@ from app.stacks import get_visible_stacks
 from app.scheduler import get_next_run_time, get_prev_run_time
 from datetime import datetime, timezone
 from app.utils import format_bytes, format_duration, get_disk_usage, to_iso_z
-from app.notifications import get_setting
+from app.notifications.helpers import get_setting
 
 bp = Blueprint('dashboard', __name__, url_prefix='/')
 

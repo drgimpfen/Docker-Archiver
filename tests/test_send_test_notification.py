@@ -1,6 +1,6 @@
 import sys, os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from app.notifications import send_test_notification
+from app.notifications.handlers import send_test_notification
 
 
 def test_send_test_notification_uses_smtp(monkeypatch):

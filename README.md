@@ -360,7 +360,7 @@ docker compose exec -T app journalctl -u docker -n 200  # if you use systemd/jou
 - Run a manual in-container test (writes to container logs and/or job log files depending on context):
 
 ```bash
-docker compose exec -T app python -c "from app.main import app; ctx=app.app_context(); ctx.push(); from app.notifications import send_archive_notification; send_archive_notification({'name':'Test-Archive'}, 9999, [], 1, 0); ctx.pop()"
+docker compose exec -T app python -c "from app.main import app; ctx=app.app_context(); ctx.push(); from app.notifications.handlers import send_archive_notification; send_archive_notification({'name':'Test-Archive'}, 9999, [], 1, 0); ctx.pop()"
 ```
 
 What to look for in logs:
