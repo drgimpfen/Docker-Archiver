@@ -61,12 +61,12 @@
         </div>
 
         <!-- Navigation -->
+        {% set _endpoint = request.endpoint or '' %}
         <ul class="nav flex-column">
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard.index') }}"><i class="bi bi-house-door me-2"></i>Dashboard</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('history.list_history') }}"><i class="bi bi-clock-history me-2"></i>History</a></li>
+            <li class="nav-item"><a class="nav-link{% if _endpoint == 'dashboard.index' %} active{% endif %}" href="{{ url_for('dashboard.index') }}"><i class="bi bi-house-door me-2"></i>Dashboard</a></li>
+            <li class="nav-item"><a class="nav-link{% if _endpoint.startswith('history.') %} active{% endif %}" href="{{ url_for('history.list_history') }}"><i class="bi bi-clock-history me-2"></i>History</a></li>
+            <li class="nav-item"><a class="nav-link{% if _endpoint.startswith('downloads.') %} active{% endif %}" href="{{ url_for('downloads.manage_downloads') }}"><i class="bi bi-download me-2"></i>Downloads</a></li>
             {% set _current_path = request.path %}
-            {% set _endpoint = request.endpoint or '' %}
-            {% set _settings_open = _endpoint.startswith('settings.') %}
             {% set _settings_open = _endpoint.startswith('settings.') %}
             <li class="nav-item">
                 <a class="nav-link d-flex justify-content-between align-items-center {% if _settings_open %}open{% endif %}" data-bs-toggle="collapse" href="#sidebarSettings" role="button" aria-expanded="{{ 'true' if _settings_open else 'false' }}" aria-controls="sidebarSettings">
@@ -80,7 +80,6 @@
                         <li class="nav-item"><a class="nav-link{% if _endpoint == 'settings.manage_notifications' %} active{% endif %}" href="{{ url_for('settings.manage_notifications') }}">Notifications</a></li>
                         <li class="nav-item"><a class="nav-link{% if _endpoint == 'settings.manage_security' %} active{% endif %}" href="{{ url_for('settings.manage_security') }}">Security</a></li>
                         <li class="nav-item"><a class="nav-link{% if _endpoint == 'settings.manage_cleanup' %} active{% endif %}" href="{{ url_for('settings.manage_cleanup') }}">Cleanup</a></li>
-                        <li class="nav-item"><a class="nav-link{% if _endpoint == 'settings.manage_downloads' %} active{% endif %}" href="{{ url_for('settings.manage_downloads') }}">Downloads</a></li>
                     </ul>
                 </div>
             </li> 

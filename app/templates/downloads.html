@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}Download Tokens - Docker Archiver{% endblock %}
+{% block title %}Downloads - Docker Archiver{% endblock %}
 
 {% block content %}
 <div class="container-fluid py-4">
     <div class="mb-4">
-        <h2><i class="bi bi-download me-2"></i> Download Tokens</h2>
+        <h2><i class="bi bi-download me-2"></i> Downloads</h2>
+        <p class="text-muted">Manage active download tokens and trigger cleanup of expired downloads.</p>
     </div>
 
     <div class="card mb-4">
@@ -24,7 +25,7 @@
     </div>
 
     <div class="form-actions">
-        <a href="{{ url_for('settings.manage_settings') }}" class="btn btn-outline-secondary">Back</a>
+        <a href="{{ url_for('dashboard.index') }}" class="btn btn-outline-secondary">Back</a>
         <button type="button" class="btn btn-secondary" onclick="cleanupTokens()">
             <i class="bi bi-trash me-1"></i> Cleanup Expired Tokens
         </button>
