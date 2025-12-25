@@ -340,6 +340,7 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
 
         # user settings for attachments
         attach_log_setting = get_setting('notify_attach_log', 'false').lower() == 'true'
+        attach_on_failure_setting = get_setting('notify_attach_log_on_failure', 'false').lower() == 'true'
 
         # Decide whether to send full HTML body or prepare an attachment
         if attach_log_setting:
