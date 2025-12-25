@@ -51,9 +51,12 @@ volumes:
   - /mnt/backups:/archives
   - /opt/stacks:/opt/stacks        # ← Auto-detected (host:container paths must match)
   - /home/user/docker:/home/user/docker  # ← Auto-detected
+  - ./downloads:/tmp/downloads      # Optional: persist generated downloads (recommended)
 ```
 
 If stacks are not mounted as identical bind mounts, the app may ignore them and jobs can fail. See the Dashboard bind-mount warnings and README troubleshooting section for guidance.
+
+Note: `/tmp/downloads` is used for temporary download files and is treated as a fixed ignore for bind-mount mismatch checks (similar to `/archives` and `/var/run/docker.sock`). Mount it if you want generated download files to persist across container restarts.
 
 ### 4. Start Services
 

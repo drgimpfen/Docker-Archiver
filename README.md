@@ -527,7 +527,7 @@ exclude_paths:
 
 **Note:** The `/api/*` endpoints have their own authentication via Bearer tokens. The download endpoint (`/download/<token>`) uses time-limited tokens and doesn't require session authentication.
 
-Downloads are always prepared/stored under `/tmp/downloads` on the host container (this path is fixed). If a requested token points to an archive outside this directory, the application will attempt to regenerate a download file into `/tmp/downloads` before serving it.
+Downloads are always prepared/stored under `/tmp/downloads` on the host container (this path is fixed). If a requested token points to an archive outside this directory, the application will attempt to regenerate a download file into `/tmp/downloads` before serving it. The application treats `/tmp/downloads` as a fixed, intentionally-ignored destination for bind-mount mismatch checks (similar to `/archives` and `/var/run/docker.sock`), so it will not appear in bind-mount mismatch warnings in the Dashboard. To persist generated downloads across container restarts, mount a host directory (for example `./downloads:/tmp/downloads`).
 
 ### Reverse proxy examples
 

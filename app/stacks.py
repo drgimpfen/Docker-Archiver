@@ -13,6 +13,40 @@ setup_logging()
 logger = get_logger(__name__)
 
 
+# Helper: centralized rule whether a destination should be ignored for stack discovery/mismatch warnings
+def _is_ignored_destination(dst: str, src: str | None = None) -> bool:
+    """Return True if the container destination should be ignored for discovery or mismatch warnings.
+
+    Rules consolidated here:
+      - ignore common system paths (/var, /etc, /usr, /proc, /sys)
+      - ignore archive and docker socket destinations used by the app
+      - ignore root
+      - ignore overlay mounts
+    """
+    if not dst:
+        return True
+    try:
+        dst_norm = str(Path(dst))
+    except Exception:
+        dst_norm = dst
+
+    # system dirs
+    if dst_norm.startswith('/var/') or dst_norm.startswith('/etc/') or dst_norm.startswith('/usr/'):
+        return True
+    if dst_norm.startswith('/proc/') or dst_norm.startswith('/sys/'):
+        return True
+
+    # fixed ignores (system/archive/docker-socket and ephemeral app dirs)
+    if dst_norm in ('/archives', '/var/run/docker.sock', '/', '/tmp/downloads'):
+        return True
+
+    # src overlay (caller is expected to pass src) - overlay means not a host bind
+    if src and src == 'overlay':
+        return True
+
+    return False
+
+
 def get_own_container_mounts():
     """
     Get bind mount paths from our own container.
@@ -70,15 +104,9 @@ def get_own_container_mounts():
                             mount_type = mount.get('Type', '')
                             if mount_type == 'bind':
                                 destination = mount.get('Destination', '')
+                                source = mount.get('Source', '')
                                 # Skip system mounts and our own archives mount
-                                if (destination and 
-                                    not destination.startswith('/var/') and
-                                    not destination.startswith('/etc/') and
-                                    not destination.startswith('/usr/') and
-                                    not destination.startswith('/proc/') and
-                                    not destination.startswith('/sys/') and
-                                    destination != get_archives_path() and
-                                    destination != '/var/run/docker.sock'):
+                                if destination and not _is_ignored_destination(destination, source):
                                     bind_mounts.append(destination)
                         if bind_mounts:
                             return bind_mounts
@@ -112,14 +140,7 @@ def get_own_container_mounts():
                 # Filter for bind mounts (source is not empty and not system paths)
                 bind_mounts = []
                 for mount_point, source in mounts:
-                    if (source and 
-                        not mount_point.startswith('/var/') and
-                        not mount_point.startswith('/etc/') and
-                        not mount_point.startswith('/usr/') and
-                        not mount_point.startswith('/proc/') and
-                        not mount_point.startswith('/sys/') and
-                        mount_point != get_archives_path() and
-                        mount_point != '/var/run/docker.sock'):
+                    if source and not _is_ignored_destination(mount_point, source):
                         bind_mounts.append(mount_point)
 
                 if bind_mounts:
@@ -202,10 +223,9 @@ def get_bind_mounts():
                         source = parts[separator_idx + 2]
                         mounts.append((mount_point, source))
 
+                # Consolidate destination filtering into helper to keep rules in one place
                 for mount_point, source in mounts:
-                    if (source and not mount_point.startswith('/var/') and not mount_point.startswith('/etc/') and not mount_point.startswith('/usr/') and
-                            not mount_point.startswith('/proc/') and not mount_point.startswith('/sys/') and mount_point != '/archives' and
-                            mount_point != '/var/run/docker.sock' and mount_point != '/' and source != 'overlay'):
+                    if source and not _is_ignored_destination(mount_point, source):
                         binds.append({'destination': mount_point, 'source': source})
                 return binds
         except Exception:
@@ -217,8 +237,14 @@ def get_bind_mounts():
     return binds
 
 
+
+
 def detect_bind_mismatches():
-    """Return list of warning messages for binds where host/source != container/destination."""
+    """Return list of warning messages for binds where host/source != container/destination.
+
+    Certain container destinations are intentionally ignored (e.g., `/tmp/downloads`) because
+    they are used for ephemeral or intentionally host-bound storage that does not affect stack discovery.
+    """
     warnings = []
     try:
         binds = get_bind_mounts()
@@ -234,6 +260,10 @@ def detect_bind_mismatches():
             except Exception:
                 src_norm = src
                 dst_norm = dst
+
+            # Ignore well-known destinations which should not generate warnings
+            if _is_ignored_destination(dst_norm, src_norm):
+                continue
 
             if src_norm != dst_norm:
                 # Return a concise message with an actionable hint
@@ -262,6 +292,10 @@ def get_mismatched_destinations():
             except Exception:
                 src_norm = src
                 dst_norm = dst
+
+            # Ignore well-known destinations that should not be treated as mismatches
+            if _is_ignored_destination(dst_norm, src_norm):
+                continue
 
             if src_norm != dst_norm and dst_norm not in mismatches:
                 mismatches.append(dst_norm)
