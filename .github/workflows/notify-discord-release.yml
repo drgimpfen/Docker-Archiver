@@ -10,8 +10,8 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Optional: release tag to notify. Leave empty to use latest published release.'
-        required: false
+        description: 'Release tag to notify (required when triggering manually, e.g., v0.8.0).'
+        required: true
 
 jobs:
   notify-discord:
@@ -34,6 +34,11 @@ jobs:
         run: |-
           set -e
           TAG="$INPUT_TAG"
+          if [ -z "$TAG" ]; then
+            echo "ERROR: 'release_tag' input is required when running manually. Provide a tag like 'v0.8.0'."
+            exit 1
+          fi
+
           # Choose auth header: prefer a provided PAT (RELEASE_FETCH_TOKEN), otherwise use GITHUB_TOKEN
           if [ -n "$RELEASE_FETCH_TOKEN" ]; then
             AUTH_HEADER="Authorization: token $RELEASE_FETCH_TOKEN"
@@ -41,13 +46,8 @@ jobs:
             AUTH_HEADER="Authorization: Bearer $GITHUB_TOKEN"
           fi
 
-          if [ -z "$TAG" ]; then
-            echo "Fetching latest release from GitHub API..."
-            curl -s -H "Accept: application/vnd.github+json" -H "$AUTH_HEADER" "https://api.github.com/repos/${{ github.repository }}/releases/latest" -o /tmp/release.json
-          else
-            echo "Fetching release for tag: $TAG"
-            curl -s -H "Accept: application/vnd.github+json" -H "$AUTH_HEADER" "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" -o /tmp/release.json
-          fi
+          echo "Fetching release for tag: $TAG"
+          curl -s -H "Accept: application/vnd.github+json" -H "$AUTH_HEADER" "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" -o /tmp/release.json
 
           python - <<'PY'
           import json, os
@@ -85,29 +85,36 @@ jobs:
           fi
 
           python - <<'PY'
-          import os, json, urllib.request
+          import os, json, urllib.request, datetime
+
           webhook_url = os.environ['WEBHOOK_URL']
           name = os.environ.get('RELEASE_NAME') or os.environ.get('RELEASE_TAG') or 'Release'
           tag = os.environ.get('RELEASE_TAG') or ''
           body = os.environ.get('RELEASE_BODY') or ''
           url = os.environ.get('RELEASE_URL') or ''
-          content_lines = [f"**New release: {name}**"]
-          if tag:
-              content_lines.append(f"Tag: {tag}")
-          if url:
-              content_lines.append(url)
-          content_lines.append("")
-          if body:
-              content_lines.append(body)
-          content = "\n".join(content_lines)
-          if len(content) > 1900:
-              content = content[:1900] + "..."
-          payload = json.dumps({"content": content}).encode('utf-8')
+
+          # Build embed
+          max_desc = 3000
+          description = body.strip() if body.strip() else f"Release {tag}" if tag else 'No description provided.'
+          if len(description) > max_desc:
+              description = description[:max_desc-3] + '...'
+
+          title = f"{name} ({tag})" if tag else name
+
+          embed = {
+              'title': title,
+              'description': description,
+              'url': url or None,
+              'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+              'color': 3447003
+          }
+
+          payload = json.dumps({'embeds': [embed]}).encode('utf-8')
           req = urllib.request.Request(webhook_url, data=payload, headers={'Content-Type': 'application/json'})
           try:
               with urllib.request.urlopen(req) as resp:
-                  print('Discord notification sent, HTTP', resp.status)
+                  print('Discord embed sent, HTTP', resp.status)
           except Exception as e:
-              print('Failed to send Discord notification:', e)
+              print('Failed to send Discord embed:', e)
               raise
           PY
