@@ -582,8 +582,16 @@ def _process_single_stack(self, stack_name, stop_containers):
             return self._create_stack_metric(stack_name, 'failed', stack_start, was_running, error=error_msg)
         
         # Start stack if it was running and we stopped it
+        start_result = None
         if stop_containers and was_running:
-            if not self._start_stack(stack_name, compose_path):
+            start_result = self._start_stack(stack_name, compose_path)
+            if start_result == 'skipped':
+                # Intentionally skipped due to missing images (pull disabled); record and continue
+                skip_reason = (getattr(self, 'stack_skip_reasons', {}) or {}).get(stack_name, 'Skipped starting stack (images missing).')
+                self.log('WARNING', f"Restart skipped for {stack_name}: {skip_reason}")
+                # Return a 'skipped' metric explicitly
+                return self._create_stack_metric(stack_name, 'skipped', stack_start, was_running, error=skip_reason)
+            if not start_result:
                 self.log('ERROR', f"Failed to restart stack: {stack_name}")
                 # Don't fail the whole job, archive was created successfully
         
@@ -701,6 +709,85 @@ def _start_stack(self, stack_name, compose_path):
         # - Load .env file from current directory
         # - Find compose.yml/docker-compose.yml in current directory
         # - Load compose.override.yml if it exists
+        # Before starting, check whether images referenced in the compose file are available locally.
+        allow_pull = get_setting('allow_image_pull', 'false').lower() == 'true'
+        missing_images = []
+        try:
+            # Try to get images from 'docker compose config --format json'
+            import json as _json
+            cf = subprocess.run(['docker', 'compose', '-f', str(compose_path), 'config', '--format', 'json'], cwd=str(host_stack_dir), capture_output=True, text=True, timeout=30)
+            services = []
+            if cf.returncode == 0 and cf.stdout:
+                try:
+                    cfg = _json.loads(cf.stdout)
+                    services = cfg.get('services', {})
+                    images = [s.get('image') for s in services.values() if isinstance(s, dict) and s.get('image')]
+                except Exception:
+                    images = []
+            else:
+                # Fallback: parse plain config output for 'image:' lines
+                cf2 = subprocess.run(['docker', 'compose', '-f', str(compose_path), 'config'], cwd=str(host_stack_dir), capture_output=True, text=True, timeout=30)
+                images = []
+                if cf2.returncode == 0 and cf2.stdout:
+                    for line in cf2.stdout.splitlines():
+                        line = line.strip()
+                        if line.startswith('image:'):
+                            parts = line.split(None, 1)
+                            if len(parts) == 2:
+                                images.append(parts[1].strip())
+            # Check each image via docker SDK
+            try:
+                import docker as _docker
+                client = _docker.from_env()
+                for img in images:
+                    try:
+                        client.images.get(img)
+                    except Exception:
+                        missing_images.append(img)
+            except Exception:
+                # Unable to check images (docker not available); assume none missing
+                missing_images = []
+        except Exception as e:
+            self.log('WARNING', f"Failed to determine images for {stack_name}: {e}")
+            missing_images = []
+
+        if missing_images:
+            if allow_pull:
+                self.log('INFO', f"Missing images for {stack_name}: {', '.join(missing_images)}. Attempting pull (allowed by settings).")
+                try:
+                    pull_res = subprocess.run(['docker', 'compose', '-f', str(compose_path), 'pull'], cwd=str(host_stack_dir), capture_output=True, text=True, timeout=300)
+                    if pull_res.returncode != 0:
+                        self.log('ERROR', f"Failed to pull images for {stack_name}: {pull_res.stderr}")
+                        return False
+                    # Re-check existence
+                    try:
+                        import docker as _docker2
+                        client = _docker2.from_env()
+                        still_missing = []
+                        for img in missing_images:
+                            try:
+                                client.images.get(img)
+                            except Exception:
+                                still_missing.append(img)
+                        if still_missing:
+                            self.log('ERROR', f"Images still missing after pull for {stack_name}: {', '.join(still_missing)}")
+                            return False
+                    except Exception:
+                        # If we can't re-check, proceed cautiously
+                        pass
+                except Exception as e:
+                    self.log('ERROR', f"Exception while pulling images for {stack_name}: {e}")
+                    return False
+            else:
+                # Pull not allowed: skip starting this stack
+                reason = f"Skipped starting stack {stack_name} because images missing: {', '.join(missing_images)} (image pull disabled in settings). See README for details."
+                self.log('WARNING', reason)
+                # Record skip reason so notifications can include it via stack metric
+                if not hasattr(self, 'stack_skip_reasons'):
+                    self.stack_skip_reasons = {}
+                self.stack_skip_reasons[stack_name] = reason
+                return 'skipped'
+
         cmd_parts = ['docker', 'compose', 'up', '-d']
         self.log('INFO', f"Starting command: Starting {stack_name} (docker compose up -d)")
         

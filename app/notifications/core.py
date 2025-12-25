@@ -182,11 +182,37 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
         else:
             html_body_to_send = body
 
+        # Ensure skipped note is present in the body used for email (attachment mode may recreate body)
+        try:
+            skipped = [s for s in (stack_metrics or []) if s.get('status') == 'skipped']
+            if skipped:
+                note_html = "\n<hr>\n<p><strong>Note:</strong> Some stacks were <em>skipped</em> during restart because required images were not available locally and image pulls are disabled in the application settings. See <a href=\"https://github.com/drgimpfen/Docker-Archiver#image-pull-policy\">README</a> for details.</p>\n<ul>\n"
+                for s in skipped:
+                    err = s.get('error') or 'Skipped (missing images)'
+                    note_html += f"  <li><strong>{s.get('stack_name')}</strong>: {err}</li>\n"
+                note_html += "</ul>\n"
+                html_body_to_send = (html_body_to_send or '') + note_html
+        except Exception:
+            pass
+
         # Build compact text and sections (plain-text) for non-email services
         compact_text, lines = build_compact_text(archive_name, stack_metrics, created_archives, total_size, size_str, duration_str, stacks_with_volumes, reclaimed, base_url)
         sections = build_sections(archive_name, lines, created_archives, total_size, stack_metrics, stacks_with_volumes, reclaimed, base_url, job_id)
 
-
+        # If any stacks were skipped due to missing images, add a short note to the HTML body
+        try:
+            skipped = [s for s in (stack_metrics or []) if s.get('status') == 'skipped']
+            if skipped:
+                note_html = "\n<hr>\n<p><strong>Note:</strong> Some stacks were <em>skipped</em> during restart because required images were not available locally and image pulls are disabled in the application settings. See <a href=\"https://github.com/drgimpfen/Docker-Archiver#image-pull-policy\">README</a> for details.</p>\n<ul>\n"
+                for s in skipped:
+                    err = s.get('error') or 'Skipped (missing images)'
+                    note_html += f"  <li><strong>{s.get('stack_name')}</strong>: {err}</li>\n"
+                note_html += "</ul>\n"
+                # Append to both inline and attachment bodies so recipients see it regardless of attachment policy
+                body = (body or '') + note_html
+                # If we already built html_body_to_send, append there too; otherwise it will be built later
+        except Exception:
+            pass
 
         # Optionally attach full job log as a file instead of inlining it
         attach_path = None

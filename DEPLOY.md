@@ -81,6 +81,13 @@ Redis is included in `docker-compose.yml` by default and stores data in `./redis
 ```bash
 # Recommended update & start workflow (pull, update images, rebuild app service, tail logs)
 git pull --ff-only && docker compose pull && docker compose up -d --build --no-deps --remove-orphans app && docker compose logs -f --tail=200 app
+
+**Image pull policy:** Docker Archiver can optionally pull missing images automatically before starting stacks. This behaviour is controlled by **Settings → Security → Allow image pulls on start** (default: **disabled**).
+
+- If enabled, the archiver will attempt `docker compose pull` before starting stacks; any pull failure will be logged and will prevent the stack from starting.
+- If disabled, the archiver checks whether the images referenced by the stack are available locally; if they are missing the stack will be **skipped** during restart and a warning will be recorded in the job log and included in the job notification. This prevents unexpected network activity or automatic updates on your hosts.
+
+Ensure required images are pre-pulled in your deployment process if this option is disabled.
 ```
 
 If you prefer a simple start for a fresh deployment:

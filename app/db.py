@@ -323,6 +323,7 @@ def init_db():
                 ('smtp_from', ''),
                 ('smtp_use_tls', 'true'),
                 ('apply_permissions', 'false'),
+                ('allow_image_pull', 'false'),
                 ('app_version', '0.7.0')
             ON CONFLICT (key) DO NOTHING;
         """)

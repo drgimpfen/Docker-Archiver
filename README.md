@@ -378,6 +378,21 @@ Tips:
 
 ---
 
+### Image pull policy
+
+**Image pull policy:** Docker Archiver can optionally pull missing images automatically before starting stacks. This behavior is controlled by **Settings → Security → Allow image pulls on start** (default: **disabled**).
+
+- If **disabled**, any stack that requires images that are not available locally will be **skipped** during the restart phase; the job log and notifications will include a short explanation and a link to this section.
+- If **enabled**, the archiver will attempt to run `docker compose pull` for the stack before starting it. This requires network access and appropriate registry credentials to be available in the environment (private registries may require additional configuration).
+
+Notes:
+
+- Pulls may fail (network issues, auth failures); on pull failure the stack start may fail and the job log will contain the error details.
+- For deterministic production behavior we recommend pre-pulling images on hosts or enabling this setting only if you trust the network/registry configuration.
+- The archiver records skipped stacks and reasons in the job summary so operators can act on them.
+
+---
+
 ### Retention Policy
 
 **GFS (Grandfather-Father-Son)**:

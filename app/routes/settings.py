@@ -127,12 +127,17 @@ def manage_security():
     if request.method == 'POST':
         try:
             apply_permissions = request.form.get('apply_permissions') == 'on'
+            allow_image_pull = request.form.get('allow_image_pull') == 'on'
             with get_db() as conn:
                 cur = conn.cursor()
                 cur.execute("""
                     INSERT INTO settings (key, value) VALUES (%s, %s)
                     ON CONFLICT (key) DO UPDATE SET value = %s, updated_at = CURRENT_TIMESTAMP;
                 """, ('apply_permissions', 'true' if apply_permissions else 'false', 'true' if apply_permissions else 'false'))
+                cur.execute("""
+                    INSERT INTO settings (key, value) VALUES (%s, %s)
+                    ON CONFLICT (key) DO UPDATE SET value = %s, updated_at = CURRENT_TIMESTAMP;
+                """, ('allow_image_pull', 'true' if allow_image_pull else 'false', 'true' if allow_image_pull else 'false'))
                 conn.commit()
             flash('Security settings saved successfully!', 'success')
             return redirect(url_for('settings.manage_security'))
