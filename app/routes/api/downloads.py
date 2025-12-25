@@ -88,7 +88,8 @@ def process_directory_pack(stack_name, source_path, token):
     try:
         # Create output path in temp downloads directory
         downloads_path = get_downloads_path()
-        output_filename = f"{stack_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.tar.gz"
+        # Use localized timestamp for filenames
+        output_filename = f"{stack_name}_{utils.local_now().strftime('%Y%m%d_%H%M%S')}.tar.gz"
         output_path = downloads_path / output_filename
         
         # Pack the directory
@@ -147,7 +148,7 @@ def request_download():
     
     # Generate token
     token = generate_token()
-    expires_at = datetime.now() + timedelta(hours=24)
+    expires_at = utils.now() + timedelta(hours=24)
     
     try:
         with get_db() as conn:
