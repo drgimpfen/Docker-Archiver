@@ -16,7 +16,6 @@ on:
 jobs:
   notify-discord:
     runs-on: ubuntu-latest
-    if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
     env:
       WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       # When triggered by a release event these will be populated from the event
