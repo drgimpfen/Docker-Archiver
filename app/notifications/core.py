@@ -266,6 +266,8 @@ def send_archive_failure_notification(archive_config, job_id, stack_metrics, dur
                 body = (body or '') + note_html
         except Exception:
             pass
+    except Exception:
+        pass
 
 
 def send_archive_notification(archive_config, job_id, stack_metrics, duration, total_size):
