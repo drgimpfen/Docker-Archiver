@@ -309,9 +309,28 @@ def to_iso_z(dt):
     return str(dt)
 
 
+def ensure_utc(dt):
+    """Normalize a datetime-like object to a timezone-aware UTC datetime.
+
+    - If `dt` is ``None``, returns ``None``.
+    - If `dt` is naive (no tzinfo), it's assumed to be UTC and ``tzinfo`` is set
+      to ``timezone.utc``.
+    - If `dt` is timezone-aware, it is converted to UTC.
+    """
+    if dt is None:
+        return None
+    try:
+        from datetime import timezone
+        if getattr(dt, 'tzinfo', None) is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return dt
+
+
 def filename_safe(name):
     """Return a filesystem-safe name derived from the provided string.
-
+"},{ 
     Replaces any character not in [A-Za-z0-9_-] with underscore and collapses
     repeated underscores.
     """

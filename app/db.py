@@ -109,7 +109,96 @@ def init_db():
             );
         """)
         
-        # Download token system removed (tokens and temporary downloads are deprecated and dropped)
+        # Download tokens for secure file access
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS download_tokens (
+                id SERIAL PRIMARY KEY,
+                token VARCHAR(64) UNIQUE NOT NULL,
+                stack_name VARCHAR(255) NOT NULL,
+                file_path TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                is_packing BOOLEAN DEFAULT FALSE
+            );
+        """)
+        
+        # Migrate download_tokens table: if older schema exists without new columns, add them
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='file_path'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN file_path TEXT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='created_at'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='expires_at'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN expires_at TIMESTAMP;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='is_packing'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN is_packing BOOLEAN DEFAULT FALSE;
+                END IF;
+            END $$;
+        """)
+
+        # Ensure `notify_emails` array column exists and drop legacy `notify_email` column if present
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='notify_emails'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN notify_emails TEXT[];
+                END IF;
+
+                -- If legacy notify_email column exists, drop it (we assume backfill has already been applied)
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='notify_email'
+                ) THEN
+                    ALTER TABLE download_tokens DROP COLUMN notify_email;
+                END IF;
+            END $$;
+        """)
+
+        # Ensure archive_path column exists and is nullable; backfill from file_path when possible
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='archive_path'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN archive_path TEXT;
+                END IF;
+
+                -- If archive_path exists but is NOT NULL, drop the NOT NULL constraint so INSERTs without it succeed
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='archive_path' AND is_nullable = 'NO'
+                ) THEN
+                    ALTER TABLE download_tokens ALTER COLUMN archive_path DROP NOT NULL;
+                END IF;
+
+                -- Backfill archive_path from file_path for existing rows
+                IF EXISTS (SELECT 1 FROM download_tokens WHERE archive_path IS NULL AND file_path IS NOT NULL) THEN
+                    UPDATE download_tokens SET archive_path = file_path WHERE archive_path IS NULL AND file_path IS NOT NULL;
+                END IF;
+            END $$;
+        """)
         
         # API tokens for external access
         cur.execute("""
@@ -137,6 +226,9 @@ def init_db():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_archive_id ON jobs(archive_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_start_time ON jobs(start_time DESC);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_job_stack_metrics_job_id ON job_stack_metrics(job_id);")
+
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_download_tokens_token ON download_tokens(token);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_download_tokens_expires_at ON download_tokens(expires_at);")
 
         cur.execute("CREATE INDEX IF NOT EXISTS idx_api_tokens_token ON api_tokens(token);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);")

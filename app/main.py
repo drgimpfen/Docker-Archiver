@@ -3,6 +3,7 @@ Main Flask application with Blueprints.
 """
 import os
 import threading
+from datetime import datetime
 from app.utils import setup_logging, get_logger, get_sentinel_path, format_bytes, format_duration, get_disk_usage, to_iso_z, format_datetime
 # Centralized logging setup (use only LOG_LEVEL env var)
 setup_logging()
@@ -24,7 +25,7 @@ from pathlib import Path
 
 # Import blueprints
 # Core routes and blueprints
-from app.routes import history, settings, api, dashboard
+from app.routes import history, settings, api, dashboard, downloads
 # Import API-specific archives blueprint from new location
 from app.routes.api import archives as api_archives
 # Legacy redirects removed — `/archives/*` legacy endpoints were deprecated and are no longer registered.
@@ -72,6 +73,7 @@ app.register_blueprint(api_archives.bp)
 # Legacy redirects removed — `/archives/*` legacy endpoints were deprecated and are no longer registered.
 
 app.register_blueprint(history.bp)
+app.register_blueprint(downloads.bp)
 app.register_blueprint(settings.bp)
 app.register_blueprint(api.bp)
 app.register_blueprint(dashboard.bp)
@@ -183,8 +185,16 @@ def run_startup_discovery():
                 if verbose:
                     logger.exception("[Startup] Failed to start stale job cleanup thread: %s", e)
 
-            # Downloads startup rescan removed (token-based download system disabled)
-            pass
+            # Resume any pending download packing tasks on startup
+            try:
+                from app.routes.api.downloads import resume_pending_downloads
+                generate_on_start = os.environ.get('DOWNLOADS_AUTO_GENERATE_ON_STARTUP', 'false').lower() in ('1','true','yes')
+                t = threading.Thread(target=resume_pending_downloads, args=(generate_on_start,), daemon=True)
+                t.start()
+                if verbose:
+                    logger.info('[Startup] Resuming pending download packing tasks (generate_missing=%s)', generate_on_start)
+            except Exception as e:
+                logger.exception('[Startup] Failed to resume pending downloads: %s', e)
 
             startup_discovery_done = True
 
@@ -323,6 +333,145 @@ def api_get_stacks():
     stacks = discover_stacks()
     return jsonify({'stacks': stacks})
 
+
+@app.route('/download/<token>')
+def download_file(token):
+    """Serve file download using secure token (publicly accessible)."""
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT file_path, archive_path, notify_emails, stack_name, expires_at, is_packing
+                FROM download_tokens
+                WHERE token = %s;
+            """, (token,))
+            token_data = cur.fetchone()
+
+        if not token_data:
+            return render_template('download_error.html', reason='Download token is invalid or does not exist.', hint='Please request a fresh download link.'), 404
+
+        # Normalize expiry and compare with UTC-aware now
+        expires = utils.ensure_utc(token_data.get('expires_at'))
+        if not expires or expires < utils.now():
+            return render_template('download_error.html', reason='This download link has expired.', hint='Request a new download link.'), 410
+
+        if token_data['is_packing']:
+            # Show preparing page and allow user to register for notification. Prevent simultaneous regenerate triggers.
+            return render_template('download_preparing.html', token=token, stack_name=token_data.get('stack_name'), notify_emails=token_data.get('notify_emails'), expires_at=token_data.get('expires_at')), 202
+
+        file_path = token_data.get('file_path')
+        if not file_path or not Path(file_path).exists():
+            # If the archive_path is already a file (created by previous runs), adopt it and serve
+            archive_path = token_data.get('archive_path')
+            if archive_path and Path(archive_path).exists() and Path(archive_path).is_file():
+                try:
+                    with get_db() as conn:
+                        cur = conn.cursor()
+                        cur.execute("UPDATE download_tokens SET file_path = %s, is_packing = FALSE WHERE token = %s;", (archive_path, token))
+                        conn.commit()
+                    file_path = archive_path
+                except Exception:
+                    pass
+
+            # If archive_path exists and is a directory, present regeneration form (public)
+            if archive_path and Path(archive_path).exists() and Path(archive_path).is_dir():
+                return render_template('download_missing.html', token=token, stack_name=token_data.get('stack_name'), notify_emails=token_data.get('notify_emails'), expires_at=token_data.get('expires_at'))
+
+            # Optionally start regeneration on access if enabled
+            if os.environ.get('DOWNLOADS_AUTO_GENERATE_ON_ACCESS', 'false').lower() in ('1','true','yes') and archive_path and Path(archive_path).exists() and Path(archive_path).is_dir():
+                try:
+                    with get_db() as conn:
+                        cur = conn.cursor()
+                        cur.execute("UPDATE download_tokens SET is_packing = TRUE WHERE token = %s;", (token,))
+                        conn.commit()
+                    from app.routes.api.downloads import process_directory_pack
+                    t = threading.Thread(target=process_directory_pack, args=(token_data.get('stack_name'), archive_path, token), daemon=True)
+                    t.start()
+                    # Do not prefill any email in the preparing page
+                    return render_template('download_preparing.html', token=token, stack_name=token_data.get('stack_name'), expires_at=token_data.get('expires_at')), 202
+                except Exception as e:
+                    logger.exception('Failed to start on-access generation for token %s: %s', token, e)
+                    return render_template('download_error.html', reason='Download file could not be found and generation failed.', hint='Contact the administrator.'), 404
+
+            return render_template('download_error.html', reason='Download file could not be found.', hint='Contact the administrator if this problem persists.'), 404
+        
+        # Serve the file using a normalized download filename
+        filename = utils.make_download_filename(file_path.name)
+        return send_file(
+            file_path,
+            as_attachment=True,
+            download_name=filename,
+            mimetype='application/octet-stream'
+        )
+        
+    except Exception as e:
+        logger.exception(f"Error serving download for token {token}: {e}")
+        flash('Error processing download', 'danger')
+        return redirect(url_for('dashboard.index'))
+
+
+@app.route('/download/<token>/regenerate', methods=['POST'])
+def download_regenerate(token):
+    """Public endpoint: accept an email to notify and start regeneration if possible."""
+    try:
+        email = request.form.get('email', '').strip()
+        # Validate single email entry
+        if not email or ',' in email or ';' in email or ' ' in email or '@' not in email:
+            return render_template('download_missing.html', token=token, stack_name='unknown', notify_emails=[], expires_at=None, error='Please provide a single valid email address'), 400
+
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT token, archive_path, stack_name, file_path, expires_at, is_packing, notify_emails FROM download_tokens WHERE token = %s;", (token,))
+            row = cur.fetchone()
+            if not row:
+                return render_template('download_error.html', reason='Download token ungültig oder nicht gefunden.'), 404
+
+            # Merge provided email into notify_emails array (unique)
+            cur.execute("""
+                UPDATE download_tokens
+                SET notify_emails = (
+                    SELECT ARRAY(SELECT DISTINCT e FROM (
+                        SELECT unnest(COALESCE(notify_emails, ARRAY[]::text[])) UNION ALL SELECT unnest(%s::text[])
+                    ) AS e)
+                )
+                WHERE token = %s;
+            """, ([email], token))
+            conn.commit()
+
+            ap = row.get('archive_path') or row.get('file_path')
+            if ap and Path(ap).exists() and Path(ap).is_dir() and not row.get('is_packing'):
+                try:
+                    # atomic update to avoid race: only set is_packing=TRUE if it was FALSE/NULL
+                    cur.execute("UPDATE download_tokens SET is_packing = TRUE WHERE token = %s AND (is_packing = FALSE OR is_packing IS NULL) RETURNING token;", (token,))
+                    r = cur.fetchone()
+                    if r:
+                        conn.commit()
+                        from app.routes.api.downloads import process_directory_pack
+                        t = threading.Thread(target=process_directory_pack, args=(row.get('stack_name'), ap, token), daemon=True)
+                        t.start()
+                    else:
+                        # someone else started packing concurrently
+                        # Do not prefill email input
+                        return render_template('download_preparing.html', token=token, stack_name=row.get('stack_name'), expires_at=row.get('expires_at')), 202
+                except Exception as e:
+                    logger.exception('Failed to start regeneration for token %s: %s', token, e)
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    return render_template('download_error.html', reason='Failed to start regeneration. Please contact the administrator.'), 500
+
+        # Return preparing page without prefilled email
+        return render_template('download_preparing.html', token=token, stack_name=row.get('stack_name'), expires_at=row.get('expires_at'))
+    except Exception as e:
+        logger.exception('Error handling regenerate form: %s', e)
+        return render_template('download_error.html', reason='Interner Serverfehler'), 500
+
+# Exempt public regenerate endpoint from CSRF protection
+try:
+    csrf.exempt(download_regenerate)
+except Exception:
+    pass
 
 # Token-based download endpoint removed.
 

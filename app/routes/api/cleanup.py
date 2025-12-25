@@ -14,6 +14,10 @@ def run_cleanup_api():
     try:
         data = request.get_json() or {}
         dry = bool(data.get('dry_run', False))
+        tasks = data.get('tasks')  # optional list of task keys to run
+        if tasks is not None and not isinstance(tasks, list):
+            return jsonify({'error': 'Invalid tasks parameter; must be an array'}), 400
+
         # Create a job record so the UI can link to it immediately
         job_id = None
         try:
@@ -34,7 +38,7 @@ def run_cleanup_api():
             try:
                 # Import here to avoid circular imports at module import time
                 from app.cleanup import run_cleanup
-                run_cleanup(dry_run_override=dry, job_id=job_id)
+                run_cleanup(dry_run_override=dry, job_id=job_id, tasks=tasks)
             except Exception as e:
                 # Ensure the job is marked as failed if something goes wrong
                 try:
