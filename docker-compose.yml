@@ -57,10 +57,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Archive output directory (bind mount - adjust to your setup)
       - ./archives:/archives
-      # Job logs (detached subprocess stdout/stderr) - optional host bind mount
+      # Job logs (detached subprocess stdout/stderr) - REQUIRED host bind mount
       # Map a host folder into the container so job logs persist outside the container
       - ./logs:/var/log/archiver
-      # Persistent downloads so prepared archives survive container restarts
+      # Persistent downloads so prepared archives survive container restarts - REQUIRED
       - ./downloads:/tmp/downloads
       # Stack directories - automatically detected from volume mounts
       # Add bind mounts for your stack directories here

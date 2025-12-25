@@ -47,8 +47,9 @@ Add your stack directory **bind mounts** to `docker-compose.yml`. **This is mand
 ```yaml
 volumes:
   - /var/run/docker.sock:/var/run/docker.sock
-  - ./logs:/var/log/archiver        # Persist application and job logs on the host
-  - ./downloads:/tmp/downloads      # Optional: persist generated downloads (recommended)  - - /mnt/backups:/archives           # Persist generated archives on the host
+  - ./logs:/var/log/archiver        # Persist application and job logs on the host (mount this)
+  - ./downloads:/tmp/downloads      # Persist generated downloads on the host (mount this)
+  - ./archives:/archives            # Persist generated archives on the host
   - /opt/stacks:/opt/stacks        # ← Auto-detected (host:container paths must match)
   - /home/user/docker:/home/user/docker  # ← Auto-detected
 
@@ -92,11 +93,50 @@ git pull --ff-only && docker compose pull && docker compose up -d --no-deps --re
 Ensure required images are pre-pulled in your deployment process if this option is disabled.
 ```
 
-If you prefer a simple start for a fresh deployment (uses the published image by default):
+If you prefer a simple start for a fresh deployment (uses the published image by default), create a minimal `docker-compose.yml` like below and run `docker compose up -d`.
 
-```bash
-docker compose up -d
+```yaml
+version: "3.8"
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: docker-archiver-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: docker_archiver
+      POSTGRES_USER: archiver
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: docker-archiver-redis
+    restart: unless-stopped
+    volumes:
+      - ./redis-data:/data
+
+  app:
+    image: drgimpfen/docker-archiver:latest
+    container_name: docker-archiver-app
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      TZ: Europe/Berlin
+      DB_PASSWORD: ${DB_PASSWORD}
+      SECRET_KEY: ${SECRET_KEY}
+      DATABASE_URL: postgresql://archiver:${DB_PASSWORD}@db:5432/docker_archiver
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./archives:/archives
+      - ./logs:/var/log/archiver
+      - ./downloads:/tmp/downloads
+      - /opt/stacks:/opt/stacks
 ```
+
+If you instead want to build locally, run `docker compose up -d --build`.
 
 If you want to build the image locally instead of pulling the published image, either run `docker compose up -d --build` or replace the `app` service's `image:` line with `build: .` in `docker-compose.yml`.
 
@@ -105,6 +145,7 @@ If you want to build the image locally instead of pulling the published image, e
 ```yaml
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s

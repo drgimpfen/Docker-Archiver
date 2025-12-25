@@ -18,12 +18,12 @@
 - 🔄 **GFS Retention** - Grandfather-Father-Son retention policy (keep X days/weeks/months/years)
 - 🧹 **Automatic Cleanup** - Scheduled cleanup of orphaned archives, old logs, and temp files
 - 🎯 **Dry Run Mode** - Test archive operations without making changes
-- 📊 **Job History & Live Logs** - Detailed logs and metrics for all archive/retention runs. The **Job Details** modal includes live log tailing (polls `/api/jobs/<id>/log/tail`) and supports per‑job EventSource streaming for near‑real‑time log updates. **Note:** global Jobs SSE support for the dashboard has been removed; the dashboard uses polling for job status updates. The modal offers terminal-like controls (search, **Pause/Resume**, **Copy**, **Download**, **Line numbers**) for easier log inspection.
+- 📊 **Job History & Live Logs** - Detailed logs and metrics for all archive/retention runs. The **Job Details** modal includes live log tailing and supports per‑job EventSource streaming for near‑real‑time log updates. The modal offers terminal-like controls (search, **Pause/Resume**, **Copy**, **Download**, **Line numbers**) for easier log inspection.
 - 🔔 **Smart Notifications** - Email via SMTP (configured in **Settings → Notifications**; settings are stored in the database)
 - 🌓 **Dark/Light Mode** - Modern Bootstrap UI with theme toggle
 - 🔐 **User Authentication** - Secure login system (role-based access coming soon)
 - 💾 **Multiple Formats** - Support for tar, tar.gz, tar.zst, or folder output
-- 🛡️ **Output Permissions (configurable)** — The application can apply secure permissions to generated archives. See `SECURITY.md` for recommendations on file and mount permissions in production.
+- 🛡️ **Output Permissions (configurable)** — The application can apply secure permissions to generated archives. 
 - 🌍 **Timezone Support** - Configurable timezone via environment variable
 
 ## Architecture
@@ -45,39 +45,6 @@ See **How Stack Discovery Works** below for full details on how stack directorie
 
 ## Quick Start
 
-### 1. Clone and Configure
-
-```bash
-git clone https://github.com/drgimpfen/Docker-Archiver.git
-cd Docker-Archiver
-cp .env.example .env
-
-# Optional: copy the override example for local development (bind-mounts / overrides)
-cp docker-compose.override.yml.example docker-compose.override.yml
-```
-
-Edit `.env` and set required secrets like `DB_PASSWORD` and `SECRET_KEY`. See [SECURITY.md](./SECURITY.md) for guidance on generating, storing, and rotating secrets securely.
-
-### 2. Start Services
-
-```bash
-docker compose up -d
-```
-
-The application will be available at **http://localhost:8080**
-
-> **Recommended update workflow (pull & restart app service)**
->
-> On development/test VMs it's convenient to use a compact, robust one-liner that pulls the repo, updates images, rebuilds the `app` service and tails recent logs:
->
-> ```bash
-> git pull --ff-only && sudo docker compose pull && sudo docker compose up -d --build --no-deps --remove-orphans app && sudo docker compose logs -f --tail=200 app
-> ```
->
-> **Note:** `--ff-only` prevents accidental merge commits; `--no-deps` + service target (`app`) limits disruption to other services.
-
-> **Note:** Stack directories must be configured as **bind mounts** — typically in `docker-compose.yml` for production, or in `docker-compose.override.yml` for local development (see examples below).
-
 ### Minimal compose example (quick start)
 
 Here is a minimal `docker-compose.yml` example that starts the core services. It uses the published image `drgimpfen/docker-archiver:latest` and only the minimum required environment variables and mounts.
@@ -87,6 +54,8 @@ version: "3.8"
 services:
   db:
     image: postgres:16-alpine
+    container_name: docker-archiver-db
+    restart: unless-stopped
     environment:
       POSTGRES_DB: docker_archiver
       POSTGRES_USER: archiver
@@ -94,8 +63,17 @@ services:
     volumes:
       - ./postgres-data:/var/lib/postgresql/data
 
+  redis:
+    image: redis:7-alpine
+    container_name: docker-archiver-redis
+    restart: unless-stopped
+    volumes:
+      - ./redis-data:/data
+
   app:
     image: drgimpfen/docker-archiver:latest
+    container_name: docker-archiver-app
+    restart: unless-stopped
     ports:
       - "8080:8080"
     environment:
@@ -103,6 +81,7 @@ services:
       DB_PASSWORD: examplepassword
       SECRET_KEY: change-me
       DATABASE_URL: postgresql://archiver:examplepassword@db:5432/docker_archiver
+      REDIS_URL: redis://redis:6379/0
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./archives:/archives
@@ -126,136 +105,32 @@ On first visit, you'll be prompted to create an admin account.
 5. Choose output format
 6. Save and run manually or wait for schedule
 
-## Stack Directory Configuration
+## Stack directory mounts
 
-**Easy Setup (MANDATORY):** Add your stack directory **bind mounts** to `docker-compose.yml` with **identical host:container paths** (e.g., `- /opt/stacks:/opt/stacks`). This is mandatory — if stacks are not mounted as identical bind mounts the archiver cannot discover them and jobs will fail.
+Keep it simple: mount the folders that contain your Docker stacks into the Archiver container using bind mounts, and use the **same path** on the host and inside the container (for example: `- /opt/stacks:/opt/stacks`). The Archiver scans these mounted folders and backs up any stacks it finds.
 
-### Automatic Detection
+Quick checklist:
+- What to mount: the Docker socket (`/var/run/docker.sock`), a folder for your stacks (e.g., `/opt/stacks`), a host directory to store archives (e.g., `./archives`), and mount `./logs` and `./downloads` so logs and prepared downloads persist across container restarts.
+- Use absolute host paths and make sure the host path equals the container path (this is required).
+- For local development, add mounts to `docker-compose.override.yml`.
+- If discovery fails, the Dashboard shows a warning and `TROUBLESHOOTING.md` explains how to diagnose and fix it.
 
-Docker Archiver auto-detects stack directories from bind mounts that are mounted into the archiver container. Detection is performed using (in order): `docker inspect` on the running container, and `/proc/self/mountinfo` as a robust fallback.
-
-Key behavior:
-- Only **bind mounts** are considered. Named Docker volumes are ignored.
-- The scanner checks the **mount root** and **one level of subdirectories** (fixed behavior; this is not configurable).
-- Hidden directories (starting with `.`) and special names like `archives` or `tmp` are excluded.
-- Results are **deduplicated** by resolved path.
-- Each discovered stack is annotated as **direct** (compose found at mount root) or **nested** (compose found in a subdirectory).
-- See **⚠️ Important: Bind Mounts Required** below for mandatory bind-mount requirements.
-
-### Volume Mounts (how to configure)
-
-Add bind mounts for your stack directories in `docker-compose.yml`. Examples:
+Minimal example (volumes only):
 
 ```yaml
 services:
   app:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./archives:/archives
       - /opt/stacks:/opt/stacks
-      - /srv/docker/stacks:/srv/docker/stacks
-      - /home/user/docker:/home/user/docker
-```
-
-```yaml
-services:
-  app:
-    volumes:
-      # Docker socket (required for container management)
-      - /var/run/docker.sock:/var/run/docker.sock
-      
-      # Archive output directory (adjust path as needed)
       - ./archives:/archives
-      
-      # Stack directories - ADD YOUR MOUNTS HERE:
-      - /opt/stacks:/opt/stacks
-      - /srv/docker/stacks:/srv/docker/stacks
-      - /home/user/docker:/home/user/docker
+      - ./logs:/var/log/archiver
+      - ./downloads:/tmp/downloads
 ```
 
-### Local development (docker-compose.override.yml)
-
-For local or development-specific mounts, put your bind mounts in `docker-compose.override.yml`. Docker Compose automatically merges this file with `docker-compose.yml` when you run `docker compose up`.
-
-If you run Docker Archiver with multiple workers and want real-time SSE events to work across workers, run a Redis service and configure `REDIS_URL` (example using `docker-compose.override.yml` below).
-
-Ensure host and container paths in your `docker-compose.override.yml` are identical — see **⚠️ Important: Bind Mounts Required** below for details.
-
-```yaml
-services:
-  app:
-    volumes:
-      - /opt/stacks:/opt/stacks    # Host and container paths are the same
-      - ./archives:/archives
-```
-
-Using identical paths (host:container) is **mandatory** to ensure the archiver finds compose files and runs `docker compose` from the expected working directory.
-
-### Redis is included by default
-
-Redis is now included by default in `docker-compose.yml` to enable cross-worker SSE event streaming out of the box. The service is a lightweight `redis:7-alpine` container and stores data in a bind-mounted folder at `./redis-data` so your Redis data is persisted next to the project.
-
-If you need to disable Redis for a particular environment, remove the `redis` service from your compose file and unset `REDIS_URL` (or remove it from the `app` environment). Otherwise the app will automatically use the bundled Redis instance and set `REDIS_URL` to `redis://redis:6379/0` by default.
-
-After changing compose files restart the app: `docker compose up -d --build app`. Verify `REDIS_URL` appears in the app logs on startup; the app automatically uses Redis when available.
-
-**Recommendation:** It's sensible to include and run a lightweight Redis service by default (the override example adds `redis:7-alpine`). Running Redis even on single-node development setups makes the deployment future-proof (enables cross-worker SSE when you scale to multiple Gunicorn workers) and adds minimal resource overhead. If you prefer to omit Redis, remove the `redis` service from your compose file and either unset `REDIS_URL` or remove it from the `app` environment to disable cross-worker streaming.
-
-**Optional Gunicorn environment overrides:** You can optionally control Gunicorn sizing via env vars in `docker-compose.yml` (they are commented examples in the provided compose). Example settings you can enable in `docker-compose.override.yml`:
-
-```yaml
-services:
-  app:
-    environment:
-      # Override automatic sizing and force workers/threads
-      # GUNICORN_WORKERS: "6"     # explicit workers (overrides auto calc)
-      # GUNICORN_MAX_WORKERS: "8" # cap for auto sizing
-      # GUNICORN_THREADS: "2"     # threads per worker
-      # GUNICORN_TIMEOUT: "300"  # worker timeout in seconds
-```
-
-
-### How Stack Discovery Works
-
-Discovery follows these rules:
-- The app first **auto-detects** candidate mount points from bind mounts inside the archiver container.
-- For each mount point the app checks the **mount root** and **one level of subdirectories** for compose files:
-  - If a compose file is present at the mount root, the stack is marked as **direct**.
-  - If a compose file is present in a subdirectory, the stack is marked as **nested** (the subdirectory becomes the stack path).
-- The scanner **ignores** hidden directories (names that start with `.`) and obvious non-stack names like `archives` or `tmp` to reduce false positives.
-- Results are deduplicated by resolved path so the same stack mounted multiple ways is only listed once.
-
-**Behavior for non-mounted stacks:** If a stack directory is not available via a bind mount, the archiver will use the path as it appears inside the container (the container-side path) when running compose commands; it will not attempt to use host-only paths that are not mounted into the container.
-
-See **⚠️ Important: Bind Mounts Required** below for the mandatory bind-mount rules — mismatched mounts will be ignored and may cause job failures.
-
-<a name="troubleshooting-bind-mount-warnings"></a>
-> **Troubleshooting (bind-mounts, Redis, logs, notifications):** See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for step-by-step guidance, diagnostic commands, and examples.
-
-### ⚠️ Important: Bind Mounts Required
-
-**Stack directories MUST use bind mounts** (not named volumes):
-
-✅ **Correct:**
-```yaml
-services:
-  app:
-    volumes:
-      - /opt/stacks:/opt/stacks  # Bind mount (host:container - same path)
-```
-
-❌ **Incorrect:**
-```yaml
-- my-volume:/opt/stacks    # Named volume - will NOT work
-```
-
-**How it works:** Docker Archiver uses the configured `STACKS_DIR` paths directly. When it finds a stack at `/opt/stacks/immich`, it uses `/opt/stacks/immich` as the working directory for `docker compose` commands (since host and container paths are identical).
-
-**Important (MANDATORY):** Bind mounts are **required** and **host and container paths must be identical** (for example: `- /opt/stacks:/opt/stacks`). Docker Archiver scans each mount root and one level of subdirectories for compose files. Any mounts where the host and container paths differ will be ignored for discovery, and jobs relying on those mounts may fail; configure proper bind mounts to ensure reliable discovery and correct `docker compose` execution.
-
-**Note:** Named volumes *within* your stack's compose.yml (like `postgres_data:`) work perfectly fine - this requirement only applies to mounting the stack directories into the archiver container.
-
-**Postgres data directory:** The project's `docker-compose.yml` uses a host bind mount for Postgres data at `./postgres-data:/var/lib/postgresql/data`. For reliable backups prefer `pg_dump` (recommended). If you need a file-level backup, stop the `db` container and copy `./postgres-data` (or use filesystem snapshots) to avoid partial writes.
+Notes:
+- Named Docker volumes **are not** suitable for stack directories — use bind mounts where host and container paths match.
+- If you need more diagnostic details, see `TROUBLESHOOTING.md` which includes commands and examples to inspect mounts and logs.
 
 ---
 
@@ -292,64 +167,7 @@ For more details and troubleshooting tips, see the dashboard warning messages or
 | `DOWNLOADS_AUTO_GENERATE_ON_STARTUP` | false | No | When `true`, the app attempts to generate missing downloads for valid tokens during startup (use with caution). Default: `false` (recommended). |
 | `LOG_LEVEL` | INFO | No | Global log level for application logging (DEBUG, INFO, WARNING, ERROR). Set `LOG_LEVEL=DEBUG` to enable debug-level output for troubleshooting. |
 
-> **Note:** Port (8080) and mount paths are configured in `docker-compose.yml`, not via environment variables.
-
-> **Note:** The application uses fixed internal paths for archive output and logs. To ensure log files are persisted on the host, mount a directory to `/var/log/archiver` (e.g. `./logs:/var/log/archiver` in `docker-compose.yml`). The relevant internal paths are:
-> - Archives directory: `/archives` (used for storing generated archives)
-> - Logs directory: `/var/log/archiver/` (contains the central app log at `/var/log/archiver/app.log` and job logs under `/var/log/archiver/jobs/`, e.g. `/var/log/archiver/jobs/job_123_My_Archive_20251225_182530.log`)
-
 ### Logging & Debugging 🔧
-
-Control application-wide logging using the `LOG_LEVEL` environment variable (recommended values: `DEBUG`, `INFO`, `WARNING`, `ERROR`). Setting `LOG_LEVEL=DEBUG` enables detailed diagnostic messages across components (scheduler, SSE, executor, etc.).
-
-File logging is always enabled and organized as follows:
-- Central app log: `/var/log/archiver/app.log` (rotated daily at midnight).
-- Job logs:
-  - Archive runs: `/var/log/archiver/jobs/archive_{archive_id}_{job_type}_{archive_name}_{TIMESTAMP}.log` (e.g. `archive_123_archive_My_Archive_20251225_182530.log`)
-  - Cleanup runs: `/var/log/archiver/jobs/cleanup_{job_id}_{TIMESTAMP}.log` (e.g. `cleanup_42_20251225_020500.log`)
-  - Notification attachments: job logs attached to notifications use `job_{job_id}_{archive_name}_{TIMESTAMP}.log`.
-
-  Note: timestamps use local display timezone and format `YYYYMMDD_HHMMSS` (e.g., `20251225_182530`).
-
-  Migration note: older versions wrote `cleanup_{job_id}.log` or `{archive_id}_{archive_name}.log` — these files are left in place; new runs will create timestamped filenames. Notification code prefers the most recent matching file for `cleanup_{job_id}_*.log` when present.
-
-Rotation (daily) applies to the app and job logs; long-term retention/deletion of rotated files is handled by the application's cleanup job (configured via **Settings → Cleanup log retention days**).
-
-Important: a logger set to a given level will **also include messages at higher-severity levels**. For example:
-
-- `LOG_LEVEL=INFO` emits **INFO**, **WARNING**, **ERROR**, **CRITICAL**
-- `LOG_LEVEL=DEBUG` emits **DEBUG**, **INFO**, **WARNING**, **ERROR**, **CRITICAL**
-
-Quick examples:
-
-```bash
-# Temporarily enable debug for a single run
-LOG_LEVEL=DEBUG docker compose up -d
-
-# Persist in .env (recommended for long-running environments)
-echo "LOG_LEVEL=DEBUG" >> .env
-docker compose up -d
-```
-
-Tips:
-- Use `DEBUG` for troubleshooting; use `INFO` for normal production verbosity.
-- Expensive debug-only work is guarded by `logger.isEnabledFor(logging.DEBUG)` to avoid runtime overhead unless debug is explicitly enabled.
-
-Deployment note: ensure the container can persist and write logs by mounting a host directory into `/var/log/archiver`. Example in `docker-compose.yml`:
-
-```yaml
-services:
-  app:
-    volumes:
-      - ./logs:/var/log/archiver   # persist app and job logs on the host
-```
-
-This ensures job logs and cleanup summaries are available on the host for inspection and backups.
-
-> **Note:** Redis is required for reliable cross‑worker SSE propagation. Set `REDIS_URL` (e.g., `redis://redis:6379/0`) and ensure the `redis` Python package is available. The app assumes Redis is present for real‑time streaming and global event propagation.
-
-> **Note:** On startup the app will mark any jobs still in `running` state that **do not have an `end_time`** as `failed` to avoid stuck jobs and UI confusion; this behavior is automatic and not configurable via environment variables.
-
 
 > **Logs & Notifications troubleshooting:** Details and commands moved to `TROUBLESHOOTING.md` — consult that file for examples and tips.
 
@@ -396,36 +214,7 @@ Examples:
 
 ## Notifications
 
-Docker Archiver sends notifications via **email (SMTP)** only; SMTP settings are configured in the web UI (Settings → Notifications). See `SECURITY.md` for guidance on TLS, least-privilege SMTP accounts, and credential handling.
-
-### Download Tokens & Notifications
-
-The download feature uses short-lived tokens (24 hours) that map to either an existing archive file or an archive directory (for which the server may prepare a `.tar.zst`). Important behavior:
-
-- **Token lifecycle**: Tokens are created via the API or UI and expire after 24 hours. A token may reference an existing file (`file_path`) or an archive directory (`archive_path`) that needs packing.
-- **notify_emails**: Each token stores a `notify_emails` array (one or more recipients). When an archive becomes ready, the server sends a link notification to the addresses in `notify_emails`.
-- **Public regenerate**: If an archive file is missing, the public `/download/<token>` page shows a small form where a user can submit a **single** email address to be added to `notify_emails` and request regeneration. The UI intentionally does **not** prefill any addresses.
-- **Automatic generation flags**: Two environment flags control optional automatic generation:
-  - `DOWNLOADS_AUTO_GENERATE_ON_ACCESS=false` (default) — when `true`, accessing a missing download link will attempt to start generation immediately.
-  - `DOWNLOADS_AUTO_GENERATE_ON_STARTUP=false` (default) — when `true`, the app will look for tokens missing prepared archives on startup and start generation for them. Both defaults are `false` and we recommend leaving them **disabled** unless you understand and want automatic generation behavior.
-
-**Security notes & token handling:** See `SECURITY.md` for guidance on secure token handling, download generation, and operational recommendations (rotate secrets, keep automatic generation disabled unless intentional).
-
-See [SECURITY.md](./SECURITY.md) for TLS and SMTP configuration recommendations.
-
-Recipients are taken from user profile email addresses or from configured default recipient settings in the Notifications page.
-
-### Notification Options
-
-- **Report verbosity** — Choose **Full** (default) or **Short** reports. Full includes a detailed HTML report with tables; Short sends a concise summary suitable for chat-like channels.
-- **Attach full job log** — When enabled, the full job log will be attached as a downloadable `.log` file instead of being inlined in the message.
-- **Attach log on failures only** — When enabled, the log is attached only when the job had failures.
-- **Subject tag** — Optional prefix (e.g., `[Production]`, `[TEST]`) to add to the message subject.
-- **Send Test Notification** — Use this button on the Notifications page to validate your SMTP settings and recipient delivery.
-
-**Note:** Non-email transports (Apprise, Discord, etc.) are no longer supported — the app sends notifications via SMTP only. If you previously used Apprise URLs, migrate those recipient addresses into user profiles or the Notifications page accordingly.
-
-**API & Endpoints:** The full runtime API reference and usage examples have been moved to [API.md](./API.md).
+Docker Archiver sends notifications via **email (SMTP)** only; configure SMTP in the web UI (**Settings → Notifications**). For secure SMTP and TLS guidance see `SECURITY.md`. The runtime API and download/token behavior are documented in `API.md` and `TROUBLESHOOTING.md`.
 
 ### Reverse Proxy Configuration (Pangolin, Authelia, etc.)
 
