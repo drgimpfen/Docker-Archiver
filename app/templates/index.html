@@ -668,18 +668,10 @@ function updateJobRowFromJob(job) {
     }
 }
 
-async function pollRunningJobs() {
-    const runningRows = document.querySelectorAll('tr[data-job-status="running"]');
-    if (!runningRows.length) {
-        if (_dashboardPoller) {
-            clearInterval(_dashboardPoller);
-            _dashboardPoller = null;
-        }
-        return;
-    }
+async function pollJobs() {
+    if (_jobsPollInFlight) return;
 
     try {
-        if (_jobsPollInFlight) return;
         _jobsPollInFlight = true;
         const resp = await fetch('/api/jobs?type=archive&limit=20');
         if (!resp.ok) return;
@@ -702,11 +694,16 @@ async function pollRunningJobs() {
         // Auto-open of Job Details disabled by user preference
         // (Users can still click a job row to open details manually.)
     } catch (err) {
-        console.error('Failed to poll running jobs:', err);
+        console.error('Failed to poll jobs:', err);
     } finally {
         // Ensure flag reset even on error
         _jobsPollInFlight = false;
     }
+}
+
+// Start continuous polling for job status updates
+if (!_dashboardPoller) {
+    _dashboardPoller = setInterval(pollJobs, 5000);
 }
 
 // Start Jobs SSE on dashboard load to receive new job events
@@ -745,9 +742,6 @@ try {
 
 // Periodically check for newly started running jobs and start polling if needed
 setInterval(() => {
-    if (document.querySelector('tr[data-job-status="running"]') && !_dashboardPoller) {
-        _dashboardPoller = setInterval(pollRunningJobs, 5000);
-    }
     // If there are running rows on the page, ensure duration ticker is active
     if (document.querySelector('tr[data-job-status="running"]')) {
         try { startDashboardDurationTicker(); } catch (e) {}
