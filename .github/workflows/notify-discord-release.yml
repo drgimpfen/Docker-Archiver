@@ -1,8 +1,14 @@
-# Notify Discord on Release (sends release title + notes to a Discord webhook)
-# Requires repository secret: DISCORD_WEBHOOK_URL
-# Optional: uses GITHUB_TOKEN to fetch latest release on manual dispatch
+# Notify a Discord channel when a release is published or when manually dispatched.
+# Triggers:
+#  - release: published
+#  - workflow_dispatch (requires input `release_tag`)
+# Required repository secrets:
+#  - DISCORD_WEBHOOK_URL: webhook URL for the target Discord channel
 
 name: Notify Discord on Release
+
+permissions:
+  contents: read
 
 on:
   release:
@@ -10,111 +16,109 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag to notify (required when triggering manually, e.g., v0.8.0).'
+        description: 'Tag name of the release (e.g. v1.2.3)'
         required: true
+        default: ''
 
 jobs:
-  notify-discord:
+  notify:
+    name: Notify Discord
     runs-on: ubuntu-latest
     env:
-      WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      # When triggered by a release event these will be populated from the event
-      RELEASE_NAME: ${{ github.event.release.name }}
-      RELEASE_TAG: ${{ github.event.release.tag_name }}
-      RELEASE_BODY: ${{ github.event.release.body }}
-      RELEASE_URL: ${{ github.event.release.html_url }}
+      REPO: ${{ github.repository }}
     steps:
-      - name: Populate release info (when run manually)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Determine release information
+        id: get_release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+            TITLE="${{ github.event.release.name }}"
+            RELEASE_URL="${{ github.event.release.html_url }}"
+            BODY="${{ github.event.release.body }}"
+          else
+            TAG="${{ github.event.inputs.release_tag }}"
+
+            # Use GITHUB_TOKEN to fetch release info
+            TOKEN="${{ secrets.GITHUB_TOKEN }}"
+
+            API_URL="https://api.github.com/repos/${REPO}/releases/tags/${TAG}"
+            RESP=$(curl -sS -H "Authorization: token $TOKEN" "$API_URL")
+
+            TITLE=$(echo "$RESP" | python - <<'PY'
+import sys, json
+try:
+    d=json.load(sys.stdin)
+    print(d.get('name') or d.get('tag_name') or '')
+except Exception:
+    print('')
+PY
+)
+            RELEASE_URL=$(echo "$RESP" | python - <<'PY'
+import sys, json
+try:
+    d=json.load(sys.stdin)
+    print(d.get('html_url') or '')
+except Exception:
+    print('')
+PY
+)
+            BODY=$(echo "$RESP" | python - <<'PY'
+import sys, json
+try:
+    d=json.load(sys.stdin)
+    print(d.get('body') or '')
+except Exception:
+    print('')
+PY
+)
+          fi
+
+          # Provide fallbacks
+          [ -n "$TITLE" ] || TITLE="$TAG"
+          [ -n "$RELEASE_URL" ] || RELEASE_URL="https://github.com/${REPO}/releases/tag/${TAG}"
+
+          # Write safe multiline values to GITHUB_ENV
+          echo "release_tag=$TAG" >> "$GITHUB_ENV"
+          echo "release_title=$TITLE" >> "$GITHUB_ENV"
+          echo "release_url=$RELEASE_URL" >> "$GITHUB_ENV"
+          echo "release_body<<'EOF'" >> "$GITHUB_ENV"
+          printf '%s
+' "$BODY" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+
+      - name: Post to Discord
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          INPUT_TAG: ${{ github.event.inputs.release_tag }}
-          # Optional PAT fallback in case GITHUB_TOKEN cannot access releases (create secret RELEASE_FETCH_TOKEN with a PAT having 'repo' scope)
-          RELEASE_FETCH_TOKEN: ${{ secrets.RELEASE_FETCH_TOKEN }}
-        run: |-
-          set -e
-          TAG="$INPUT_TAG"
-          if [ -z "$TAG" ]; then
-            echo "ERROR: 'release_tag' input is required when running manually. Provide a tag like 'v0.8.0'."
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
+            echo "DISCORD_WEBHOOK_URL secret is not set. Aborting."
             exit 1
           fi
 
-          # Choose auth header: prefer a provided PAT (RELEASE_FETCH_TOKEN), otherwise use GITHUB_TOKEN
-          if [ -n "$RELEASE_FETCH_TOKEN" ]; then
-            AUTH_HEADER="Authorization: token $RELEASE_FETCH_TOKEN"
-          else
-            AUTH_HEADER="Authorization: Bearer $GITHUB_TOKEN"
-          fi
+          JSON_PAYLOAD=$(python - <<'PY'
+import os, json, datetime
 
-          echo "Fetching release for tag: $TAG"
-          curl -s -H "Accept: application/vnd.github+json" -H "$AUTH_HEADER" "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" -o /tmp/release.json
+title = os.environ.get('release_title') or os.environ.get('release_tag')
+url = os.environ.get('release_url')
+body = os.environ.get('release_body') or ''
+# Truncate body to Discord embed description limit (approx 2048)
+if len(body) > 2048:
+    body = body[:2045] + '...'
+embed = {
+    'title': f'Release {title}',
+    'url': url,
+    'description': body,
+    'timestamp': datetime.datetime.utcnow().isoformat(),
+    'color': 3066993
+}
+print(json.dumps({'embeds': [embed]}))
+PY
+)
 
-          python - <<'PY'
-          import json, os
-          try:
-              d=json.load(open('/tmp/release.json'))
-          except Exception as e:
-              print('Failed to parse release JSON:', e)
-              print(open('/tmp/release.json').read())
-              raise
-          name = d.get('name') or d.get('tag_name') or ''
-          tag = d.get('tag_name') or ''
-          body = d.get('body') or ''
-          url = d.get('html_url') or ''
-          # Write variables to GITHUB_ENV using multiline EOF syntax to support newlines
-          with open(os.environ['GITHUB_ENV'],'a') as f:
-              f.write("RELEASE_NAME<<'EOF'\n")
-              f.write(name + "\n")
-              f.write("EOF\n")
-              f.write("RELEASE_TAG<<'EOF'\n")
-              f.write(tag + "\n")
-              f.write("EOF\n")
-              f.write("RELEASE_BODY<<'EOF'\n")
-              f.write(body + "\n")
-              f.write("EOF\n")
-              f.write("RELEASE_URL<<'EOF'\n")
-              f.write(url + "\n")
-              f.write("EOF\n")
-          PY
-
-      - name: Send Discord notification
-        run: |-
-          if [ -z "${WEBHOOK_URL}" ]; then
-            echo "DISCORD_WEBHOOK_URL not set, skipping notification";
-            exit 0;
-          fi
-
-          python - <<'PY'
-          import os, json, urllib.request, datetime
-
-          webhook_url = os.environ['WEBHOOK_URL']
-          name = os.environ.get('RELEASE_NAME') or os.environ.get('RELEASE_TAG') or 'Release'
-          tag = os.environ.get('RELEASE_TAG') or ''
-          body = os.environ.get('RELEASE_BODY') or ''
-          url = os.environ.get('RELEASE_URL') or ''
-
-          # Build embed
-          max_desc = 3000
-          description = body.strip() if body.strip() else f"Release {tag}" if tag else 'No description provided.'
-          if len(description) > max_desc:
-              description = description[:max_desc-3] + '...'
-
-          title = f"{name} ({tag})" if tag else name
-
-          embed = {
-              'title': title,
-              'description': description,
-              'url': url or None,
-              'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
-              'color': 3447003
-          }
-
-          payload = json.dumps({'embeds': [embed]}).encode('utf-8')
-          req = urllib.request.Request(webhook_url, data=payload, headers={'Content-Type': 'application/json'})
-          try:
-              with urllib.request.urlopen(req) as resp:
-                  print('Discord embed sent, HTTP', resp.status)
-          except Exception as e:
-              print('Failed to send Discord embed:', e)
-              raise
-          PY
+          curl -sS -H "Content-Type: application/json" -d "$JSON_PAYLOAD" "$DISCORD_WEBHOOK_URL" -o /dev/null
+          echo "Posted release ${{ env.release_tag }} to Discord."
