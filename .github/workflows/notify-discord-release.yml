@@ -61,12 +61,20 @@ jobs:
           tag = d.get('tag_name') or ''
           body = d.get('body') or ''
           url = d.get('html_url') or ''
-          # Append to GITHUB_ENV so following steps see these values
+          # Write variables to GITHUB_ENV using multiline EOF syntax to support newlines
           with open(os.environ['GITHUB_ENV'],'a') as f:
-              f.write(f"RELEASE_NAME={name}\n")
-              f.write(f"RELEASE_TAG={tag}\n")
-              f.write(f"RELEASE_BODY={body}\n")
-              f.write(f"RELEASE_URL={url}\n")
+              f.write("RELEASE_NAME<<'EOF'\n")
+              f.write(name + "\n")
+              f.write("EOF\n")
+              f.write("RELEASE_TAG<<'EOF'\n")
+              f.write(tag + "\n")
+              f.write("EOF\n")
+              f.write("RELEASE_BODY<<'EOF'\n")
+              f.write(body + "\n")
+              f.write("EOF\n")
+              f.write("RELEASE_URL<<'EOF'\n")
+              f.write(url + "\n")
+              f.write("EOF\n")
           PY
 
       - name: Send Discord notification
