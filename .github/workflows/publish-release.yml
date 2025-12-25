@@ -10,6 +10,10 @@
 # GitHub provides GITHUB_TOKEN automatically for release attachment.
 name: Publish Release (Docker Hub)
 
+permissions:
+  contents: read
+  packages: write
+
 on:
   release:
     types: [published]
