@@ -326,9 +326,8 @@ def api_get_stacks():
 
 
 @app.route('/download/<token>')
-@login_required
 def download_file(token):
-    """Serve file download using secure token."""
+    """Serve file download using secure token (publicly accessible)."""
     try:
         with get_db() as conn:
             cur = conn.cursor()
@@ -340,21 +339,17 @@ def download_file(token):
             token_data = cur.fetchone()
             
         if not token_data:
-            flash('Invalid or expired download token', 'danger')
-            return redirect(url_for('dashboard.index'))
+            return render_template('download_error.html', reason='Download token is invalid or does not exist.', hint='Please request a fresh download link.'), 404
             
         if token_data['expires_at'] < datetime.now():
-            flash('Download token has expired', 'danger')
-            return redirect(url_for('dashboard.index'))
+            return render_template('download_error.html', reason='This download link has expired.', hint='Request a new download link.'), 410
             
         if token_data['is_packing']:
-            flash('Archive is still being prepared. Please wait for the email notification.', 'info')
-            return redirect(url_for('dashboard.index'))
+            return render_template('download_error.html', reason='The archive is still being prepared. Please wait for the email notification.', hint='You will receive an email when the archive is ready.'), 202
         
         file_path = Path(token_data['file_path'])
         if not file_path.exists():
-            flash('Download file no longer exists', 'danger')
-            return redirect(url_for('dashboard.index'))
+            return render_template('download_error.html', reason='Download file could not be found.', hint='Contact the administrator if this problem persists.'), 404
         
         # Serve the file
         filename = f"{token_data['stack_name']}.tar.gz" if file_path.suffix == '.gz' else file_path.name

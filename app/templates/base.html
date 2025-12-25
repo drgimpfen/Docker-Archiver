@@ -1395,7 +1395,7 @@
 
     async function requestDownload(jobId, stackName, archivePath) {
         try {
-            const response = await fetch(`/api/jobs/${jobId}/download`, {
+            const response = await fetch('/api/downloads/request', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

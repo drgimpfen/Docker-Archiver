@@ -132,13 +132,7 @@
                     <span class="text-muted">N/A</span>
                     {% endif %}
                 </td>
-                <td>
-                    {% if job.job_type == 'archive' and job.status == 'success' %}
-                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="showDownloadModal({{ job.id }}, '{{ job.archive_name }}')" title="Download stacks">
-                            <i class="bi bi-download"></i>
-                        </button>
-                    {% endif %}
-                </td>
+                <td></td>
             </tr>
             {% endfor %}
         </tbody>
@@ -150,26 +144,6 @@
 </div>
 {% endif %}
 
-<!-- Download Modal -->
-<div class="modal fade" id="downloadModal" tabindex="-1" aria-labelledby="downloadModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="downloadModalLabel">Download Stacks - <span id="downloadArchiveName"></span></h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <div id="downloadContent">
-                    <div class="text-center">
-                        <div class="spinner-border" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
 
 {% endblock %}
 
@@ -183,94 +157,9 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-async function showDownloadModal(jobId, archiveName) {
-    document.getElementById('downloadArchiveName').textContent = archiveName;
-    
-    const modal = new bootstrap.Modal(document.getElementById('downloadModal'));
-    modal.show();
-    
-    // Load job details to get stack metrics
-    try {
-        const response = await fetch(`/api/jobs/${jobId}`);
-        const data = await response.json();
-        
-        if (data.job && data.metrics) {
-            let html = '<div class="list-group">';
-            
-            data.metrics.forEach(metric => {
-                if (metric.archive_path && !metric.deleted_at) {
-                    const stackName = metric.stack_name;
-                    const archivePath = metric.archive_path;
-                    const fileSize = metric.archive_size_bytes ? formatBytes(metric.archive_size_bytes) : 'Unknown';
-                    
-                    html += `
-                        <div class="list-group-item d-flex justify-content-between align-items-center">
-                            <div>
-                                <strong>${stackName}</strong>
-                                <br><small class="text-muted">${fileSize} • ${archivePath.split('/').pop()}</small>
-                            </div>
-                            <button type="button" class="btn btn-primary btn-sm" onclick="requestDownload(${jobId}, '${stackName}', '${archivePath}')">
-                                <i class="bi bi-download me-1"></i>Download
-                            </button>
-                        </div>
-                    `;
-                }
-            });
-            
-            html += '</div>';
-            
-            if (html === '<div class="list-group"></div>') {
-                html = '<div class="alert alert-info"><i class="bi bi-info-circle me-2"></i>No downloadable archives found for this job.</div>';
-            }
-            
-            document.getElementById('downloadContent').innerHTML = html;
-        } else {
-            document.getElementById('downloadContent').innerHTML = '<div class="alert alert-danger">Error loading job details.</div>';
-        }
-    } catch (error) {
-        document.getElementById('downloadContent').innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
-    }
-}
 
-async function requestDownload(jobId, stackName, archivePath) {
-    try {
-        const response = await fetch('/api/downloads/request', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                stack_name: stackName,
-                archive_path: archivePath
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            if (data.is_folder) {
-                // Close download modal and show preparation message
-                const downloadModal = bootstrap.Modal.getInstance(document.getElementById('downloadModal'));
-                downloadModal.hide();
-                
-                // Show preparation modal
-                const prepModal = new bootstrap.Modal(document.getElementById('downloadPrepModal'));
-                const msgEl = document.getElementById('downloadPrepMessage');
-                if (msgEl) msgEl.textContent = data.message || 'The archive is being prepared; you will receive a notification when it is ready.';
-                prepModal.show();
-            } else {
-                // Close modal and open download link
-                const modal = bootstrap.Modal.getInstance(document.getElementById('downloadModal'));
-                modal.hide();
-                window.open(data.download_url, '_blank');
-            }
-        } else {
-            alert('Error: ' + (data.error || 'Unknown error'));
-        }
-    } catch (error) {
-        alert('Error requesting download: ' + error.message);
-    }
-}
+
+
 
 function downloadLog(jobId) {
     window.open(`/api/jobs/${jobId}/log`, '_blank');
