@@ -127,7 +127,18 @@ def manage_security():
     if request.method == 'POST':
         try:
             apply_permissions = request.form.get('apply_permissions') == 'on'
-            allow_image_pull = request.form.get('allow_image_pull') == 'on'
+            # New checkbox: if checked -> 'always' else 'never'
+            image_pull_policy = 'always' if request.form.get('image_pull_always') == 'on' else 'never'
+            image_pull_inactivity_timeout = request.form.get('image_pull_inactivity_timeout', '600').strip()
+            # Validate inactivity timeout (integer within reasonable bounds; 0 disables inactivity timeout)
+            try:
+                t = int(image_pull_inactivity_timeout)
+                if t < 0 or t > 86400:
+                    t = 600
+            except Exception:
+                t = 600
+            image_pull_inactivity_timeout = str(t)
+
             with get_db() as conn:
                 cur = conn.cursor()
                 cur.execute("""
@@ -137,7 +148,11 @@ def manage_security():
                 cur.execute("""
                     INSERT INTO settings (key, value) VALUES (%s, %s)
                     ON CONFLICT (key) DO UPDATE SET value = %s, updated_at = CURRENT_TIMESTAMP;
-                """, ('allow_image_pull', 'true' if allow_image_pull else 'false', 'true' if allow_image_pull else 'false'))
+                """, ('image_pull_policy', image_pull_policy, image_pull_policy))
+                cur.execute("""
+                    INSERT INTO settings (key, value) VALUES (%s, %s)
+                    ON CONFLICT (key) DO UPDATE SET value = %s, updated_at = CURRENT_TIMESTAMP;
+                """, ('image_pull_inactivity_timeout', image_pull_inactivity_timeout, image_pull_inactivity_timeout))
                 conn.commit()
             flash('Security settings saved successfully!', 'success')
             return redirect(url_for('settings.manage_security'))

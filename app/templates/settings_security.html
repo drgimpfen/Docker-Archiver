@@ -38,11 +38,18 @@
                 <h5 class="mb-0"><i class="bi bi-cloud-arrow-down me-2"></i> Image Pull Policy</h5>
             </div>
             <div class="card-body">
-                <div class="form-check form-switch mb-3">
-                    <input class="form-check-input" type="checkbox" role="switch" id="allowImagePull" name="allow_image_pull" {% if settings.get('allow_image_pull') == 'true' %}checked{% endif %}>
-                    <label class="form-check-label" for="allowImagePull"><strong>Allow image pulls on start</strong><br><small class="text-muted">If enabled, missing images will be pulled automatically before starting stacks. If disabled, stacks missing images will be skipped. See <a href="https://github.com/drgimpfen/Docker-Archiver#image-pull-policy" target="_blank" rel="noopener">README — Image pull policy</a> for details.</small></label>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch" id="imagePullAlways" name="image_pull_always" {% if settings.get('image_pull_policy', 'never') == 'always' %}checked{% endif %}>
+                        <label class="form-check-label" for="imagePullAlways"><strong>Always pull images on start</strong><br><small class="text-muted">If enabled, the archiver will attempt to pull images before starting stacks (may increase job duration). If disabled, no pull will be attempted at start and `--pull=never` will be added to `docker compose up` to explicitly prevent pulls. See <a href="https://github.com/drgimpfen/Docker-Archiver#image-pull-policy" target="_blank" rel="noopener">README</a> for details.</small></label>
+                    </div>
                 </div>
-                <div class="form-text text-muted">Recommendation: keep disabled in production unless you trust registry/network access. Enabling may extend start times and can fail on auth/network errors.</div>
+
+                <div class="mb-3">
+                    <label for="imagePullInactivityTimeout" class="form-label"><strong>Pull inactivity timeout (seconds)</strong></label>
+                    <input type="number" id="imagePullInactivityTimeout" name="image_pull_inactivity_timeout" min="0" max="86400" class="form-control" value="{{ settings.get('image_pull_inactivity_timeout', '300') }}">
+                    <div class="form-text text-muted mt-2">Inactivity timeout for `docker compose pull` (seconds). If no output is produced for this duration, the pull will be aborted. Set to <code>0</code> to disable inactivity timeout (use with caution). See <a href="https://github.com/drgimpfen/Docker-Archiver#image-pull-policy" target="_blank" rel="noopener">README</a> for guidance.</div>
+                </div>
             </div>
         </div>
 

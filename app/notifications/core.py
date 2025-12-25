@@ -195,6 +195,98 @@ def send_archive_notification(archive_config, job_id, stack_metrics, duration, t
         except Exception:
             pass
 
+        # If any stacks had images pulled/updated, add a short note to the HTML body
+        try:
+            updated = [s for s in (stack_metrics or []) if s.get('images_pulled')]
+            if updated:
+                # Determine excerpt lines setting (bounded)
+                try:
+                    excerpt_lines_setting = int(get_setting('image_pull_excerpt_lines', '8'))
+                except Exception:
+                    excerpt_lines_setting = 8
+                excerpt_lines = max(1, min(50, excerpt_lines_setting))
+
+                note_html = "\n<hr>\n<p><strong>Note:</strong> Some stacks had container images pulled during this job; please verify containers were updated as expected. See <a href=\"https://github.com/drgimpfen/Docker-Archiver#image-pull-policy\">README</a> for details.</p>\n<ul>\n"
+                for s in updated:
+                    stack_name = s.get('stack_name')
+                    pull_output = (s.get('pull_output') or '')
+                    if pull_output:
+                        # Normalize and strip ANSI sequences
+                        import re as _re, html as _html
+                        ansi_re = _re.compile(r'\x1B[@-_][0-?]*[ -/]*[@-~]')
+                        raw = str(pull_output)
+                        norm = ansi_re.sub('', raw)
+
+                        # Split into lines and filter out transient progress updates.
+                        # Heuristics tuned to keep final, meaningful lines (e.g., 'Pulled', 'Download complete', 'Already exists')
+                        # and to remove transient progress like spinners and per-layer live percentages.
+                        filtered = []
+                        for line in raw.splitlines():
+                            # Remove any remaining ANSI escapes early
+                            clean = ansi_re.sub('', line).rstrip()
+                            if not clean:
+                                continue
+
+                            # If line contains a carriage return it's likely an in-place progress update -> skip
+                            if '\r' in line:
+                                continue
+
+                            # Trim whitespace for checks
+                            s = clean.strip()
+                            if not s:
+                                continue
+
+                            # Keep top-level summary lines like "[+] Pulling 15/15"
+                            if _re.match(r'^\s*\[\+\]\s*Pulling', s, _re.IGNORECASE):
+                                filtered.append(s)
+                                continue
+
+                            # Keep lines that start with a checkmark (✔) — they indicate completed steps
+                            if s.startswith('✔') or s.startswith('\u2713'):
+                                filtered.append(s)
+                                continue
+
+                            # Keep lines indicating completion or important info
+                            if _re.search(r'\b(Pulled|Downloaded|Downloaded newer image|Download complete|Already exists|Digest:|sha256:)\b', s, _re.IGNORECASE):
+                                filtered.append(s)
+                                continue
+
+                            # Skip obvious progress lines that contain MB/MB, progress blocks or percentage
+                            if _re.search(r"\d+(?:\.\d+)?M[Bb]?/\d+(?:\.\d+)?M[Bb]?", s):
+                                continue
+                            if _re.search(r'^\s*\d+%\b', s):
+                                continue
+
+                            # Skip lines with spinner symbols (common Unicode spinner glyphs)
+                            if any(ch in s for ch in ['⠹', '⠏', '⠸', '⠼', '⠴', '⠦', '⠧']):
+                                continue
+
+                            # Skip lines with generic progress verbs unless they explicitly denote completion
+                            if _re.search(r'\b(Downloading|Pulling|Extracting|Compressing|Verifying|Waiting|Pushing)\b', s, _re.IGNORECASE):
+                                continue
+
+                            # If we reach here, the line didn't match any keep/skip rule; keep it as potentially useful
+                            filtered.append(s)
+
+                        # Determine excerpt: 0 -> unlimited (all filtered lines), otherwise first N
+                        if excerpt_lines == 0:
+                            excerpt = '\n'.join(filtered)
+                            excerpt_label = 'full (filtered)'
+                        else:
+                            excerpt = '\n'.join(filtered[:excerpt_lines])
+                            excerpt_label = f'first {excerpt_lines} lines (filtered)'
+
+                        escaped = _html.escape(excerpt)
+                        note_html += f"  <li><strong>{stack_name}</strong>: Pull output (excerpt, {excerpt_label}):<br>\n    <pre style='background:#f7f7f7;padding:8px;border-radius:5px;white-space:pre-wrap;overflow:auto;max-height:240px;'>{escaped}</pre></li>\n"
+                    else:
+                        note_html += f"  <li><strong>{stack_name}</strong>: Pull output available in job log</li>\n"
+                note_html += "</ul>\n"
+                html_body_to_send = (html_body_to_send or '') + note_html
+                # Also append to inline body so recipients see it regardless
+                body = (body or '') + note_html
+        except Exception:
+            pass
+
         # Build compact text and sections (plain-text) for non-email services
         compact_text, lines = build_compact_text(archive_name, stack_metrics, created_archives, total_size, size_str, duration_str, stacks_with_volumes, reclaimed, base_url)
         sections = build_sections(archive_name, lines, created_archives, total_size, stack_metrics, stacks_with_volumes, reclaimed, base_url, job_id)

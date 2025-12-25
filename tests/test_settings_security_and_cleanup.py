@@ -39,15 +39,18 @@ def test_manage_security_post_sets_apply_permissions(monkeypatch):
         resp = client.post('/settings/security', data={
             'csrf_token': csrf,
             'apply_permissions': 'on',
-            'allow_image_pull': 'on'
+            'image_pull_always': 'on',
+            'image_pull_inactivity_timeout': '450'
         }, follow_redirects=True)
 
         assert resp.status_code == 200
         # Ensure we attempted to insert/update apply_permissions
         found_apply = any(params and params[0] == 'apply_permissions' and params[1] == 'true' for _, params in executed if params)
-        found_pull = any(params and params[0] == 'allow_image_pull' and params[1] == 'true' for _, params in executed if params)
+        found_policy = any(params and params[0] == 'image_pull_policy' and params[1] == 'always' for _, params in executed if params)
+        found_timeout = any(params and params[0] == 'image_pull_inactivity_timeout' and params[1] == '450' for _, params in executed if params)
         assert found_apply, 'apply_permissions update not attempted'
-        assert found_pull, 'allow_image_pull update not attempted'
+        assert found_policy, 'image_pull_policy update not attempted'
+        assert found_timeout, 'image_pull_inactivity_timeout update not attempted'
 
 
 def test_manage_cleanup_post_valid_saves_and_schedules(monkeypatch):

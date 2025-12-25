@@ -380,15 +380,19 @@ Tips:
 
 ### Image pull policy
 
-**Image pull policy:** Docker Archiver can optionally pull missing images automatically before starting stacks. This behavior is controlled by **Settings → Security → Allow image pulls on start** (default: **disabled**).
+**Image pull policy:** The app lets you choose whether images should be pulled when stacks are restarted. You can find the option on **Settings → Security** as a single checkbox **Always pull images on start** (default: **disabled**, i.e. *Never*). In short:
 
-- If **disabled**, any stack that requires images that are not available locally will be **skipped** during the restart phase; the job log and notifications will include a short explanation and a link to this section.
-- If **enabled**, the archiver will attempt to run `docker compose pull` for the stack before starting it. This requires network access and appropriate registry credentials to be available in the environment (private registries may require additional configuration).
+- **Never (default)** — Do not pull images automatically. If required images are missing locally, the stack restart will be skipped and the job notification explains which stacks were skipped and why. The executor will append `--pull=never` to `docker compose up` to explicitly prevent pulls when restarting stacks.
+- **Always** — Try to pull images before starting each stack. The executor runs `docker compose pull` and will record the pull output in the job log.
+
+Pull inactivity timeout: To avoid a hung image pull blocking a whole job, the executor now uses an *inactivity timeout* (seconds) which aborts a pull if no output is produced for the configured period. You can set **Pull inactivity timeout (seconds)** in **Settings → Security** (default: **300**). Set it to **0** to disable the inactivity timeout (use with caution).
+
+Notification note: When images are pulled, notifications include a short inline excerpt of the pull output (a few lines) so operators get a quick summary; the full pull output is still available in the job log.
 
 Notes:
 
-- Pulls may fail (network issues, auth failures); on pull failure the stack start may fail and the job log will contain the error details.
-- For deterministic production behavior we recommend pre-pulling images on hosts or enabling this setting only if you trust the network/registry configuration.
+- Pulls can fail for network or authentication reasons; the job log will contain details to help debugging.
+- For deterministic production behavior we recommend pre-pulling images on hosts or using the **Always** option only when appropriate for your environment.
 - The archiver records skipped stacks and reasons in the job summary so operators can act on them.
 
 ---
