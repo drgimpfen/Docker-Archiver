@@ -70,3 +70,12 @@ Caddy handles streaming well by default; ensure X-Forwarded headers are preserve
 - If streaming does not work: check proxy logs for buffering or header rewriting.
 - Ensure `/api/*` is excluded from external auth and can be authenticated via Bearer tokens instead.
 
+### SMTP connectivity
+
+The application sends notifications via SMTP to an external mail server. Ensure the following:
+
+- The app container can reach the SMTP server (check firewall, DNS, and Docker network routing)
+- If using an SMTP service inside the same Docker network, reference the service name (for example, `smtp.example` or `mail`) in the SMTP Server field in Settings
+- If using a cloud SMTP provider, ensure outbound SMTP (TCP port 587 or 465) is allowed from your host/network
+- Test delivery via the **Send Test Notification** button in **Settings → Notifications** to validate connectivity
+

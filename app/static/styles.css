@@ -180,6 +180,52 @@ body.has-sidebar .app-main {
     box-shadow: 0 0.5rem 1rem rgba(0,0,0,0.4);
 }
 
+/* Make archive cards equal height and keep action buttons at the bottom */
+/* Avoid changing the display type on the Bootstrap column elements — let Bootstrap handle column sizing. */
+.row.g-3 > .col-md-6, .row.g-3 > .col-lg-4 {
+    /* keep default Bootstrap behavior */
+}
+.row.g-3 > .col-md-6 > .card, .row.g-3 > .col-lg-4 > .card {
+    /* Keep default block layout for the card container so columns size normally */
+    width: 100%;
+    min-height: 200px; /* modest card height so empty cards aren't tiny */
+}
+.archive-card .card-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+}
+/* Make the title truncate gracefully instead of overflowing the card */
+.archive-card .card-title {
+    min-width: 0; /* allow flex child to shrink and enable overflow */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2; /* clamp to 2 lines */
+    -webkit-box-orient: vertical;
+}
+.archive-card .meta,
+.archive-card .last-run,
+.archive-card .retention,
+.archive-card .next-run {
+    min-height: 2.2rem; /* provide consistent spacing for missing fields */
+}
+.archive-card .actions {
+    margin-top: auto; /* push to bottom */
+}
+
+/* Ensure buttons have consistent size and spacing */
+.archive-card .actions .btn {
+    white-space: nowrap;
+}
+
+/* Fade-out animation for card removal */
+.fade-out {
+    transition: opacity 0.28s ease, transform 0.28s ease;
+    opacity: 0;
+    transform: translateY(4px) scale(0.995);
+}
+
 /* Loading spinner */
 .spinner-border-sm {
     width: 1rem;
@@ -199,6 +245,11 @@ body.has-sidebar .app-main {
     font-size: 0.82rem;
     padding: 0.25rem 0.45rem;
     line-height: 1;
+}
+
+/* Badges using inline data-color should show white text by default */
+.badge[data-color] {
+    color: #fff;
 }
 
 /* Table column sizing */

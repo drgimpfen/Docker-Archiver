@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+
+{% block title %}Cleanup Settings - Docker Archiver{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="mb-4">
+        <h2><i class="bi bi-recycle me-2"></i> Cleanup</h2>
+    </div>
+
+    <form method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-arrow-repeat me-2"></i> Automated Cleanup</h5>
+            </div>
+            <div class="card-body">
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" role="switch" 
+                           id="cleanupEnabled" name="cleanup_enabled"
+                           {% if settings.get('cleanup_enabled', 'true') == 'true' %}checked{% endif %}>
+                    <label class="form-check-label" for="cleanupEnabled">
+                        <strong>Enable Scheduled Cleanup</strong>
+                    </label>
+                </div>
+                <div class="mb-3">
+                    <label for="cleanupCron" class="form-label">Cleanup schedule (cron)</label>
+                    <input type="text" class="form-control" id="cleanupCron" name="cleanup_cron" value="{{ settings.get('cleanup_cron', '30 2 * * *') }}">
+                    <div class="form-text">Cron expression (minute hour day month day_of_week).</div>
+                </div>
+                <div class="mb-3">
+                    <label for="logRetentionDays" class="form-label">Log Retention (Days)</label>
+                    <input type="number" class="form-control" id="logRetentionDays" name="cleanup_log_retention_days" value="{{ settings.get('cleanup_log_retention_days', '90') }}" min="0" max="3650">
+                </div>
+
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" role="switch" id="cleanupDryRun" name="cleanup_dry_run" {% if settings.get('cleanup_dry_run', 'false') == 'true' %}checked{% endif %}>
+                    <label class="form-check-label" for="cleanupDryRun">Dry Run Mode</label>
+                </div>
+
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" role="switch" id="notifyCleanup" name="notify_cleanup" {% if settings.get('notify_on_cleanup', 'false') == 'true' %}checked{% endif %}>
+                    <label class="form-check-label" for="notifyCleanup">Send Notification</label>
+                </div>
+            </div>
+        </div>
+
+        <div id="cleanupStatus" class="mb-3"></div>
+
+        <div class="form-actions">
+            <a href="{{ url_for('settings.manage_settings') }}" class="btn btn-outline-secondary">Back</a>
+            <button type="button" class="btn btn-outline-danger me-2" onclick="showRunCleanupModal()"><i class="bi bi-play-fill me-1"></i> Run Cleanup Now</button>
+            <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+    </form>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Manual cleanup modal & action (duplicated here so it's available on the Cleanup page)
+function showRunCleanupModal() {
+    const modalHtml = `
+    <div class="modal fade" id="runCleanupModal" tabindex="-1">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Run Cleanup Now</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <p class="mb-0">This will run the cleanup tasks immediately.</p>
+            <p class="mb-0">Choose <strong>Run (Dry Run)</strong> to simulate the cleanup (no files will be deleted).</p>
+            <p class="mb-0">Choose <strong>Run (Live)</strong> to perform the actual cleanup now.</p>
+            <div class="mt-3">
+                <label class="form-label"><strong>Select which cleanup tasks to run:</strong></label>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="orphaned_archives" id="optOrphaned" name="cleanup_task" checked>
+                    <label class="form-check-label" for="optOrphaned">Orphaned Archives</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="unreferenced_files" id="optFiles" name="cleanup_task" checked>
+                    <label class="form-check-label" for="optFiles">Unreferenced Files</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="unreferenced_dirs" id="optDirs" name="cleanup_task" checked>
+                    <label class="form-check-label" for="optDirs">Unreferenced Directories</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="old_logs" id="optLogs" name="cleanup_task" checked>
+                    <label class="form-check-label" for="optLogs">Old Logs</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="download_tokens" id="optDownloads" name="cleanup_task" checked>
+                    <label class="form-check-label" for="optDownloads">Download Tokens</label>
+                </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn btn-outline-danger" id="runCleanupConfirmDry">Run (Dry Run)</button>
+            <button type="button" class="btn btn-danger" id="runCleanupConfirmLive">Run (Live)</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+    // Insert modal into DOM and show it
+    let wrapper = document.createElement('div');
+    wrapper.innerHTML = modalHtml;
+    document.body.appendChild(wrapper);
+    const modalEl = document.getElementById('runCleanupModal');
+    const bsModal = new bootstrap.Modal(modalEl);
+    bsModal.show();
+
+    function cleanupHandlers() {
+        try { document.getElementById('runCleanupConfirmDry').removeEventListener('click', onDry); } catch(e){}
+        try { document.getElementById('runCleanupConfirmLive').removeEventListener('click', onLive); } catch(e){}
+    }
+
+    function onDry() {
+        confirmRunCleanup(true, bsModal, modalEl);
+    }
+    function onLive() {
+        confirmRunCleanup(false, bsModal, modalEl);
+    }
+
+    document.getElementById('runCleanupConfirmDry').addEventListener('click', onDry);
+    document.getElementById('runCleanupConfirmLive').addEventListener('click', onLive);
+
+    // Remove modal from DOM after it's hidden to keep DOM clean
+    modalEl.addEventListener('hidden.bs.modal', function () {
+        cleanupHandlers();
+        wrapper.remove();
+    });
+}
+
+async function confirmRunCleanup(dry, bsModal, modalEl) {
+    const btnDry = document.getElementById('runCleanupConfirmDry');
+    const btnLive = document.getElementById('runCleanupConfirmLive');
+    const originalDry = btnDry.innerHTML;
+    const originalLive = btnLive.innerHTML;
+    try {
+        btnDry.disabled = true; btnLive.disabled = true;
+        if (dry) btnDry.innerHTML = 'Starting...'; else btnLive.innerHTML = 'Starting...';
+
+        // Collect selected tasks
+        const selected = Array.from(modalEl.querySelectorAll('input[name="cleanup_task"]:checked')).map(c => c.value);
+        const resp = await fetch('/api/cleanup/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dry_run: dry, tasks: selected })
+        });
+        // Guard against HTML redirects/pages returned when the user is not authenticated
+        const contentType = resp.headers.get('content-type') || '';
+        let data;
+        if (contentType.includes('application/json')) {
+            data = await resp.json();
+        } else {
+            const text = await resp.text();
+            throw new Error('Server returned non-JSON response. Response starts with: ' + text.slice(0,200));
+        }
+        if (resp.status === 202) {
+            if (typeof showAlert === 'function') {
+                showAlert('Cleanup started', 'success');
+            } else {
+                console.log('Cleanup started');
+            }
+
+            try {
+                const jobId = data.job_id;
+                let statusEl = document.getElementById('cleanupStatus');
+                const makeAlert = (html) => `\n                        <div class="alert alert-success alert-dismissible fade show" role="alert">\n                            ${html}\n                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>\n                        </div>`;
+
+                let alertHtml;
+                if (jobId) {
+                    alertHtml = makeAlert(`Cleanup started. <a href="#" class="alert-link" onclick="(function(){ try { showJobDetails(${jobId}); } catch(e){ window.location='{{ url_for('history.list_history') }}'; } return false; })()">View Job</a>`);
+                } else {
+                    const historyUrl = "{{ url_for('history.list_history') }}";
+                    alertHtml = makeAlert(`Cleanup started. <a href="${historyUrl}" class="alert-link">View History</a>`);
+                }
+
+                if (statusEl) {
+                    statusEl.innerHTML = alertHtml;
+                    statusEl.scrollIntoView({behavior: 'smooth', block: 'center'});
+                } else {
+                    const main = document.querySelector('main') || document.querySelector('body');
+                    const wrapper = document.createElement('div');
+                    wrapper.innerHTML = alertHtml;
+                    if (main && main.firstChild) main.insertBefore(wrapper, main.firstChild);
+                    else document.body.insertAdjacentElement('afterbegin', wrapper);
+                    wrapper.scrollIntoView({behavior: 'smooth', block: 'center'});
+                }
+            } catch (e) {
+                console.warn('Failed to render cleanup status alert:', e);
+            }
+
+            bsModal.hide();
+        } else {
+            if (typeof showAlert === 'function') {
+                showAlert('Error: ' + (data.error || 'Failed to start cleanup'), 'danger');
+            } else {
+                console.warn('Error: ' + (data.error || 'Failed to start cleanup'));
+            }
+        }
+    } catch (e) {
+        if (typeof showAlert === 'function') {
+            showAlert('Error: ' + e.message, 'danger');
+        } else {
+            console.error('Error: ' + e.message);
+        }
+    } finally {
+        try { btnDry.disabled = false; btnLive.disabled = false; btnDry.innerHTML = originalDry; btnLive.innerHTML = originalLive; } catch(e){}
+    }
+}
+</script>
+{% endblock %}

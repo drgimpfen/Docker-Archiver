@@ -38,6 +38,7 @@ docker-compose.override.yml
 redis-data/
 # Postgres data directory (local bind mount)
 postgres-data/
+
 # Database
 *.db
 *.sqlite
@@ -57,7 +58,7 @@ archives/
 *~
 .DS_Store
 
-# Logs
+# Logs (host or container persisted logs)
 *.log
 logs/
 

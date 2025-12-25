@@ -38,7 +38,7 @@
                     <div class="stack-badges">
                         {% set st = archive.stacks | sort %}
                         {% for stack in st[:3] %}
-                        <span class="badge" style="background-color: {{ stack|stack_color }}; color: white;">{{ stack }}</span>
+                        <span class="badge" data-color="{{ stack|stack_color }}">{{ stack }}</span>
                         {% endfor %}
                         {% if st|length > 3 %}
                         <span class="badge bg-secondary">+{{ st|length - 3 }}</span>
@@ -52,7 +52,7 @@
                         <small class="d-inline-block text-truncate" style="max-width: 100px; vertical-align: middle;">{{ archive.schedule_cron }}</small>
                     </span>
                     {% if archive.next_run %}
-                    <small class="text-muted ms-2 d-none d-lg-inline" data-next-run="{{ archive.next_run.isoformat() }}">(<span class="time-until"></span>)</small>
+                    <small class="text-muted ms-2 d-none d-lg-inline" data-next-run="{{ archive.next_run|iso_z }}">(<span class="time-until"></span>){% if archive.is_overdue and archive.missed_run %} <span class="text-danger"> missed {{ archive.missed_run|datetime('%Y-%m-%d %H:%M') }}</span>{% elif archive.is_overdue %} <span class="text-danger"> overdue</span>{% endif %}</small>
                     {% endif %}
                     {% elif archive.schedule_enabled %}
                     <span class="badge bg-warning">
@@ -94,7 +94,7 @@
                     <button class="btn btn-sm btn-outline-primary" onclick="editArchive({{ archive.id }})" title="Edit Archive">
                         <i class="bi bi-pencil me-1"></i>Edit
                     </button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteArchive({{ archive.id }}, '{{ archive.name }}')" title="Delete Archive">
+                    <button class="btn btn-sm btn-outline-danger" onclick='deleteArchive({{ archive.id }}, {{ archive.name|tojson }})' title="Delete Archive">
                         <i class="bi bi-trash me-1"></i>Delete
                     </button>
                 </td>
@@ -331,7 +331,7 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
                 </div>
             </form>
         </div>
@@ -350,7 +350,7 @@ function editArchive(archiveId) {
     if (!archive) return;
     
     // Set form action
-    document.getElementById('editArchiveForm').action = `/archives/${archiveId}/edit`;
+    document.getElementById('editArchiveForm').action = `/api/archives/${archiveId}/edit`;
     
     // Fill form fields
     document.getElementById('editName').value = archive.name;
@@ -382,10 +382,10 @@ function setEditCron(cron) {
 }
 
 function deleteArchive(archiveId, archiveName) {
-    if (confirm(`Delete archive "${archiveName}"? This will also delete all associated job history.`)) {
+    if (confirm('Delete archive "' + archiveName + '"? This will also delete all associated job history.')) {
         const form = document.createElement('form');
         form.method = 'POST';
-        form.action = `/archives/${archiveId}/delete`;
+        form.action = `/api/archives/${archiveId}/delete`;
         
         // Add CSRF token
         const csrfToken = document.querySelector('meta[name="csrf-token"]');

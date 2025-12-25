@@ -27,25 +27,62 @@
     .log-line.muted { opacity: 0.8; }
     .log-highlight { background: rgba(255,255,0,0.12); }
     .paused-indicator { display:inline-block; background:#ff6b6b; color:white; padding:2px 6px; border-radius:4px; font-weight:600; margin-left:8px; }
+    /* Sidebar chevron rotation for settings submenu */
+    .nav-link .bi-chevron-down { transition: transform .18s ease; }
+    .nav-link.open .bi-chevron-down { transform: rotate(180deg); }
+
+    /* Card header / title consistency */
+    .card-header h5.mb-0, .card-header .card-title { display:flex; align-items:center; gap:.625rem; font-size:1rem; margin:0; }
+    .card-header .bi { font-size:1.15rem; }
+    /* Section headings inside card bodies */
+    .card-body h6 { margin-top:0; margin-bottom:.75rem; font-size:0.95rem; font-weight:600; }
+
+    /* Consistent action bar spacing (left-aligned) */
+    .form-actions { margin-top:1rem; display:flex; gap:0.5rem; justify-content:flex-start; }
     </style>
 </head>
 <body>
+    <script>
+        // Global error hooks for debugging (early registration)
+        window.addEventListener('error', function(e){
+            try { console.error('Global error', e.message, e.filename, e.lineno, e.colno, e.error); } catch(_){}
+        });
+        window.addEventListener('unhandledrejection', function(e){
+            try { console.error('Unhandled rejection', e.reason); } catch(_){}
+        });
+    </script>
     {% if session.user_id %}
     <aside class="app-sidebar" id="app-sidebar">
         <!-- Logo -->
         <div class="sidebar-header">
-            <a href="{{ url_for('index') }}" class="d-flex align-items-center text-decoration-none">
+            <a href="{{ url_for('dashboard.index') }}" class="d-flex align-items-center text-decoration-none">
                 <img src="{{ url_for('static', filename='images/Logo.png') }}" alt="Docker Archiver" style="max-width: 200px; height: auto;">
             </a>
         </div>
 
         <!-- Navigation -->
+        {% set _endpoint = request.endpoint or '' %}
         <ul class="nav flex-column">
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('index') }}"><i class="bi bi-house-door me-2"></i>Dashboard</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('archives.list_archives') }}"><i class="bi bi-archive me-2"></i>Archives</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('history.list_history') }}"><i class="bi bi-clock-history me-2"></i>History</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('profile.manage_profile') }}"><i class="bi bi-person me-2"></i>Profile</a></li>
-            <li class="nav-item"><a class="nav-link" href="{{ url_for('settings.manage_settings') }}"><i class="bi bi-gear me-2"></i>Settings</a></li>
+            <li class="nav-item"><a class="nav-link{% if _endpoint == 'dashboard.index' %} active{% endif %}" href="{{ url_for('dashboard.index') }}"><i class="bi bi-house-door me-2"></i>Dashboard</a></li>
+            <li class="nav-item"><a class="nav-link{% if _endpoint.startswith('history.') %} active{% endif %}" href="{{ url_for('history.list_history') }}"><i class="bi bi-clock-history me-2"></i>History</a></li>
+            <li class="nav-item"><a class="nav-link{% if _endpoint.startswith('downloads.') %} active{% endif %}" href="{{ url_for('downloads.manage_downloads') }}"><i class="bi bi-download me-2"></i>Downloads</a></li>
+            {% set _current_path = request.path %}
+            {% set _settings_open = _endpoint.startswith('settings.') %}
+            <li class="nav-item">
+                <a class="nav-link d-flex justify-content-between align-items-center {% if _settings_open %}open{% endif %}" data-bs-toggle="collapse" href="#sidebarSettings" role="button" aria-expanded="{{ 'true' if _settings_open else 'false' }}" aria-controls="sidebarSettings">
+                    <span><i class="bi bi-gear me-2"></i>Settings</span>
+                    <i class="bi bi-chevron-down small"></i>
+                </a>
+                <div class="collapse {% if _settings_open %}show{% endif %}" id="sidebarSettings">
+                    <ul class="nav flex-column ms-3">
+                        <li class="nav-item"><a class="nav-link{% if _endpoint == 'settings.manage_settings' %} active{% endif %}" href="{{ url_for('settings.manage_settings') }}">General</a></li>
+                        <li class="nav-item"><a class="nav-link{% if _endpoint == 'settings.manage_profile' %} active{% endif %}" href="{{ url_for('settings.manage_profile') }}">Profile</a></li>
+                        <li class="nav-item"><a class="nav-link{% if _endpoint == 'settings.manage_notifications' %} active{% endif %}" href="{{ url_for('settings.manage_notifications') }}">Notifications</a></li>
+                        <li class="nav-item"><a class="nav-link{% if _endpoint == 'settings.manage_security' %} active{% endif %}" href="{{ url_for('settings.manage_security') }}">Security</a></li>
+                        <li class="nav-item"><a class="nav-link{% if _endpoint == 'settings.manage_cleanup' %} active{% endif %}" href="{{ url_for('settings.manage_cleanup') }}">Cleanup</a></li>
+                    </ul>
+                </div>
+            </li> 
         </ul>
 
         <!-- Sidebar Bottom -->
@@ -77,11 +114,16 @@
     <main class="app-main mt-4">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
+                {% set _seen = [] %}
                 {% for category, message in messages %}
-                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
-                        {{ message }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                    </div>
+                    {% set key = category ~ '::' ~ message %}
+                    {% if key not in _seen %}
+                        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                        {% set _seen = _seen + [key] %}
+                    {% endif %}
                 {% endfor %}
             {% endif %}
         {% endwith %}
@@ -108,27 +150,6 @@
             }
         })();
 
-        // LocalStorage helpers for 'follow' feature
-        function getFollowedJobs() {
-            try { return JSON.parse(localStorage.getItem('followedJobs') || '[]'); } catch (e) { return []; }
-        }
-        function setFollowedJobs(list) {
-            try { localStorage.setItem('followedJobs', JSON.stringify(list)); } catch (e) {}
-        }
-        function isJobFollowed(jobId) {
-            return getFollowedJobs().includes(String(jobId));
-        }
-        function setJobFollowed(jobId, value) {
-            const list = getFollowedJobs().filter(x=>x);
-            const s = String(jobId);
-            const exists = list.includes(s);
-            if (value && !exists) list.push(s);
-            if (!value && exists) {
-                const idx = list.indexOf(s); if (idx !== -1) list.splice(idx,1);
-            }
-            setFollowedJobs(list);
-        }
-
         // Persisted Line Number setting
         function getShowLineNumbers() {
             try { return localStorage.getItem('showLineNumbers') === 'true'; } catch (e) { return false; }
@@ -137,32 +158,7 @@
             try { localStorage.setItem('showLineNumbers', v ? 'true' : 'false'); } catch (e) {}
         }
 
-        // Global follow toggle for index rows
-        function toggleFollow(jobId) {
-            const row = document.getElementById(`job-row-${jobId}`);
-            if (!row) return;
-            const current = row.getAttribute('data-follow') === 'true';
-            const newVal = !current;
-            row.setAttribute('data-follow', newVal.toString());
-            // Persist
-            setJobFollowed(jobId, newVal);
-            // Update any modal or index follow buttons
-            document.querySelectorAll(`#job-follow-toggle-${jobId}`).forEach(btn => btn.classList.toggle('btn-success', newVal));
-            // If following and the job is running, open details
-            if (newVal && row.getAttribute('data-job-status') === 'running') {
-                showJobDetails(jobId);
-            }
-        }
 
-        // Initialize follow state on page load
-        document.addEventListener('DOMContentLoaded', ()=>{
-            const followed = getFollowedJobs();
-            followed.forEach(id => {
-                const row = document.getElementById(`job-row-${id}`);
-                if (row) row.setAttribute('data-follow','true');
-                document.querySelectorAll(`#job-follow-toggle-${id}`).forEach(btn => btn.classList.add('btn-success'));
-            });
-        });
         
         // Bootstrap 5 native theme toggle
         (function(){
@@ -228,6 +224,16 @@
                 body.classList.toggle('sidebar-open');
             });
         })();
+
+        // Toggle chevron rotation when settings collapse opens/closes
+        (function(){
+            const collapseEl = document.getElementById('sidebarSettings');
+            const anchor = document.querySelector('[href="#sidebarSettings"]');
+            if (collapseEl && anchor) {
+                collapseEl.addEventListener('show.bs.collapse', () => anchor.classList.add('open'));
+                collapseEl.addEventListener('hide.bs.collapse', () => anchor.classList.remove('open'));
+            }
+        })();
     </script>
     
     <!-- Job Details Modal (shared across pages) -->
@@ -250,17 +256,96 @@
             </div>
         </div>
     </div>
+
+    <!-- Download Preparation Modal (used when a requested archive is being prepared) -->
+    <div class="modal fade" id="downloadPrepModal" tabindex="-1">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Download preparation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p id="downloadPrepMessage">The archive is being prepared; you will receive a notification when it's ready.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Send Download Link Modal (used to enter recipient email) -->
+    <div class="modal fade" id="sendDownloadModal" tabindex="-1">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Send Download Link</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <label for="sendDownloadEmail" class="form-label">Recipient Email</label>
+              <input type="email" id="sendDownloadEmail" class="form-control" placeholder="recipient@example.com">
+              <input type="hidden" id="sendDownloadToken">
+              <input type="hidden" id="sendDownloadArchivePath">
+              <input type="hidden" id="sendDownloadStackName">
+            </div>
+            <div id="sendDownloadFeedback" class="text-muted small"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn btn-primary" id="sendDownloadConfirm">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
     
     <script>
+    // Global Jobs SSE disabled — dashboard relies on polling now.
+
+    // Format ISO 8601 / Z timestamps into a user-friendly local datetime string (YYYY-MM-DD HH:MM:SS)
+    function formatDateTime(isoStr){
+        if(!isoStr) return 'N/A';
+        try{
+            const d = new Date(isoStr);
+            if (isNaN(d.getTime())) return isoStr;
+            return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        } catch (e){
+            return isoStr;
+        }
+    }
+
     // Shared job details modal function
     async function showJobDetails(jobId) {
+        try {
+        } catch (e) {}
         // Track currently-open modal job id for dashboard polling
         window._currentJobId = jobId;
         const modalEl = document.getElementById('jobDetailsModal');
-        const modal = new bootstrap.Modal(modalEl);
+        if (!modalEl) {
+            console.error('Job details modal element not found');
+            alert('Could not open job details: modal element missing');
+            return;
+        }
+
+        let modal;
+        try {
+            modal = new bootstrap.Modal(modalEl);
+        } catch (e) {
+            console.error('Bootstrap Modal constructor failed', e);
+            alert('Could not open job details: modal library not available');
+            return;
+        }
+
         const content = document.getElementById('jobDetailsContent');
-        
-        modal.show();
+        try {
+            modal.show();
+        } catch (e) {
+            console.error('Failed to show modal', e);
+            alert('Could not open job details: ' + (e && e.message ? e.message : e));
+            return;
+        }
 
         // Clear current job id when modal is hidden
         modalEl.addEventListener('hide.bs.modal', () => {
@@ -268,6 +353,10 @@
             if (window._jobLogPoller) {
                 clearTimeout(window._jobLogPoller);
                 window._jobLogPoller = null;
+            }
+            if (window._jobRefreshTimer) {
+                clearTimeout(window._jobRefreshTimer);
+                window._jobRefreshTimer = null;
             }
             // Stop any SSE connection
             if (window._jobEventSource) {
@@ -277,7 +366,17 @@
         }, { once: true });
         
         try {
-            const response = await fetch(`/api/jobs/${jobId}`);
+            const response = await fetch(`/api/jobs/${jobId}`, { credentials: 'same-origin' });
+            if (!response.ok) {
+                content.innerHTML = `<div class="alert alert-danger">Failed to load job details (status ${response.status})</div>`;
+                return;
+            }
+            // Ensure we only parse JSON responses
+            const contentType = response.headers.get('content-type') || '';
+            if (!contentType.includes('application/json')) {
+                content.innerHTML = `<div class="alert alert-danger">Invalid response for job details (expected JSON)</div>`;
+                return;
+            }
             const data = await response.json();
             
             if (data.error) {
@@ -285,8 +384,31 @@
                 return;
             }
             
-            const job = data.job;
+            let job = data.job;
             const metrics = data.metrics;
+            
+            // Determine compact type/format display (short labels with title tooltips)
+            let typeHtml = '';
+            if (job.job_type === 'archive') {
+                const fmt = job.archive_output_format || 'tar';
+                if (fmt === 'folder') {
+                    typeHtml = '<i class="bi bi-folder me-1 text-primary"></i> <span title="folder (for borg backup)">folder</span>';
+                } else if (fmt === 'tar') {
+                    typeHtml = '<i class="bi bi-archive me-1 text-secondary"></i> <span title="tar (no compression)">tar</span>';
+                } else if (fmt === 'tar.gz') {
+                    typeHtml = '<i class="bi bi-archive me-1 text-info"></i> <span title="tar.gz (gzip)">tgz</span>';
+                } else if (fmt === 'tar.zst') {
+                    typeHtml = '<i class="bi bi-archive me-1 text-success"></i> <span title="tar.zst (zstd)">zst</span>';
+                } else {
+                    const short = (fmt.length <= 8) ? fmt : fmt.substring(0,8) + '…';
+                    typeHtml = '<i class="bi bi-file-earmark me-1 text-muted"></i> <span title="' + fmt + '">' + short + '</span>';
+                }
+                if (job.is_dry_run) typeHtml += ' <span class="badge bg-secondary">DRY</span>';
+            } else {
+                let label = job.job_type.replace('_',' ');
+                if (label.length > 6) label = label.substring(0,6) + '…';
+                typeHtml = '<span title="' + job.job_type + '">' + label + '</span>' + (job.is_dry_run ? ' <span class="badge bg-secondary">DRY</span>' : '');
+            }
             
             let html = `
                 <div class="row mb-4">
@@ -295,7 +417,7 @@
                         <table class="table table-sm">
                             <tr><th width="150">Job ID:</th><td>#${job.id}</td></tr>
                             <tr><th>Archive:</th><td id="job-archive-name">${job.archive_name || 'N/A'}</td></tr>
-                            <tr><th>Type:</th><td id="job-type">${job.job_type} ${job.is_dry_run ? '<span class="badge bg-secondary">DRY RUN</span>' : ''}</td></tr>
+                            <tr><th>Type:</th><td id="job-type">${typeHtml}</td></tr>
                             <tr><th>Status:</th><td><span id="job-status-badge" class="badge bg-${job.status === 'success' ? 'success' : (job.status === 'running' ? 'info' : 'danger')}">${job.status}</span></td></tr>
                             <tr><th>Triggered By:</th><td id="job-triggered-by">${job.triggered_by}</td></tr>
                         </table>
@@ -303,8 +425,8 @@
                     <div class="col-md-6">
                         <h6>Timing & Size</h6>
                         <table class="table table-sm">
-                            <tr><th width="150">Start Time:</th><td id="job-start-time">${job.start_time || 'N/A'}</td></tr>
-                            <tr><th>End Time:</th><td id="job-end-time">${job.end_time || 'N/A'}</td></tr>
+                            <tr><th width="150">Start Time:</th><td id="job-start-time" data-start="${job.start_time || ''}">${job.start_time ? formatDateTime(job.start_time) : 'N/A'}</td></tr>
+                            <tr><th>End Time:</th><td id="job-end-time" data-end="${job.end_time || ''}">${job.end_time ? formatDateTime(job.end_time) : 'N/A'}</td></tr>
                             <tr><th>Duration:</th><td id="job-duration">${job.duration_seconds !== null && job.duration_seconds !== undefined ? job.duration_seconds + 's' : 'N/A'}</td></tr>
                             <tr><th>Total Size:</th><td id="job-total-size">${job.total_size_bytes ? formatBytes(job.total_size_bytes) : 'N/A'}</td></tr>
                             <tr><th>Reclaimed:</th><td id="job-reclaimed">${job.reclaimed_bytes ? formatBytes(job.reclaimed_bytes) : 'N/A'}</td></tr>
@@ -352,6 +474,7 @@
                             <td><small>${m.archive_path || 'N/A'}</small></td>
                             <td class="text-nowrap">
                                 ${hasArchive ? `<button class="btn btn-sm btn-outline-primary me-1" onclick="requestDownload(${job.id}, '${m.stack_name}', '${m.archive_path}')" title="Download Archive"><i class="bi bi-download"></i></button>` : ''}
+                                ${hasArchive ? `<button class="btn btn-sm btn-outline-secondary me-1" onclick="showSendDownloadModal('${m.stack_name}', '${m.archive_path}', null)" title="Send Download Link"><i class="bi bi-envelope"></i></button>` : ''}
                                 <button class="btn btn-sm btn-outline-secondary" onclick="downloadStackLog(${job.id}, '${m.stack_name}')" title="Download Stack Log"><i class="bi bi-file-text"></i></button>
                             </td>
                         </tr>
@@ -375,7 +498,7 @@
                     <button id="job-log-toggle-autoscroll-${job.id}" class="btn btn-sm btn-outline-primary">Pause</button>
                     <button id="job-log-clear-${job.id}" class="btn btn-sm btn-outline-danger">Clear</button>
                     <button id="job-log-toggle-linenos-${job.id}" class="btn btn-sm btn-outline-secondary">Line #</button>
-                    <button id="job-follow-toggle-${job.id}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-bullseye"></i> Follow</button>
+
                     <span id="job-sse-status-${job.id}" class="badge bg-secondary ms-2">Polling</span>
                     <span id="job-paused-indicator-${job.id}" class="paused-indicator" style="display:none;">PAUSED</span>
                 </div>
@@ -550,10 +673,23 @@
 
                     window._jobEventSource.onopen = function() {
                         try { updateSseStatus('live'); } catch (e) {}
+                        // Start a short watchdog: if no messages arrive shortly, fall back to polling
+                        try {
+                            if (window._jobSseIdleTimer) clearTimeout(window._jobSseIdleTimer);
+                            window._jobSseIdleTimer = setTimeout(function(){
+                                console.warn('No per-job SSE messages received; falling back to polling');
+                                try { window._jobEventSource.close(); } catch (e) {}
+                                window._jobEventSource = null;
+                                try { updateSseStatus('polling'); } catch (e) {}
+                                // start polling fallback
+                                fetchTail();
+                            }, 2000);
+                        } catch (e) {}
                     };
 
                     window._jobEventSource.onmessage = function(e) {
                         try {
+                            if (window._jobSseIdleTimer) { clearTimeout(window._jobSseIdleTimer); window._jobSseIdleTimer = null; }
                             const payload = JSON.parse(e.data);
                             handleSseEvent(payload);
                         } catch (err) {
@@ -567,6 +703,8 @@
                         try { window._jobEventSource.close(); } catch (e) {}
                         window._jobEventSource = null;
                         try { updateSseStatus('polling'); } catch (e) {}
+                        // Start polling immediately
+                        fetchTail();
                     };
                 } catch (err) {
                     console.error('Failed to start SSE:', err);
@@ -574,43 +712,366 @@
                 }
             }
 
+            // Global SSE events (permissions fixes, job-level broadcasts, etc.)
+            // Only open global EventSource if the server supports global SSE (debug endpoint check)
+            function startGlobalEventSource(){
+                if (typeof(EventSource) === 'undefined') return;
+                if (window._globalEventSource) return;
+
+                // Probe server debug endpoint to determine whether global SSE is available
+                fetch('/api/_debug/sse', { credentials: 'same-origin' }).then(function(resp){
+                    if (!resp.ok) {
+                        console.debug('Global SSE not available: debug endpoint returned ' + resp.status);
+                        return null;
+                    }
+                    // Ensure JSON response (not a login redirect HTML)
+                    const ct = resp.headers.get('content-type') || '';
+                    if (!ct.includes('application/json')) {
+                        console.debug('Global SSE debug endpoint returned non-JSON content');
+                        return null;
+                    }
+                    return resp.json();
+                }).then(function(data){
+                    if (!data || !data.sse) {
+                        console.debug('Global SSE not enabled (no debug info)');
+                        return;
+                    }
+                    const s = data.sse || {};
+                    // Only attempt to open global SSE if Redis is configured/connected (server-side requirement)
+                    if (!s.redis_url_set && !s.use_redis) {
+                        console.debug('Global SSE not enabled on server (no Redis)');
+                        return;
+                    }
+
+                    try {
+                        window._globalEventSource = new EventSource('/api/events');
+                        window._globalEventSource.onmessage = function(e){
+                            try{
+                                const payload = JSON.parse(e.data);
+                                if(!payload || !payload.type) return;
+                                // Handle permissions fix completion
+                                if(payload.type === 'permissions_fix_completed'){
+                                    const d = payload.data || {};
+                                    const files = d.files_changed || 0;
+                                    const dirs = d.dirs_changed || 0;
+                                    const msg = `Permissions fix completed: ${files} files, ${dirs} dirs fixed`;
+                                    if(typeof showAlert === 'function'){
+                                        // If there are sample fixes, include a small 'View fixes' link
+                                        showAlert(msg, 'success');
+                                    }
+                                    // If permissions modal is open, refresh its contents
+                                    const permModalEl = document.getElementById('permissionsModal');
+                                    const isOpen = permModalEl && permModalEl.classList && permModalEl.classList.contains('show');
+                                    if(isOpen && typeof checkPermissions === 'function'){
+                                        // Refresh the modal contents to reflect current state
+                                        checkPermissions();
+                                    }
+                                }
+                            }catch(err){ console.error('Global SSE parse error', err); }
+                        };
+                        window._globalEventSource.onerror = function(err){
+                            try { window._globalEventSource.close(); } catch(e){}
+                            window._globalEventSource = null;
+                        };
+                    } catch(e){ console.error('Failed to open global SSE:', e); }
+                }).catch(function(e){
+                    console.debug('Global SSE debug check failed, skipping global SSE (error):', e);
+                });
+            }
+
+
+
+            // Start global SSE immediately on load
+            try { startGlobalEventSource(); } catch(e) {}
+
+            // Modal duration ticker (updates the Job Details modal duration every second)
+            function updateModalDuration() {
+                try {
+                    const id = window._currentJobId;
+                    if (!id) return;
+                    const startEl = document.getElementById('job-start-time');
+                    const durEl = document.getElementById('job-duration');
+                    if (!startEl || !durEl) return;
+                    const startRaw = startEl.dataset.start || startEl.textContent || '';
+                    const secs = computeDurationSecondsFromStart(startRaw);
+                    if (secs !== null) {
+                        durEl.textContent = formatDuration(secs);
+                    }
+                } catch (e) {}
+            }
+
+            function startJobModalDurationTicker() {
+                if (window._jobModalDurationTicker) return;
+                updateModalDuration();
+                window._jobModalDurationTicker = setInterval(updateModalDuration, 1000);
+            }
+
+            function stopJobModalDurationTicker() {
+                if (window._jobModalDurationTicker) { clearInterval(window._jobModalDurationTicker); window._jobModalDurationTicker = null; }
+            }
+
             function stopJobEventSource() {
                 if (window._jobEventSource) {
                     try { window._jobEventSource.close(); } catch (e) {}
                     window._jobEventSource = null;
                 }
+                if (window._jobSseIdleTimer) { clearTimeout(window._jobSseIdleTimer); window._jobSseIdleTimer = null; }
             }
 
-            function handleSseEvent(payload) {
-                if (!payload || !payload.type) return;
-                if (payload.type === 'log') {
-                        const line = payload.data && payload.data.line ? payload.data.line : JSON.stringify(payload.data);
-                        appendLogLine(line);
-                    } else if (payload.type === 'status' || payload.type === 'job') {
-                    // Update modal and dashboard immediately
-                    const jobMeta = payload.data || {};
-                    if (jobMeta.status) {
-                        job.status = jobMeta.status;
-                        const statusBadge = document.getElementById('job-status-badge');
-                        if (statusBadge) {
-                            const cls = job.status === 'success' ? 'success' : (job.status === 'running' ? 'info' : 'danger');
-                            statusBadge.className = `badge bg-${cls}`;
-                            statusBadge.textContent = job.status;
+            // Helper: deterministic HSL color for stack badges (client-side)
+            function stackColor(name) {
+                if (!name) return '#6c757d';
+                let h = 0;
+                for (let i = 0; i < name.length; i++) {
+                    h = (h * 31 + name.charCodeAt(i)) % 360;
+                }
+                return `hsl(${h}, 65%, 45%)`;
+            }
+
+            // Insert a job row at the top of the Recent Jobs table if it doesn't exist
+            function addOrInsertJobRow(job) {
+                try {
+                    const tbody = document.querySelector('table.table.table-hover.table-sm tbody');
+                    if (!tbody) return;
+
+                    // Remove any pending placeholder rows for the same archive_id
+                    try {
+                        if (job.archive_id) {
+                            const pending = tbody.querySelectorAll(`tr[data-pending-archive="${job.archive_id}"]`);
+                            pending.forEach(p => p.remove());
+                        }
+                    } catch (e) {}
+
+                    let existing = document.getElementById(`job-row-${job.id}`);
+                    if (existing) {
+                        updateJobRowFromJob(job);
+                        return;
+                    }
+
+                    // Build stacks badges
+                    let stacksHtml = '<span class="text-muted small">N/A</span>';
+                    if (job.stack_names) {
+                        const parts = job.stack_names.split(',').filter(s => s && s.trim());
+                        if (parts.length) {
+                            stacksHtml = parts.slice(0,3).map(s => `<span class="badge" style="background-color: ${stackColor(s)}; color: white;">${s}</span>`).join('');
+                            if (parts.length > 3) stacksHtml += `<span class="badge bg-secondary">+${parts.length - 3}</span>`;
                         }
                     }
 
-                    if (jobMeta.start_time) {
-                        const elStart = document.getElementById('job-start-time'); if (elStart) elStart.textContent = jobMeta.start_time;
+                    const tr = document.createElement('tr');
+                    tr.id = `job-row-${job.id}`;
+                    tr.setAttribute('data-job-id', job.id);
+                    tr.setAttribute('data-job-status', job.status || 'running');
+
+                    tr.style.cursor = 'pointer';
+                    // Inline safe onclick for classic behavior
+                    tr.setAttribute('onclick', "(function(e){ (e||window.event||{}).stopPropagation && (e||window.event).stopPropagation(); try { if (typeof showJobDetails === 'function') showJobDetails(" + job.id + "); } catch(err){ console.error(err); } })(event)");
+                    // Attach full handlers (keyboard + defensive JS handlers)
+                    try { attachJobRowHandlers(tr, job.id); } catch (e) {} ;
+
+                    tr.innerHTML = `
+                        <td class="align-middle" style="white-space: nowrap;">
+                            <div class="d-inline-flex align-items-center">
+                                <strong class="me-2">#${job.id}</strong>
+
+                            </div>
+                        </td>
+                        <td><span class="badge ${job.status === 'success' ? 'bg-success' : (job.status === 'running' ? 'bg-info' : 'bg-danger')}">${job.status}</span></td>
+                        <td>${job.job_type || 'archive'}</td>
+                        <td>${job.archive_name || 'N/A'}</td>
+                        <td>${stacksHtml}</td>
+                        <td class="d-none d-md-table-cell"><small style="white-space: nowrap;" id="row-job-start-${job.id}">${job.start_time ? formatJobTime(job.start_time) : 'N/A'}</small></td>
+                        <td class="d-none d-md-table-cell"><small style="white-space: nowrap;" id="row-job-end-${job.id}">${job.end_time ? formatJobTime(job.end_time) : 'N/A'}</small></td>
+                        <td><small id="row-job-duration-${job.id}">${job.duration_seconds !== null && job.duration_seconds !== undefined ? job.duration_seconds + 's' : 'N/A'}</small></td>
+                        <td style="text-align: right;"><span id="row-job-size-${job.id}">${job.total_size_bytes ? `<span class="text-success">+${formatBytes(job.total_size_bytes)}</span>` : '<span class="text-muted">N/A</span>'}</span></td>
+                    `;
+
+                    // Insert at top
+                    tbody.insertBefore(tr, tbody.firstChild);
+
+                    // Attach robust click + keyboard handlers to ensure modal opens when a row is clicked
+                    try {
+                        attachJobRowHandlers(tr, job.id);
+                    } catch (e) {
                     }
-                    if (jobMeta.end_time) {
-                        const elEnd = document.getElementById('job-end-time'); if (elEnd) elEnd.textContent = jobMeta.end_time;
+
+                    // Fetch full job data to populate any missing details (best-effort)
+                    (async function() {
+                        try {
+                            const resp = await fetch(`/api/jobs/${job.id}`);
+                            if (!resp.ok) return;
+                            const data = await resp.json();
+                            if (data && data.job) {
+                                updateJobRowFromJob(data.job);
+                            }
+                        } catch (e) {
+                        }
+                    })();
+
+                    // Temporary highlight to indicate a new job was added
+                    try {
+                        tr.style.backgroundColor = '#fff3cd';
+                        setTimeout(() => { tr.style.transition = 'background-color 1s ease'; tr.style.backgroundColor = ''; }, 1200);
+                    } catch (e) {}
+                } catch (e) {
+                    console.error('Failed to insert job row:', e);
+                }
+            }
+
+            // Global Jobs SSE removed — dashboard uses polling now.
+
+            // Helper to attach click/keyboard handlers to a job row
+            function attachJobRowHandlers(tr, jobId) {
+                try {
+                    tr.addEventListener('click', function(e) {
+                        try {
+                            // Ignore clicks on controls inside the row (buttons/links)
+                            if (e && e.target && (e.target.closest('button') || e.target.closest('a'))) return;
+
+                            // Prevent duplicate modal opens
+                            if (window._currentJobId && String(window._currentJobId) === String(jobId)) return;
+                            if (typeof showJobDetails === 'function') {
+                                showJobDetails(parseInt(jobId, 10));
+                            } else {
+                                console.warn('showJobDetails not available when clicking job row', jobId);
+                            }
+                        } catch (err) {
+                            console.error('Error in job row click handler', err);
+                            try { alert('Error opening job details: ' + (err && err.message ? err.message : err)); } catch (e) {}
+                        }
+                    });
+
+                    // Keyboard support (Enter key)
+                    tr.addEventListener('keydown', function(e) {
+                        try {
+                            if (e && e.key === 'Enter') {
+                                if (typeof showJobDetails === 'function') showJobDetails(parseInt(jobId, 10));
+                            }
+                        } catch (err) {
+                            console.error('Error in job row keydown handler', err);
+                        }
+                    });
+
+                    // Make row focusable for keyboard access
+                    tr.tabIndex = 0;
+                } catch (e) {
+                }
+            }
+
+            // Attach handlers to any existing job rows on page (dashboard, history, etc.)
+            try {
+                document.querySelectorAll('tr[data-job-id]').forEach(function(tr) {
+                    try {
+                        const id = tr.getAttribute('data-job-id');
+                        if (id) attachJobRowHandlers(tr, id);
+                    } catch (e) {}
+                });
+            } catch (e) {}
+
+
+
+            // Run Now behavior is handled by the surrounding <form> (no JS interception needed).
+
+            function addPendingJobRow(archiveId, archiveName) {
+                // Create a placeholder row with a negative id
+                const job = {
+                    id: `pending-${Date.now()}`,
+                    archive_id: archiveId,
+                    archive_name: archiveName,
+                    job_type: 'archive',
+                    status: 'starting',
+                    start_time: new Date().toISOString(),
+                    total_size_bytes: null,
+                    stack_names: ''
+                };
+                try {
+                    const tbody = document.querySelector('table.table.table-hover.table-sm tbody');
+                    if (!tbody) return;
+                    // Remove any existing pending rows for same archive
+                    const old = tbody.querySelectorAll(`tr[data-pending-archive="${archiveId}"]`);
+                    old.forEach(o => o.remove());
+
+                    // Build row using the existing insertion function but mark as pending
+                    const tr = document.createElement('tr');
+                    tr.id = `job-row-${job.id}`;
+                    tr.setAttribute('data-job-id', job.id);
+                    tr.setAttribute('data-job-status', job.status || 'starting');
+                    tr.setAttribute('data-pending-archive', archiveId);
+                    tr.style.cursor = 'pointer';
+                    tr.innerHTML = `
+                        <td class="align-middle" style="white-space: nowrap;">
+                            <div class="d-inline-flex align-items-center">
+                                <strong class="me-2">#${job.id}</strong>
+
+                            </div>
+                        </td>
+                        <td><span class="badge bg-info">starting</span></td>
+                        <td>${job.job_type || 'archive'}</td>
+                        <td>${job.archive_name || 'N/A'}</td>
+                        <td><span class="text-muted small">N/A</span></td>
+                        <td class="d-none d-md-table-cell"><small style="white-space: nowrap;">${new Date().toISOString().substring(0,16).replace('T',' ')}</small></td>
+                        <td class="d-none d-md-table-cell"><small style="white-space: nowrap;">N/A</small></td>
+                        <td><small>N/A</small></td>
+                        <td style="text-align: right;"><span class="text-muted">N/A</span></td>
+                    `;
+                    attachJobRowHandlers(tr, job.id);
+                    tbody.insertBefore(tr, tbody.firstChild);
+                    tr.style.backgroundColor = '#fff3cd';
+                    setTimeout(() => { tr.style.transition = 'background-color 1s ease'; tr.style.backgroundColor = ''; }, 1200);
+                } catch (e) {
+                    console.error('Failed to add pending job row:', e);
+                }
+            }
+
+            function stopJobsEventSource() {
+                // No-op: global Jobs SSE disabled
+            }
+
+            // Handle incoming SSE payloads for the Job Details modal
+            function handleSseEvent(payload) {
+                if (!payload || !payload.type) return;
+
+                // Log lines
+                if (payload.type === 'log') {
+                    const data = payload.data;
+                    if (Array.isArray(data)) {
+                        data.forEach(l => appendLogLine(l));
+                    } else if (typeof data === 'string') {
+                        appendLogLine(data);
+                    } else if (data && data.lines) {
+                        data.lines.forEach(l => appendLogLine(l));
+                    } else if (data && data.line) {
+                        appendLogLine(data.line);
                     }
-                    if (jobMeta.duration_seconds !== undefined) {
-                        const elDuration = document.getElementById('job-duration'); if (elDuration) elDuration.textContent = jobMeta.duration_seconds + 's';
+                    return;
+                }
+
+                // Job/status updates
+                if (payload.type === 'job' || payload.type === 'status') {
+                    const j = payload.data || {};
+                    // Merge incoming job fields
+                    try { job = Object.assign({}, job || {}, j); } catch (e) {}
+
+                    // Update status badge
+                    const statusBadge = document.getElementById('job-status-badge');
+                    if (statusBadge) {
+                        const cls = job.status === 'success' ? 'success' : (job.status === 'running' ? 'info' : 'danger');
+                        statusBadge.className = `badge bg-${cls}`;
+                        statusBadge.textContent = job.status;
                     }
-                    if (jobMeta.total_size_bytes !== undefined) {
-                        const elTotal = document.getElementById('job-total-size'); if (elTotal) elTotal.textContent = jobMeta.total_size_bytes ? formatBytes(jobMeta.total_size_bytes) : 'N/A';
-                    }
+
+                    // Update timing & size fields (best-effort); then refresh authoritative data shortly
+                    const elStart = document.getElementById('job-start-time');
+                    const elEnd = document.getElementById('job-end-time');
+                    const elDuration = document.getElementById('job-duration');
+                    const elTotal = document.getElementById('job-total-size');
+                    const elReclaimed = document.getElementById('job-reclaimed');
+
+                    if (elStart) elStart.textContent = formatJobTime(job.start_time) || elStart.textContent || 'N/A';
+                    if (elEnd) elEnd.textContent = formatJobTime(job.end_time) || elEnd.textContent || 'N/A';
+                    if (elDuration) elDuration.textContent = (job.duration_seconds !== null && job.duration_seconds !== undefined) ? job.duration_seconds + 's' : elDuration.textContent || 'N/A';
+                    if (elTotal) elTotal.textContent = job.total_size_bytes ? formatBytes(job.total_size_bytes) : elTotal.textContent || 'N/A';
+                    if (elReclaimed) elReclaimed.textContent = job.reclaimed_bytes ? formatBytes(job.reclaimed_bytes) : elReclaimed.textContent || 'N/A';
 
                     // Update dashboard row if present
                     const dashboardRow = document.getElementById(`job-row-${job.id}`);
@@ -618,20 +1079,49 @@
                         dashboardRow.setAttribute('data-job-status', job.status);
                         const tableBadge = dashboardRow.querySelector('td:nth-child(2) .badge');
                         if (tableBadge) {
-                            const cls = job.status === 'success' ? 'bg-success' : (job.status === 'running' ? 'bg-info' : 'bg-danger');
-                            tableBadge.className = `badge ${cls}`;
+                            const cls = job.status === 'success' ? 'success' : (job.status === 'running' ? 'info' : 'danger');
+                            tableBadge.className = `badge bg-${cls}`;
                             tableBadge.textContent = job.status;
+                        }
+
+                        const startEl = document.getElementById(`row-job-start-${job.id}`);
+                        const endEl = document.getElementById(`row-job-end-${job.id}`);
+                        const durEl = document.getElementById(`row-job-duration-${job.id}`);
+                        const sizeEl = document.getElementById(`row-job-size-${job.id}`);
+
+                        if (startEl) startEl.textContent = formatJobTime(job.start_time) || startEl.textContent || 'N/A';
+                        if (endEl) endEl.textContent = formatJobTime(job.end_time) || endEl.textContent || 'N/A';
+                        if (durEl) durEl.textContent = (job.duration_seconds !== null && job.duration_seconds !== undefined) ? job.duration_seconds + 's' : durEl.textContent || 'N/A';
+                        if (sizeEl) {
+                            if (job.job_type === 'archive' && job.total_size_bytes) {
+                                sizeEl.innerHTML = `<span class="text-success">+${formatBytes(job.total_size_bytes)}</span>`;
+                            } else if ((job.job_type === 'retention' || job.job_type == 'cleanup') && (job.reclaimed_bytes || job.reclaimed_size_bytes)) {
+                                sizeEl.innerHTML = `<span class="text-warning">-${formatBytes(job.reclaimed_size_bytes || job.reclaimed_bytes)}</span>`;
+                            } else {
+                                sizeEl.innerHTML = `<span class="text-muted">N/A</span>`;
+                            }
                         }
                     }
 
-                    // If job finished, stop SSE and any polling
+                    // If job finished, stop SSE, any polling, and modal duration ticker
                     if (job.status !== 'running') {
                         stopJobEventSource();
                         try { updateSseStatus('stopped'); } catch (e) {}
                         if (window._jobLogPoller) { clearTimeout(window._jobLogPoller); window._jobLogPoller = null; }
+                        try { stopJobModalDurationTicker(); } catch (e) {}
                     }
-                } else if (payload.type === 'metrics') {
-                    // Replace metrics table
+
+                    // Refresh authoritative job info shortly to pick up any missing fields
+                    try {
+                        if (window._jobRefreshTimer) clearTimeout(window._jobRefreshTimer);
+                        window._jobRefreshTimer = setTimeout(refreshJobInfo, 500);
+                    } catch (e) {}
+
+                    return;
+                }
+
+                // Metrics updates
+                if (payload.type === 'metrics') {
                     const tbody = document.getElementById('job-metrics-body');
                     if (tbody && Array.isArray(payload.data)) {
                         tbody.innerHTML = '';
@@ -678,9 +1168,21 @@
                     const elTotal = document.getElementById('job-total-size');
                     const elReclaimed = document.getElementById('job-reclaimed');
 
-                    if (elStart) elStart.textContent = job.start_time || 'N/A';
-                    if (elEnd) elEnd.textContent = job.end_time || 'N/A';
-                    if (elDuration) elDuration.textContent = (job.duration_seconds !== null && job.duration_seconds !== undefined) ? job.duration_seconds + 's' : 'N/A';
+                    if (elStart) { elStart.textContent = formatJobTime(job.start_time) || 'N/A'; elStart.dataset.start = job.start_time || ''; }
+                    if (elEnd) { elEnd.textContent = formatJobTime(job.end_time) || 'N/A'; elEnd.dataset.end = job.end_time || ''; }
+
+                    // If job is running, compute duration from start_time and start modal ticker
+                    if (job.status === 'running') {
+                        if (elDuration) {
+                            const secs = computeDurationSecondsFromStart(job.start_time);
+                            elDuration.textContent = secs !== null ? formatDuration(secs) : formatDuration(0);
+                        }
+                        try { startJobModalDurationTicker(); } catch (e) {}
+                    } else {
+                        if (elDuration) elDuration.textContent = (job.duration_seconds !== null && job.duration_seconds !== undefined) ? formatDuration(job.duration_seconds) : 'N/A';
+                        try { stopJobModalDurationTicker(); } catch (e) {}
+                    }
+
                     if (elTotal) elTotal.textContent = job.total_size_bytes ? formatBytes(job.total_size_bytes) : 'N/A';
                     if (elReclaimed) elReclaimed.textContent = job.reclaimed_bytes ? formatBytes(job.reclaimed_bytes) : 'N/A';
 
@@ -722,8 +1224,8 @@
                         const durEl = document.getElementById(`row-job-duration-${job.id}`);
                         const sizeEl = document.getElementById(`row-job-size-${job.id}`);
 
-                        if (startEl) startEl.textContent = job.start_time || 'N/A';
-                        if (endEl) endEl.textContent = job.end_time || 'N/A';
+                        if (startEl) startEl.textContent = formatJobTime(job.start_time) || 'N/A';
+                        if (endEl) endEl.textContent = formatJobTime(job.end_time) || 'N/A';
                         if (durEl) durEl.textContent = (job.duration_seconds !== null && job.duration_seconds !== undefined) ? job.duration_seconds + 's' : 'N/A';
                         if (sizeEl) {
                             if (job.job_type === 'archive' && job.total_size_bytes) {
@@ -740,7 +1242,11 @@
                     if (job.status !== 'running') {
                         // Get final log if available and display
                         if (job.log) {
-                            logPre.textContent = job.log;
+                            clearLog();
+                            (job.log || '').split('\n').forEach(l => { if (l) appendLogLine(l); });
+                            // Initialize tail index so subsequent polling doesn't re-append duplicate lines
+                            try { lastLine = (job.log || '').split('\n').length; } catch (e) { lastLine = 0; }
+                            // Ensure scrolled to bottom
                             logPre.scrollTop = logPre.scrollHeight;
                         }
 
@@ -791,8 +1297,8 @@
                         const elTotal = document.getElementById('job-total-size');
                         const elReclaimed = document.getElementById('job-reclaimed');
 
-                        if (elStart) elStart.textContent = job.start_time || 'N/A';
-                        if (elEnd) elEnd.textContent = job.end_time || 'N/A';
+                        if (elStart) elStart.textContent = formatJobTime(job.start_time) || 'N/A';
+                        if (elEnd) elEnd.textContent = formatJobTime(job.end_time) || 'N/A';
                         if (elDuration) elDuration.textContent = (job.duration_seconds !== null && job.duration_seconds !== undefined) ? job.duration_seconds + 's' : 'N/A';
                         if (elTotal) elTotal.textContent = job.total_size_bytes ? formatBytes(job.total_size_bytes) : 'N/A';
                         if (elReclaimed) elReclaimed.textContent = job.reclaimed_bytes ? formatBytes(job.reclaimed_bytes) : 'N/A';
@@ -813,8 +1319,8 @@
                             const durEl = document.getElementById(`row-job-duration-${job.id}`);
                             const sizeEl = document.getElementById(`row-job-size-${job.id}`);
 
-                            if (startEl) startEl.textContent = job.start_time || 'N/A';
-                            if (endEl) endEl.textContent = job.end_time || 'N/A';
+                            if (startEl) startEl.textContent = formatJobTime(job.start_time) || 'N/A';
+                            if (endEl) endEl.textContent = formatJobTime(job.end_time) || 'N/A';
                             if (durEl) durEl.textContent = (job.duration_seconds !== null && job.duration_seconds !== undefined) ? job.duration_seconds + 's' : 'N/A';
                             if (sizeEl) {
                                 if (job.job_type === 'archive' && job.total_size_bytes) {
@@ -862,12 +1368,7 @@
                 lineBtn.textContent = window._jobLogShowLineNumbers ? 'Hide #' : 'Line #';
                 lineBtn.classList.toggle('btn-success', window._jobLogShowLineNumbers);
             }
-            const followBtn = document.getElementById(`job-follow-toggle-${job.id}`);
-            if (followBtn) {
-                // Reflect persisted follow state
-                try { followBtn.classList.toggle('btn-success', isJobFollowed(job.id)); } catch (e) {}
-                followBtn.addEventListener('click', ()=> toggleFollow(job.id));
-            }
+
 
             // SSE status helper
             function updateSseStatus(state) {
@@ -888,6 +1389,8 @@
                 }
             }
 
+
+
             updateSseStatus('polling');
 
             if (job.status === 'running') {
@@ -903,6 +1406,8 @@
                 // Show final log snapshot
                 clearLog();
                 (job.log || '').split('\n').forEach(l => { if (l) appendLogLine(l); });
+                // Initialize tail index so subsequent polling doesn't re-append duplicate lines
+                try { lastLine = (job.log || '').split('\n').length; } catch (e) { lastLine = 0; }
                 // Apply persisted line number visibility
                 document.querySelectorAll('#job-log .ln').forEach(el => el.style.display = window._jobLogShowLineNumbers ? '' : 'none');
                 // Also ensure metadata is up to date
@@ -916,7 +1421,7 @@
 
     async function requestDownload(jobId, stackName, archivePath) {
         try {
-            const response = await fetch(`/api/jobs/${jobId}/download`, {
+            const response = await fetch('/api/downloads/request', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -930,13 +1435,28 @@
             const data = await response.json();
             
             if (data.success) {
-                if (data.is_folder) {
-                    alert(data.message);
+                if (data.is_folder || data.is_preparing) {
+                    // Show a modal informing the user that archive preparation has started or is in-progress
+                    const modalEl = document.getElementById('downloadPrepModal');
+                    const msgEl = document.getElementById('downloadPrepMessage');
+                    if (msgEl) msgEl.textContent = data.message || (data.is_preparing ? 'The archive is being prepared; please try again in a few minutes.' : 'The archive is being prepared; you will receive a notification when it is ready.');
+                    try { if (modalEl && typeof bootstrap !== 'undefined' && bootstrap.Modal) new bootstrap.Modal(modalEl).show(); else alert(data.message); } catch(e){ alert(data.message); }
+
+                    // Persist token in localStorage so the modal persists across reloads and start polling
+                    try {
+                        if (data.token) {
+                            localStorage.setItem('download_prep_token', data.token);
+                            // Clear any previously-muted state for this token
+                            try { sessionStorage.removeItem('download_prep_muted'); } catch(e) {}
+                            startDownloadStatusPolling(data.token);
+                        }
+                    } catch(e) {}
                 } else {
+                    try { localStorage.removeItem('download_prep_token'); } catch(e) {}
                     window.open(data.download_url, '_blank');
                 }
             } else {
-                alert('Error: ' + (data.error || 'Unknown error'));
+                try { showAlert('Error: ' + (data.error || 'Unknown error'), 'danger'); } catch(e){ alert('Error: ' + (data.error || 'Unknown error')); }
             }
         } catch (error) {
             alert('Error requesting download: ' + error.message);
@@ -945,6 +1465,162 @@
 
     function downloadLog(jobId) {
         window.open(`/api/jobs/${jobId}/log`, '_blank');
+    }
+
+    // Polling for a token's prepare status so the modal persists across reloads
+    let _downloadStatusPollInterval = null;
+    async function checkDownloadStatus(token) {
+        try {
+            const resp = await fetch(`/api/downloads/status?token=${encodeURIComponent(token)}`);
+
+            // If the token was removed or expired, clear persisted state and stop polling
+            if (!resp.ok) {
+                if (resp.status === 404 || resp.status === 410) {
+                    try { localStorage.removeItem('download_prep_token'); sessionStorage.removeItem('download_prep_muted'); } catch(e){}
+                    // Hide modal if visible
+                    const modalEl = document.getElementById('downloadPrepModal');
+                    try { if (modalEl && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+                        const inst = bootstrap.Modal.getInstance(modalEl);
+                        if (inst) inst.hide();
+                    }} catch(e){}
+                    try { if (typeof showAlert === 'function') showAlert('Download link expired or was removed; request a new one.', 'warning'); } catch(e){}
+                    return false;
+                }
+                // For other non-OK responses just log and keep polling
+                console.error('Download status returned non-OK status', resp.status);
+                return false;
+            }
+
+            const d = await resp.json();
+            if (d.ready && d.download_url) {
+                // Clear persisted state and any muted flag
+                try { localStorage.removeItem('download_prep_token'); sessionStorage.removeItem('download_prep_muted'); } catch(e){}
+                // Hide modal if visible
+                const modalEl = document.getElementById('downloadPrepModal');
+                try { if (modalEl && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+                    const inst = bootstrap.Modal.getInstance(modalEl);
+                    if (inst) inst.hide();
+                }} catch(e){}
+                // Auto-open download in a new tab
+                window.open(d.download_url, '_blank');
+                return true;
+            } else {
+                // If user has muted this token (closed the modal), don't force it open again
+                try {
+                    const muted = sessionStorage.getItem('download_prep_muted');
+                    if (muted && muted === token) {
+                        return false;
+                    }
+                } catch (e) {}
+
+                // Show modal status
+                const modalEl = document.getElementById('downloadPrepModal');
+                const msgEl = document.getElementById('downloadPrepMessage');
+                if (msgEl) msgEl.textContent = 'The archive is being prepared; please try again in a few minutes.';
+                try { if (modalEl && typeof bootstrap !== 'undefined' && bootstrap.Modal) new bootstrap.Modal(modalEl).show(); } catch(e){}
+                return false;
+            }
+        } catch (e) {
+            console.error('Failed to check download status', e);
+            return false;
+        }
+    }
+
+    function startDownloadStatusPolling(token) {
+        if (_downloadStatusPollInterval) clearInterval(_downloadStatusPollInterval);
+        checkDownloadStatus(token);
+        _downloadStatusPollInterval = setInterval(async () => {
+            const ready = await checkDownloadStatus(token);
+            if (ready && _downloadStatusPollInterval) {
+                clearInterval(_downloadStatusPollInterval);
+                _downloadStatusPollInterval = null;
+            }
+        }, 10000);
+    }
+
+    // On page load, resume any persisted preparing state
+    document.addEventListener('DOMContentLoaded', () => {
+        try {
+            const t = localStorage.getItem('download_prep_token');
+            if (t) startDownloadStatusPolling(t);
+
+            // When the user dismisses the modal manually, mute repeated popups for this token
+            try {
+                const modalEl = document.getElementById('downloadPrepModal');
+                if (modalEl) {
+                    modalEl.addEventListener('hidden.bs.modal', function () {
+                        try {
+                            const tok = localStorage.getItem('download_prep_token');
+                            if (tok) sessionStorage.setItem('download_prep_muted', tok);
+                        } catch (e) {}
+                    });
+                    modalEl.addEventListener('show.bs.modal', function () {
+                        try { sessionStorage.removeItem('download_prep_muted'); } catch (e) {}
+                    });
+                }
+            } catch (e) {}
+
+            // Hook send-download modal confirm handler
+            try {
+                const btn = document.getElementById('sendDownloadConfirm');
+                if (btn) {
+                    btn.addEventListener('click', async function () {
+                        const email = (document.getElementById('sendDownloadEmail').value || '').trim();
+                        const token = (document.getElementById('sendDownloadToken').value || '').trim();
+                        const archive = (document.getElementById('sendDownloadArchivePath').value || '').trim();
+                        const stack = (document.getElementById('sendDownloadStackName').value || '').trim();
+
+                        if (!email) {
+                            const fb = document.getElementById('sendDownloadFeedback');
+                            if (fb) fb.textContent = 'Please enter a recipient email';
+                            return;
+                        }
+
+                        try {
+                            const body = {};
+                            body.email = email;
+                            if (token) body.token = token;
+                            else if (archive) { body.archive_path = archive; if (stack) body.stack_name = stack; }
+
+                            const resp = await fetch('/api/downloads/send_link', {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+                            });
+                            const data = await resp.json();
+                            if (resp.ok) {
+                                // Hide modal and clear fields
+                                try { const mdl = bootstrap.Modal.getInstance(document.getElementById('sendDownloadModal')); if (mdl) mdl.hide(); } catch(e){}
+                                try { if (typeof showAlert === 'function') showAlert(data.message || 'Email sent', 'success'); else alert(data.message || 'Email sent'); } catch(e){}
+                                // If we are on the downloads page, reload tokens
+                                try { if (document.getElementById('tokensTable')) loadTokens(); } catch(e){}
+                            } else {
+                                const fb = document.getElementById('sendDownloadFeedback');
+                                if (fb) fb.textContent = data.error || (data.message || 'Failed to send');
+                            }
+                        } catch (e) {
+                            const fb = document.getElementById('sendDownloadFeedback');
+                            if (fb) fb.textContent = 'Request failed: ' + e.message;
+                        }
+                    });
+                }
+            } catch (e) {}
+        } catch (e) {}
+    });
+
+    function showSendDownloadModal(stackName, archivePath, token) {
+        try {
+            const emailInput = document.getElementById('sendDownloadEmail');
+            const tokenInput = document.getElementById('sendDownloadToken');
+            const archiveInput = document.getElementById('sendDownloadArchivePath');
+            const stackInput = document.getElementById('sendDownloadStackName');
+            const feedback = document.getElementById('sendDownloadFeedback');
+            if (emailInput) emailInput.value = '';
+            if (tokenInput) tokenInput.value = token || '';
+            if (archiveInput) archiveInput.value = archivePath || '';
+            if (stackInput) stackInput.value = stackName || '';
+            if (feedback) feedback.textContent = '';
+            const modalEl = document.getElementById('sendDownloadModal');
+            if (modalEl && typeof bootstrap !== 'undefined' && bootstrap.Modal) new bootstrap.Modal(modalEl).show();
+        } catch (e) { console.error(e); }
     }
 
     function downloadStackLog(jobId, stackName) {
@@ -958,11 +1634,81 @@
         const i = Math.floor(Math.log(bytes) / Math.log(1024));
         return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
     }
-    
+
+    function formatDuration(seconds) {
+        if (seconds === null || seconds === undefined) return 'N/A';
+        seconds = Number(seconds);
+        if (Number.isNaN(seconds)) return 'N/A';
+        if (seconds < 60) return `${seconds}s`;
+        const minutes = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        if (minutes < 60) return `${minutes}m ${secs}s`;
+        const hours = Math.floor(minutes / 60);
+        const mins = minutes % 60;
+        return `${hours}h ${mins}m`;
+    }
+
+    function pad(n) { return String(n).padStart(2,'0'); }
+
+    function formatJobTime(t) {
+        // Parse any ISO-like timestamp and format in the client's local timezone as YYYY-MM-DD HH:MM
+        if (!t) return 'N/A';
+        try {
+            const d = new Date(t);
+            if (Number.isNaN(d.getTime())) return String(t).substring(0,16).replace('T',' ');
+            return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        } catch (e) { return String(t).substring(0,16).replace('T',' '); }
+    }
+
+    function computeDurationSecondsFromStart(startTime) {
+        if (!startTime) return null;
+        try {
+            const s = new Date(startTime).getTime();
+            if (Number.isNaN(s)) return null;
+            const now = Date.now();
+            const diff = Math.floor((now - s) / 1000);
+            return diff >= 0 ? diff : 0;
+        } catch (e) { return null; }
+    }
+
+    // Update duration cells for running jobs every second
+    function updateRunningDurations() {
+        try {
+            const runningRows = document.querySelectorAll('tr[data-job-status="running"]');
+            if (!runningRows || runningRows.length === 0) {
+                // If we have a ticker running, stop it
+                if (window._dashboardDurationTicker) { clearInterval(window._dashboardDurationTicker); window._dashboardDurationTicker = null; }
+                return;
+            }
+
+            runningRows.forEach(row => {
+                try {
+                    const id = row.getAttribute('data-job-id');
+                    if (!id) return;
+                    const durEl = document.getElementById(`row-job-duration-${id}`);
+                    const startEl = document.getElementById(`row-job-start-${id}`);
+                    if (!durEl || !startEl) return;
+                    const startRaw = startEl.dataset.start || startEl.textContent || '';
+                    const secs = computeDurationSecondsFromStart(startRaw);
+                    if (secs !== null) durEl.textContent = formatDuration(secs);
+                } catch (e) {}
+            });
+        } catch (e) {}
+    }
+
+    function startDashboardDurationTicker() {
+        if (window._dashboardDurationTicker) return;
+        window._dashboardDurationTicker = setInterval(updateRunningDurations, 1000);
+    }
+
+    function stopDashboardDurationTicker() {
+        if (window._dashboardDurationTicker) { clearInterval(window._dashboardDurationTicker); window._dashboardDurationTicker = null; }
+    }
+
     // Edit Archive Modal - Navigate to archives page
     function editArchive(archiveId) {
         localStorage.setItem('openEditModal', archiveId);
-        window.location.href = '/archives';
+        window.location.href = "{{ url_for('dashboard.index') }}";
     }
     </script>
     
