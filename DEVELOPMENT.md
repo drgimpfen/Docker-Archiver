@@ -135,7 +135,7 @@ docker compose logs -f --tail=200 app
 docker inspect <container_name> --format '{{json .Mounts}}'
 ```
 
-- If you see bind-mount mismatch warnings in the Dashboard, make sure host and container paths are identical (see README / TROUBLESHOOTING.md).
+- If you see bind-mount mismatch warnings in the Dashboard, make sure host and container paths are identical (see [README.md](./README.md) and [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)).
 
 ---
 
@@ -180,7 +180,7 @@ Docker-Archiver/
 
 ## Contributing
 
-See `CONTRIBUTING.md` for contribution guidelines, testing instructions, and the PR checklist. Keep PRs small and focused; if you change public APIs or the database schema, update `API.md` or `CHANGELOG.md` accordingly.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution guidelines, testing instructions, and the PR checklist. Keep PRs small and focused; if you change public APIs or the database schema, update [API.md](./API.md) or [CHANGELOG.md](./CHANGELOG.md) accordingly.
 
 ---
 

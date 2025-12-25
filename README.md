@@ -56,7 +56,7 @@ cp .env.example .env
 cp docker-compose.override.yml.example docker-compose.override.yml
 ```
 
-Edit `.env` and set required secrets like `DB_PASSWORD` and `SECRET_KEY`. See `SECURITY.md` for guidance on generating, storing, and rotating secrets securely.
+Edit `.env` and set required secrets like `DB_PASSWORD` and `SECRET_KEY`. See [SECURITY.md](./SECURITY.md) for guidance on generating, storing, and rotating secrets securely.
 
 ### 2. Start Services
 
@@ -195,7 +195,7 @@ Discovery follows these rules:
 See **⚠️ Important: Bind Mounts Required** below for the mandatory bind-mount rules — mismatched mounts will be ignored and may cause job failures.
 
 <a name="troubleshooting-bind-mount-warnings"></a>
-> **Troubleshooting (bind-mounts, Redis, logs, notifications):** See `TROUBLESHOOTING.md` for step-by-step guidance, diagnostic commands, and examples.
+> **Troubleshooting (bind-mounts, Redis, logs, notifications):** See [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) for step-by-step guidance, diagnostic commands, and examples.
 
 ### ⚠️ Important: Bind Mounts Required
 
@@ -376,7 +376,7 @@ The download feature uses short-lived tokens (24 hours) that map to either an ex
 
 **Security notes & token handling:** See `SECURITY.md` for guidance on secure token handling, download generation, and operational recommendations (rotate secrets, keep automatic generation disabled unless intentional).
 
-See `SECURITY.md` for TLS and SMTP configuration recommendations.
+See [SECURITY.md](./SECURITY.md) for TLS and SMTP configuration recommendations.
 
 Recipients are taken from user profile email addresses or from configured default recipient settings in the Notifications page.
 
@@ -390,7 +390,7 @@ Recipients are taken from user profile email addresses or from configured defaul
 
 **Note:** Non-email transports (Apprise, Discord, etc.) are no longer supported — the app sends notifications via SMTP only. If you previously used Apprise URLs, migrate those recipient addresses into user profiles or the Notifications page accordingly.
 
-**API & Endpoints:** The full runtime API reference and usage examples have been moved to `API.md` (see `API.md` in the repository).
+**API & Endpoints:** The full runtime API reference and usage examples have been moved to [API.md](./API.md).
 
 ### Reverse Proxy Configuration (Pangolin, Authelia, etc.)
 
@@ -447,7 +447,9 @@ For contribution guidelines, the PR checklist, and local test instructions, see 
 
 ## Support
 
-- 🐛 **Issues**: https://github.com/drgimpfen/Docker-Archiver/issues
+- � **Documentation (local):** [DEVELOPMENT.md](./DEVELOPMENT.md) · [API.md](./API.md) · [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) · [SECURITY.md](./SECURITY.md) · [CONTRIBUTING.md](./CONTRIBUTING.md)
+
+- �🐛 **Issues**: https://github.com/drgimpfen/Docker-Archiver/issues
 - 📚 **Documentation**: https://github.com/drgimpfen/Docker-Archiver/wiki
 - 💬 **Discussions**: https://github.com/drgimpfen/Docker-Archiver/discussions
 - 💬 **Discord**: https://discord.gg/Tq84tczrR2
