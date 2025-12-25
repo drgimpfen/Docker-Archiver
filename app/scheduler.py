@@ -5,13 +5,13 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from app.db import get_db
 from app.executor import ArchiveExecutor
-from app.notifications import get_setting
+from app.notifications.helpers import get_setting
 import os
 import time
 import threading
 from app.utils import setup_logging, get_logger, get_display_timezone, get_log_dir, get_sentinel_path, local_now, filename_safe
 from app.cleanup import run_cleanup
-from app.notifications import send_error_notification
+from app.notifications.handlers import send_error_notification
 from datetime import datetime, timezone
 from croniter import croniter
 

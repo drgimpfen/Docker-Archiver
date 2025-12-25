@@ -6,7 +6,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from app.auth import login_required, get_current_user, hash_password, verify_password
 from app.db import get_db
 from app.scheduler import reload_schedules
-from app.notifications import send_test_notification
+from app.notifications.handlers import send_test_notification
 from app.utils import format_mode
 
 
@@ -322,8 +322,8 @@ def fix_permissions():
     try:
         import threading
         from app.utils import get_archives_path, apply_permissions_recursive, get_logger
-        from app.notifications import send_permissions_fix_notification
-        logger = get_logger(__name__)
+        from app.notifications.handlers import send_permissions_fix_notification
+        logger = get_logger(__name__) 
 
         def _run():
             try:

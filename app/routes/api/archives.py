@@ -16,7 +16,8 @@ from croniter import croniter
 from datetime import datetime, timezone, timedelta
 from app.utils import setup_logging, get_logger, format_bytes, format_duration, get_disk_usage, to_iso_z, get_log_dir, now, local_now, filename_safe
 from app import utils
-from app.notifications import get_setting, send_retention_notification
+from app.notifications.helpers import get_setting
+from app.notifications.handlers import send_retention_notification
 
 # Configure logging using centralized setup so LOG_LEVEL is respected
 setup_logging()

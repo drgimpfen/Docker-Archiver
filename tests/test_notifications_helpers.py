@@ -1,5 +1,5 @@
 import pytest
-from app.notifications import helpers
+import app.notifications.helpers as helpers
 
 
 def test_get_setting_returns_default_when_db_fails(monkeypatch):

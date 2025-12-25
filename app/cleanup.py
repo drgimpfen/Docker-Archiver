@@ -6,8 +6,9 @@ import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
 from app.db import get_db
-from app.notifications import get_setting, get_subject_with_tag, strip_html_tags
-from app.notifications import get_user_emails
+from app.notifications.helpers import get_setting, get_subject_with_tag
+from app.notifications.formatters import strip_html_tags
+from app.notifications.helpers import get_user_emails
 from app import utils
 from app.utils import setup_logging, get_logger, format_bytes
 

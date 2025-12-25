@@ -18,7 +18,7 @@ from app.db import init_db, get_db
 from app.auth import login_required, authenticate_user, create_user, get_user_count, get_current_user
 from app.scheduler import init_scheduler, get_next_run_time
 from app.stacks import discover_stacks, get_stack_mount_paths
-from app.notifications import get_setting
+from app.notifications.helpers import get_setting
 import shutil
 from app import utils
 from pathlib import Path
