@@ -3,7 +3,7 @@ Main Flask application with Blueprints.
 """
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import datetime
 from app.utils import setup_logging, get_logger, get_sentinel_path, format_bytes, format_duration, get_disk_usage, to_iso_z, format_datetime
 # Centralized logging setup (use only LOG_LEVEL env var)
 setup_logging()
@@ -342,14 +342,11 @@ def download_file(token):
         if not token_data:
             return render_template('download_error.html', reason='Download token is invalid or does not exist.', hint='Please request a fresh download link.'), 404
             
-        # Normalize expiry and compare with an timezone-aware 'now' in UTC
-        expires_at = token_data.get('expires_at')
+        # Normalize expiry using utils helper and compare with UTC now
+        expires_at = utils.ensure_utc(token_data.get('expires_at'))
         if not expires_at:
             return render_template('download_error.html', reason='This download link is invalid or missing expiry.', hint='Request a new download link.'), 410
-        # If DB returned a naive datetime, assume UTC and make it timezone-aware
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        if expires_at < datetime.now(timezone.utc):
+        if expires_at < utils.now():
             return render_template('download_error.html', reason='This download link has expired.', hint='Request a new download link.'), 410
             
         if token_data['is_packing']:

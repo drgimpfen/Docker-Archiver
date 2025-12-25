@@ -5,7 +5,7 @@ import os
 import uuid
 import subprocess
 import threading
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from flask import request, jsonify, send_file
 from app.routes.api import bp, api_auth_required
@@ -13,6 +13,7 @@ from app.db import get_db
 from app.utils import get_downloads_path, get_logger, setup_logging
 from app.notifications.adapters.smtp import SMTPAdapter
 from app.notifications.core import get_setting
+from app import utils
 
 # Configure logging
 setup_logging()
@@ -251,8 +252,9 @@ def download_status():
             row = cur.fetchone()
             if not row:
                 return jsonify({'ready': False, 'error': 'Token not found or expired'}), 404
-            # Check expiry
-            if row['expires_at'] and row['expires_at'] < datetime.now():
+            # Check expiry (normalize to UTC)
+            expires_at = utils.ensure_utc(row.get('expires_at'))
+            if expires_at and expires_at < utils.now():
                 return jsonify({'ready': False, 'error': 'Token expired'}), 404
             fp = row.get('file_path')
             if fp and Path(fp).exists() and not row.get('is_packing'):
