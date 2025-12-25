@@ -22,6 +22,41 @@ python3 -c "from app.db import init_db; init_db()" || {
   exit 1
 }
 
+# Wait for schema to be usable (ensure migrations/CREATE TABLEs are visible)
+RETRIES=${DB_WAIT_RETRIES:-30}
+DELAY=${DB_WAIT_DELAY:-1}
+count=0
+echo "[Entrypoint] Waiting for database schema to be ready..."
+while [ "$count" -lt "$RETRIES" ]; do
+  if python3 - <<'PY'
+import os, sys
+import psycopg2
+try:
+    conn = psycopg2.connect(os.environ['DATABASE_URL'], connect_timeout=3)
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='settings' LIMIT 1;")
+    row = cur.fetchone()
+    conn.close()
+    if row:
+        sys.exit(0)
+    else:
+        sys.exit(1)
+except Exception:
+    sys.exit(1)
+PY
+  then
+    echo "[Entrypoint] Database schema is ready"
+    break
+  fi
+  count=$((count+1))
+  echo "[Entrypoint] Waiting for schema ($count/$RETRIES)..."
+  sleep "$DELAY"
+done
+if [ "$count" -ge "$RETRIES" ]; then
+  echo "[Entrypoint] ERROR: Database schema not ready after $RETRIES retries"
+  exit 1
+fi
+
 echo "[Entrypoint] Starting application..."
 
 # If the provided command is 'gunicorn', compute dynamic worker/threads settings
