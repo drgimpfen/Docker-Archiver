@@ -30,7 +30,16 @@ DB_PASSWORD=your-secure-db-password
 SECRET_KEY=your-random-secret-key-here
 APP_PORT=8080
 ARCHIVE_DIR=/mnt/archives
+# Optional download-generation flags (defaults: false)
+# Leave these disabled unless you explicitly want auto generation behavior.
+DOWNLOADS_AUTO_GENERATE_ON_ACCESS=false
+DOWNLOADS_AUTO_GENERATE_ON_STARTUP=false
 ```
+
+**Notes:**
+- `DOWNLOADS_AUTO_GENERATE_ON_ACCESS`: when `true`, visiting a missing download link can start background generation immediately. Default is `false`.
+- `DOWNLOADS_AUTO_GENERATE_ON_STARTUP`: when `true`, the app will attempt to generate missing downloads for valid tokens on startup. Default is `false` and should be used with caution.
+- SMTP credentials are managed via the app UI (Settings → Notifications) and are not configured via env vars. See `README.md` for additional details.
 
 ### 3. Configure Volume Mounts
 
@@ -42,17 +51,43 @@ volumes:
   - /mnt/backups:/archives
   - /opt/stacks:/opt/stacks        # ← Auto-detected (host:container paths must match)
   - /home/user/docker:/home/user/docker  # ← Auto-detected
+  - ./downloads:/tmp/downloads      # Optional: persist generated downloads (recommended)
 ```
 
 If stacks are not mounted as identical bind mounts, the app may ignore them and jobs can fail. See the Dashboard bind-mount warnings and README troubleshooting section for guidance.
 
+Note: `/tmp/downloads` is used for temporary download files and is treated as a fixed ignore for bind-mount mismatch checks (similar to `/archives` and `/var/run/docker.sock`). Mount it if you want generated download files to persist across container restarts.
+
 ### 4. Start Services
+
+#### Debugging (Enable debug logs)
+
+To enable verbose logs for troubleshooting set `LOG_LEVEL=DEBUG` before running Docker Compose. This emits DEBUG-level messages (and higher) across the application components.
+
+```bash
+# Temporarily enable debug for a single run
+LOG_LEVEL=DEBUG docker compose up -d
+
+# Persist in .env for repeated troubleshooting
+echo "LOG_LEVEL=DEBUG" >> .env
+docker compose up -d
+```
+
+Use debug carefully in production — set it only when you need detailed diagnostics and revert to `INFO` afterwards.
+
 
 Redis is included in `docker-compose.yml` by default and stores data in `./redis-data` (bind mounted). The `redis` service in the compose file is simple and lightweight, but we recommend adding a basic healthcheck to ensure the `app` waits for Redis to be ready before starting (example shown in compose). To start the services:
 
 ```bash
 # Recommended update & start workflow (pull, update images, rebuild app service, tail logs)
 git pull --ff-only && docker compose pull && docker compose up -d --build --no-deps --remove-orphans app && docker compose logs -f --tail=200 app
+
+**Image pull policy:** Docker Archiver can optionally pull missing images automatically before starting stacks. This behaviour is controlled by **Settings → Security → Allow image pulls on start** (default: **disabled**).
+
+- If enabled, the archiver will attempt `docker compose pull` before starting stacks; any pull failure will be logged and will prevent the stack from starting.
+- If disabled, the archiver checks whether the images referenced by the stack are available locally; if they are missing the stack will be **skipped** during restart and a warning will be recorded in the job log and included in the job notification. This prevents unexpected network activity or automatic updates on your hosts.
+
+Ensure required images are pre-pulled in your deployment process if this option is disabled.
 ```
 
 If you prefer a simple start for a fresh deployment:
@@ -80,12 +115,29 @@ docker compose up -d --build
 1. Browse to http://your-server:8080
 2. Create admin account
 3. Configure first archive
+4. Configure SMTP for notifications
+
+   * Go to **Settings → Notifications** in the web UI
+   * Set **SMTP Server**, **SMTP Port**, **SMTP Username/Password** (if required), **From address** and toggle **Use TLS** as needed
+   * Optionally add recipient addresses in user profiles or in the Notifications defaults
+   * Use the **Send Test Notification** button to validate delivery
+
+   Note: SMTP settings are stored in the application database (Settings) and are not configured via environment variables. This avoids leaking credentials in the environment and makes runtime changes available via the web UI.
 
 ## Production Hardening
 
 ### Gunicorn & Workers
 
-The Docker image runs Gunicorn by default (see `Dockerfile`, default `--workers 2`). For higher throughput, increase workers (e.g., `--workers 4`) but be aware that real-time SSE events require a cross-worker pub/sub if you run multiple workers — this is why Redis is included by default. Ensure `REDIS_URL` is set (the compose file sets this to `redis://redis:6379/0`) when scaling beyond one worker.
+The Docker image computes a sane default for Gunicorn workers on startup: the entrypoint detects CPU count and uses the formula **(2 * CPUS + 1)** to compute the worker count and caps it to `GUNICORN_MAX_WORKERS` (default **8**). This works well on machines with spare CPU capacity and avoids hardcoding worker counts in images.
+
+You can override the automatic sizing with these environment variables:
+
+- `GUNICORN_WORKERS` — set an explicit number of workers (overrides auto calculation)
+- `GUNICORN_MAX_WORKERS` — maximum workers when using automatic sizing (default: 8)
+- `GUNICORN_THREADS` — threads per worker (default: 2)
+- `GUNICORN_TIMEOUT` — worker timeout in seconds (default: 300)
+
+When running multiple workers and you rely on real-time SSE, ensure a cross-worker pub/sub is configured (e.g., Redis via `REDIS_URL`).
 
 ### Use HTTPS (Traefik Example)
 
@@ -177,7 +229,7 @@ sudo chmod 666 /var/run/docker.sock
 1. Check mount paths in `docker-compose.yml`
 2. Verify compose files exist:
    ```bash
-   docker compose exec app ls -la /local/
+   docker compose exec app ls -la /opt/stacks/
    ```
 3. Check logs:
    ```bash
@@ -224,6 +276,8 @@ sudo chmod 666 /var/run/docker.sock
 
 ### Cleanup Old Jobs
 
+> **Note:** On startup the app will automatically mark jobs still in `running` state that **do not have an `end_time`** as `failed` to avoid stuck running states and UI confusion.
+
 ```sql
 -- Connect to database
 docker compose exec db psql -U archiver docker_archiver
@@ -231,7 +285,6 @@ docker compose exec db psql -U archiver docker_archiver
 -- Delete jobs older than 90 days
 DELETE FROM jobs WHERE start_time < NOW() - INTERVAL '90 days';
 ```
-
 ### Cleanup Expired Tokens
 
 Runs automatically daily at 2 AM, or manually:

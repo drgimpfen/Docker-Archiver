@@ -5,6 +5,12 @@ import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from contextlib import contextmanager
+from app.utils import setup_logging, get_logger
+from app import utils
+
+# Configure logging using centralized setup so LOG_LEVEL is respected
+setup_logging()
+logger = get_logger(__name__)
 
 
 def get_db_url():
@@ -103,19 +109,95 @@ def init_db():
             );
         """)
         
-        # Download tokens
+        # Download tokens for secure file access
         cur.execute("""
             CREATE TABLE IF NOT EXISTS download_tokens (
                 id SERIAL PRIMARY KEY,
                 token VARCHAR(64) UNIQUE NOT NULL,
-                job_id INTEGER REFERENCES jobs(id) ON DELETE CASCADE,
-                stack_name VARCHAR(255),
-                archive_path TEXT NOT NULL,
-                is_folder BOOLEAN DEFAULT false,
+                stack_name VARCHAR(255) NOT NULL,
+                file_path TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMP NOT NULL,
-                downloads INTEGER DEFAULT 0
+                is_packing BOOLEAN DEFAULT FALSE
             );
+        """)
+        
+        # Migrate download_tokens table: if older schema exists without new columns, add them
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='file_path'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN file_path TEXT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='created_at'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='expires_at'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN expires_at TIMESTAMP;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='is_packing'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN is_packing BOOLEAN DEFAULT FALSE;
+                END IF;
+            END $$;
+        """)
+
+        # Ensure `notify_emails` array column exists and drop legacy `notify_email` column if present
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='notify_emails'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN notify_emails TEXT[];
+                END IF;
+
+                -- If legacy notify_email column exists, drop it (we assume backfill has already been applied)
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='notify_email'
+                ) THEN
+                    ALTER TABLE download_tokens DROP COLUMN notify_email;
+                END IF;
+            END $$;
+        """)
+
+        # Ensure archive_path column exists and is nullable; backfill from file_path when possible
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='archive_path'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN archive_path TEXT;
+                END IF;
+
+                -- If archive_path exists but is NOT NULL, drop the NOT NULL constraint so INSERTs without it succeed
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='archive_path' AND is_nullable = 'NO'
+                ) THEN
+                    ALTER TABLE download_tokens ALTER COLUMN archive_path DROP NOT NULL;
+                END IF;
+
+                -- Backfill archive_path from file_path for existing rows
+                IF EXISTS (SELECT 1 FROM download_tokens WHERE archive_path IS NULL AND file_path IS NOT NULL) THEN
+                    UPDATE download_tokens SET archive_path = file_path WHERE archive_path IS NULL AND file_path IS NOT NULL;
+                END IF;
+            END $$;
         """)
         
         # API tokens for external access
@@ -144,32 +226,14 @@ def init_db():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_archive_id ON jobs(archive_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_jobs_start_time ON jobs(start_time DESC);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_job_stack_metrics_job_id ON job_stack_metrics(job_id);")
+
         cur.execute("CREATE INDEX IF NOT EXISTS idx_download_tokens_token ON download_tokens(token);")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_download_tokens_expires ON download_tokens(expires_at);")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_download_tokens_expires_at ON download_tokens(expires_at);")
+
         cur.execute("CREATE INDEX IF NOT EXISTS idx_api_tokens_token ON api_tokens(token);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);")
         
-        # Migrate download_tokens table if needed (rename file_path to archive_path, add is_folder)
-        cur.execute("""
-            DO $$ 
-            BEGIN
-                -- Check if old column exists and rename it
-                IF EXISTS (
-                    SELECT 1 FROM information_schema.columns 
-                    WHERE table_name='download_tokens' AND column_name='file_path'
-                ) THEN
-                    ALTER TABLE download_tokens RENAME COLUMN file_path TO archive_path;
-                END IF;
-                
-                -- Add is_folder column if it doesn't exist
-                IF NOT EXISTS (
-                    SELECT 1 FROM information_schema.columns 
-                    WHERE table_name='download_tokens' AND column_name='is_folder'
-                ) THEN
-                    ALTER TABLE download_tokens ADD COLUMN is_folder BOOLEAN DEFAULT false;
-                END IF;
-            END $$;
-        """)
+
         
         # Migrate jobs table - add missing columns
         cur.execute("""
@@ -189,6 +253,26 @@ def init_db():
                     WHERE table_name='jobs' AND column_name='error_message'
                 ) THEN
                     ALTER TABLE jobs ADD COLUMN error_message TEXT;
+                END IF;
+
+                -- Add deleted counts for retention reporting
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='jobs' AND column_name='deleted_count'
+                ) THEN
+                    ALTER TABLE jobs ADD COLUMN deleted_count INTEGER DEFAULT 0;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='jobs' AND column_name='deleted_dirs'
+                ) THEN
+                    ALTER TABLE jobs ADD COLUMN deleted_dirs INTEGER DEFAULT 0;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='jobs' AND column_name='deleted_files'
+                ) THEN
+                    ALTER TABLE jobs ADD COLUMN deleted_files INTEGER DEFAULT 0;
                 END IF;
             END $$;
         """)
@@ -215,24 +299,34 @@ def init_db():
             END $$;
         """)
         
+
+
+
         # Insert default settings if not exist
         cur.execute("""
             INSERT INTO settings (key, value) VALUES 
                 ('base_url', 'http://localhost:8080'),
-                ('apprise_urls', ''),
                 ('notify_on_success', 'true'),
                 ('notify_on_error', 'true'),
                 ('maintenance_mode', 'false'),
-                ('max_token_downloads', '3'),
                 ('cleanup_enabled', 'true'),
-                ('cleanup_time', '02:30'),
+                ('cleanup_cron', '30 2 * * *'),
                 ('cleanup_log_retention_days', '90'),
                 ('cleanup_dry_run', 'false'),
                 ('notify_on_cleanup', 'false'),
-                ('notify_report_verbosity', 'full'),
                 ('notify_attach_log', 'false'),
-                ('notify_attach_log_on_failure', 'false'),
-                ('app_version', '0.7.0')
+                ('notify_attach_log_on_failure', 'true'),
+                ('smtp_server', ''),
+                ('smtp_port', '587'),
+                ('smtp_user', ''),
+                ('smtp_password', ''),
+                ('smtp_from', ''),
+                ('smtp_use_tls', 'true'),
+                ('apply_permissions', 'false'),
+                ('image_pull_policy', 'never'),
+                ('image_pull_inactivity_timeout', '300'),
+                ('image_pull_excerpt_lines', '8'),
+                ('app_version', '0.8.0')
             ON CONFLICT (key) DO NOTHING;
         """)
         
@@ -248,7 +342,68 @@ def init_db():
             pass
         
         conn.commit()
-        print("[DB] Database schema initialized successfully")
+        logger.info("[DB] Database schema initialized successfully")
+
+
+def is_archive_running(archive_id):
+    """Return True if there is a running job for the given archive id."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) AS cnt FROM jobs WHERE archive_id = %s AND status = 'running';", (archive_id,))
+        row = cur.fetchone()
+        return bool(row and row.get('cnt', 0) > 0)
+
+
+def mark_stale_running_jobs(threshold_minutes=None):
+    """Mark running jobs as failed at startup.
+
+    If ``threshold_minutes`` is ``None`` (default) this function will mark *all* jobs with
+    ``status = 'running'`` and ``end_time IS NULL`` as ``failed`` (sets ``end_time`` and
+    ``duration_seconds`` where available). If ``threshold_minutes`` is provided, it will only
+    mark jobs whose ``start_time`` is older than the threshold (legacy behavior).
+
+    Returns the number of jobs that were marked as failed.
+    """
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            msg = 'Marked failed on server startup (stale running job)'
+            log_line = f"[{utils.local_now().strftime('%Y-%m-%d %H:%M:%S')}] [ERROR] Job marked failed due to server restart\n"
+
+            if threshold_minutes is None:
+                # Mark any running jobs missing an end_time as failed
+                cur.execute("""
+                    UPDATE jobs
+                    SET status = 'failed',
+                        end_time = NOW(),
+                        duration_seconds = CASE WHEN start_time IS NOT NULL
+                            THEN EXTRACT(EPOCH FROM (NOW() - start_time))::INTEGER
+                            ELSE NULL END,
+                        error = COALESCE(error, '') || %s,
+                        log = COALESCE(log, '') || %s
+                    WHERE status = 'running' AND end_time IS NULL;
+                """, (msg, log_line))
+                count = cur.rowcount
+                conn.commit()
+                return count
+            else:
+                # Legacy: mark only jobs older than threshold
+                cur.execute("""
+                    UPDATE jobs
+                    SET status = 'failed',
+                        end_time = NOW(),
+                        duration_seconds = EXTRACT(EPOCH FROM (NOW() - start_time))::INTEGER,
+                        error = COALESCE(error, '') || %s,
+                        log = COALESCE(log, '') || %s
+                    WHERE status = 'running'
+                      AND start_time < NOW() - (%s || ' minutes')::interval;
+                """, (msg, log_line, str(threshold_minutes)))
+                count = cur.rowcount
+                conn.commit()
+                return count
+    except Exception as e:
+        logger.exception("[DB] Failed to mark stale running jobs: %s", e)
+        return 0
 
 
 if __name__ == '__main__':

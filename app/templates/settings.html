@@ -7,240 +7,46 @@
     <h2><i class="bi bi-gear me-2"></i> Settings</h2>
 </div>
 
-<form method="POST">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-    <!-- General Settings -->
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="mb-0"><i class="bi bi-globe me-2"></i> General</h5>
-        </div>
-        <div class="card-body">
-            <div class="mb-3">
-                <label for="baseUrl" class="form-label">Base URL</label>
-                <input type="url" class="form-control" id="baseUrl" name="base_url" 
-                       value="{{ settings.get('base_url', 'http://localhost:8080') }}">
-                <div class="form-text">Used for generating links in notifications</div>
-            </div>
-            
-            <div class="form-check form-switch">
-                <input class="form-check-input" type="checkbox" role="switch" 
-                       id="maintenanceMode" name="maintenance_mode"
-                       {% if settings.get('maintenance_mode') == 'true' %}checked{% endif %}>
-                <label class="form-check-label" for="maintenanceMode">
-                    <strong>Maintenance Mode</strong><br>
-                    <small class="text-muted">Pauses all scheduled archives (shows banner on dashboard)</small>
-                </label>
+<div class="row g-3">
+    <div class="col-12 col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title"><i class="bi bi-globe me-2"></i>General</h5>
+                <p class="card-text">Basic application settings (Base URL, maintenance mode).</p>
+                <a href="{{ url_for('settings.manage_settings') }}" class="btn btn-primary btn-sm">Open</a>
             </div>
         </div>
     </div>
-    
-    <!-- Security Settings -->
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="mb-0"><i class="bi bi-shield-lock me-2"></i> Security</h5>
-        </div>
-        <div class="card-body">
-            <div class="mb-3">
-                <label for="maxTokenDownloads" class="form-label">Max Downloads per Token</label>
-                <input type="number" class="form-control" id="maxTokenDownloads" name="max_token_downloads" 
-                       value="{{ settings.get('max_token_downloads', '3') }}" min="1" max="100">
-                <div class="form-text">Maximum number of times a download link can be used (prevents sharing)</div>
+    <div class="col-12 col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title"><i class="bi bi-bell me-2"></i>Notifications</h5>
+                <p class="card-text">SMTP & notification preferences.</p>
+                <a href="{{ url_for('settings.manage_notifications') }}" class="btn btn-primary btn-sm">Open</a>
             </div>
         </div>
     </div>
-    
-    <!-- Notification Settings -->
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="mb-0"><i class="bi bi-bell me-2"></i> Notifications</h5>
-        </div>
-        <div class="card-body">
-            {% if not smtp_configured %}
-            <div class="alert alert-warning">
-                <i class="bi bi-exclamation-triangle me-2"></i>
-                <strong>Email notifications not configured</strong><br>
-                To enable email notifications, set SMTP environment variables: SMTP_SERVER, SMTP_USER, SMTP_PASSWORD, SMTP_FROM
-            </div>
-            {% endif %}
-            
-            <div class="mb-3">
-                <label for="appriseUrls" class="form-label">Apprise URLs</label>
-                <textarea class="form-control" id="appriseUrls" name="apprise_urls" 
-                          rows="5" placeholder="One URL per line&#10;discord://webhook_id/webhook_token&#10;telegram://bot_token/chat_id">{{ settings.get('apprise_urls', '') }}</textarea>
-                <div class="form-text">
-                    Enter notification service URLs (one per line). See 
-                    <a href="https://github.com/caronc/apprise#supported-notifications" target="_blank">Apprise documentation</a> 
-                    for supported services.<br>
-                    <strong>Note:</strong> <code>mailto://</code> URLs are not allowed here. Use SMTP environment variables for email notifications.
-                    Duplicate URLs will be automatically removed.<br>
-                    <em>If you need duplicate URLs or email via Apprise, please open an 
-                    <a href="https://github.com/drgimpfen/Docker-Archiver/issues" target="_blank">Issue</a> or 
-                    <a href="https://github.com/drgimpfen/Docker-Archiver/discussions" target="_blank">Discussion</a> on GitHub.</em>
-                    {% if smtp_configured %}
-                    <br><strong>Note:</strong> User emails will be automatically added via configured SMTP settings.
-                    {% endif %}
-                </div>
-            </div>
-
-            <div class="mb-3">
-                <label for="notificationSubjectTag" class="form-label">Subject Tag (Optional)</label>
-                <input type="text" class="form-control" id="notificationSubjectTag" name="notification_subject_tag" 
-                       value="{{ settings.get('notification_subject_tag', '') }}" 
-                       placeholder="[Production]">
-                <div class="form-text">Optional prefix for notification subjects (e.g., [Production], [Test])</div>
-            </div>
-            
-            <div class="mb-3">
-                <label class="form-label">Notify on:</label>
-                
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="notifySuccess" name="notify_success"
-                           {% if settings.get('notify_on_success') == 'true' %}checked{% endif %}>
-                    <label class="form-check-label" for="notifySuccess">
-                        <i class="bi bi-check-circle text-success me-1"></i> Successful job completion
-                    </label>
-                </div>
-                
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="notifyError" name="notify_error"
-                           {% if settings.get('notify_on_error') == 'true' %}checked{% endif %}>
-                    <label class="form-check-label" for="notifyError">
-                        <i class="bi bi-x-circle text-danger me-1"></i> Job failures
-                    </label>
-                </div>
-            </div>
-
-            <div class="form-check form-switch mb-3">
-                <input class="form-check-input" type="checkbox" role="switch" 
-                       id="notifyHtmlFormat" name="notify_html_format"
-                       {% if settings.get('notify_html_format', 'true') == 'true' %}checked{% endif %}>
-                <label class="form-check-label" for="notifyHtmlFormat">
-                    <strong>Send E-Mail notifications as HTML</strong><br>
-                    <small class="text-muted">Enable rich formatting for e‑mail notifications. Disable for plain text format.</small>
-                </label>
-            </div>
-
-            <div class="mb-3">
-                <label class="form-label">Report verbosity</label>
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="notify_report_verbosity" id="verbosityFull" value="full"
-                           {% if settings.get('notify_report_verbosity', 'full') == 'full' %}checked{% endif %}>
-                    <label class="form-check-label" for="verbosityFull">Full report (includes tables and optional full log)</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="notify_report_verbosity" id="verbosityShort" value="short"
-                           {% if settings.get('notify_report_verbosity', 'full') == 'short' %}checked{% endif %}>
-                    <label class="form-check-label" for="verbosityShort">Short summary (concise message only)</label>
-                </div>
-            </div>
-
-            <div class="form-check mb-3">
-                <input class="form-check-input" type="checkbox" id="notifyAttachLog" name="notify_attach_log" {% if settings.get('notify_attach_log') == 'true' %}checked{% endif %}>
-                <label class="form-check-label" for="notifyAttachLog">
-                    <strong>Attach full job log</strong><br>
-                    <small class="text-muted">Attach the full job log as a downloadable file instead of inlining it in the email. Useful for large logs.</small>
-                </label>
-            </div>
-
-            <div class="form-check mb-3">
-                <input class="form-check-input" type="checkbox" id="notifyAttachLogOnFailure" name="notify_attach_log_on_failure" {% if settings.get('notify_attach_log_on_failure') == 'true' %}checked{% endif %}>
-                <label class="form-check-label" for="notifyAttachLogOnFailure">
-                    <strong>Attach log on failures only</strong><br>
-                    <small class="text-muted">If checked, the log will only be attached when the job has failed (overrides 'Attach full job log' for failures).</small>
-                </label>
-            </div>
-
-            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="testNotification()">
-                <i class="bi bi-send me-1"></i>Send Test Notification
-            </button>
-        </div>
-    </div>
-    
-    <!-- Cleanup Settings -->
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="mb-0"><i class="bi bi-recycle me-2"></i> Automated Cleanup</h5>
-        </div>
-        <div class="card-body">
-            <div class="form-check form-switch mb-3">
-                <input class="form-check-input" type="checkbox" role="switch" 
-                       id="cleanupEnabled" name="cleanup_enabled"
-                       {% if settings.get('cleanup_enabled', 'true') == 'true' %}checked{% endif %}>
-                <label class="form-check-label" for="cleanupEnabled">
-                    <strong>Enable Nightly Cleanup</strong><br>
-                    <small class="text-muted">Automatically clean up orphaned files, old logs, and temp files</small>
-                </label>
-            </div>
-            
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <label for="cleanupTime" class="form-label">Cleanup Time</label>
-                    <input type="time" class="form-control" id="cleanupTime" name="cleanup_time" 
-                           value="{{ settings.get('cleanup_time', '02:30') }}">
-                    <div class="form-text">Daily time to run cleanup (24-hour format)</div>
-                </div>
-                
-                <div class="col-md-6 mb-3">
-                    <label for="logRetentionDays" class="form-label">Log Retention (Days)</label>
-                    <input type="number" class="form-control" id="logRetentionDays" name="cleanup_log_retention_days" 
-                           value="{{ settings.get('cleanup_log_retention_days', '90') }}" min="0" max="3650">
-                    <div class="form-text">Keep job logs for this many days (0 = never delete)</div>
-                </div>
-            </div>
-            
-            <div class="form-check form-switch mb-3">
-                <input class="form-check-input" type="checkbox" role="switch" 
-                       id="cleanupDryRun" name="cleanup_dry_run"
-                       {% if settings.get('cleanup_dry_run', 'false') == 'true' %}checked{% endif %}>
-                <label class="form-check-label" for="cleanupDryRun">
-                    <strong>Dry Run Mode</strong><br>
-                    <small class="text-muted">Only log what would be deleted (don't actually delete anything)</small>
-                </label>
-            </div>
-            
-            <div class="form-check form-switch">
-                <input class="form-check-input" type="checkbox" role="switch" 
-                       id="notifyCleanup" name="notify_cleanup"
-                       {% if settings.get('notify_on_cleanup', 'false') == 'true' %}checked{% endif %}>
-                <label class="form-check-label" for="notifyCleanup">
-                    <strong>Send Notification</strong><br>
-                    <small class="text-muted">Send notification after cleanup task completes</small>
-                </label>
-            </div>
-            
-            <div class="alert alert-info mt-3 mb-0">
-                <i class="bi bi-info-circle me-2"></i>
-                <strong>Cleanup Tasks:</strong>
-                <ul class="mb-0 mt-2">
-                    <li>Orphaned archive directories (archives without database entry)</li>
-                    <li>Old job logs (older than retention period)</li>
-                    <li>Temporary files (*.tmp) from failed jobs</li>
-                    <li>Empty stack directories</li>
-                </ul>
+    <div class="col-12 col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title"><i class="bi bi-shield-lock me-2"></i>Security</h5>
+                <p class="card-text">Permissions and security related settings.</p>
+                <a href="{{ url_for('settings.manage_security') }}" class="btn btn-primary btn-sm">Open</a>
             </div>
         </div>
     </div>
-    
-    <!-- User Management (Placeholder) -->
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="mb-0"><i class="bi bi-people me-2"></i> Users</h5>
-        </div>
-        <div class="card-body">
-            <p class="text-muted mb-0">
-                <i class="bi bi-info-circle me-1"></i> 
-                User management and role-based access control will be available in a future update.
-            </p>
+    <div class="col-12 col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title"><i class="bi bi-recycle me-2"></i>Cleanup</h5>
+                <p class="card-text">Scheduled cleanup and retention rules.</p>
+                <a href="{{ url_for('settings.manage_cleanup') }}" class="btn btn-primary btn-sm">Open</a>
+            </div>
         </div>
     </div>
-    
-    <div class="d-flex gap-2">
-        <button type="submit" class="btn btn-primary">
-            <i class="bi bi-check-lg me-1"></i>Save Settings
-        </button>
-        <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">Cancel</a>
-    </div>
-</form>
+</div>
+
+{% endblock %}
 
 {% endblock %}
 
@@ -305,5 +111,333 @@ function testNotification() {
         btn.innerHTML = originalContent;
     });
 }
+
+function setCleanupCron(cron) {
+    document.getElementById('cleanupCron').value = cron;
+}
+
+// Manual cleanup modal & action
+function showRunCleanupModal() {
+    const modalHtml = `
+    <div class="modal fade" id="runCleanupModal" tabindex="-1">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Run Cleanup Now</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <p class="mb-0">This will run the cleanup tasks immediately.</p>
+            <p class="mb-0">Choose <strong>Run (Dry Run)</strong> to simulate the cleanup (no files will be deleted).</p>
+            <p class="mb-0">Choose <strong>Run (Live)</strong> to perform the actual cleanup now.</p>
+            <div class="mt-3">
+                <label class="form-label"><strong>Select which cleanup tasks to run:</strong></label>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="orphaned_archives" id="optOrphaned" name="cleanup_task" checked>
+                    <label class="form-check-label" for="optOrphaned">Orphaned Archives</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="unreferenced_files" id="optFiles" name="cleanup_task" checked>
+                    <label class="form-check-label" for="optFiles">Unreferenced Files</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="unreferenced_dirs" id="optDirs" name="cleanup_task" checked>
+                    <label class="form-check-label" for="optDirs">Unreferenced Directories</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="old_logs" id="optLogs" name="cleanup_task" checked>
+                    <label class="form-check-label" for="optLogs">Old Logs</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="download_tokens" id="optDownloads" name="cleanup_task" checked>
+                    <label class="form-check-label" for="optDownloads">Download Tokens</label>
+                </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn btn-outline-danger" id="runCleanupConfirmDry">Run (Dry Run)</button>
+            <button type="button" class="btn btn-danger" id="runCleanupConfirmLive">Run (Live)</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+    // Insert modal into DOM and show it
+    let wrapper = document.createElement('div');
+    wrapper.innerHTML = modalHtml;
+    document.body.appendChild(wrapper);
+    const modalEl = document.getElementById('runCleanupModal');
+    const bsModal = new bootstrap.Modal(modalEl);
+    bsModal.show();
+
+    function cleanupHandlers() {
+        try { document.getElementById('runCleanupConfirmDry').removeEventListener('click', onDry); } catch(e){}
+        try { document.getElementById('runCleanupConfirmLive').removeEventListener('click', onLive); } catch(e){}
+    }
+
+    function onDry() {
+        confirmRunCleanup(true, bsModal, modalEl);
+    }
+    function onLive() {
+        confirmRunCleanup(false, bsModal, modalEl);
+    }
+
+    document.getElementById('runCleanupConfirmDry').addEventListener('click', onDry);
+    document.getElementById('runCleanupConfirmLive').addEventListener('click', onLive);
+
+    // Remove modal from DOM after it's hidden to keep DOM clean
+    modalEl.addEventListener('hidden.bs.modal', function () {
+        cleanupHandlers();
+        wrapper.remove();
+    });
+}
+
+async function confirmRunCleanup(dry, bsModal, modalEl) {
+    const btnDry = document.getElementById('runCleanupConfirmDry');
+    const btnLive = document.getElementById('runCleanupConfirmLive');
+    const originalDry = btnDry.innerHTML;
+    const originalLive = btnLive.innerHTML;
+    try {
+        btnDry.disabled = true; btnLive.disabled = true;
+        if (dry) btnDry.innerHTML = 'Starting...'; else btnLive.innerHTML = 'Starting...';
+
+        // Collect selected tasks
+        const selected = Array.from(modalEl.querySelectorAll('input[name="cleanup_task"]:checked')).map(c => c.value);
+        const resp = await fetch('/api/cleanup/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dry_run: dry, tasks: selected })
+        });
+        // Guard against HTML redirects/pages returned when the user is not authenticated
+        const contentType = resp.headers.get('content-type') || '';
+        let data;
+        if (contentType.includes('application/json')) {
+            data = await resp.json();
+        } else {
+            const text = await resp.text();
+            // Provide a helpful error message instead of throwing a JSON parse exception
+            throw new Error('Server returned non-JSON response (possible redirect to login or server error). Response starts with: ' + text.slice(0,200));
+        }
+        if (resp.status === 202) {
+            // Show toast if available
+            if (typeof showAlert === 'function') {
+                showAlert('Cleanup started', 'success');
+            } else {
+                console.log('Cleanup started');
+            }
+
+            // Show inline status under the Run button with link to history
+            try {
+                const jobId = data.job_id;
+                let statusEl = document.getElementById('cleanupStatus');
+                const makeAlert = (html) => `\n                        <div class="alert alert-success alert-dismissible fade show" role="alert">\n                            ${html}\n                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>\n                        </div>`;
+
+                let alertHtml;
+                if (jobId) {
+                    alertHtml = makeAlert(`Cleanup started. <a href="#" class="alert-link" onclick="(function(){ try { showJobDetails(${jobId}); } catch(e){ window.location='{{ url_for('history.list_history') }}'; } return false; })()">View Job</a>`);
+                } else {
+                    const historyUrl = "{{ url_for('history.list_history') }}";
+                    alertHtml = makeAlert(`Cleanup started. <a href="${historyUrl}" class="alert-link">View History</a>`);
+                }
+
+                if (statusEl) {
+                    statusEl.innerHTML = alertHtml;
+                    // Scroll into view so user notices it
+                    statusEl.scrollIntoView({behavior: 'smooth', block: 'center'});
+                } else {
+                    // Fallback: insert at top of main content
+                    const main = document.querySelector('main') || document.querySelector('body');
+                    const wrapper = document.createElement('div');
+                    wrapper.innerHTML = alertHtml;
+                    if (main && main.firstChild) main.insertBefore(wrapper, main.firstChild);
+                    else document.body.insertAdjacentElement('afterbegin', wrapper);
+                    // Scroll to it
+                    wrapper.scrollIntoView({behavior: 'smooth', block: 'center'});
+                }
+            } catch (e) {
+                console.warn('Failed to render cleanup status alert:', e);
+            }
+
+            bsModal.hide();
+        } else {
+            if (typeof showAlert === 'function') {
+                showAlert('Error: ' + (data.error || 'Failed to start cleanup'), 'danger');
+            } else {
+                console.warn('Error: ' + (data.error || 'Failed to start cleanup'));
+            }
+        }
+    } catch (e) {
+        if (typeof showAlert === 'function') {
+            showAlert('Error: ' + e.message, 'danger');
+        } else {
+            console.error('Error: ' + e.message);
+        }
+    } finally {
+        try { btnDry.disabled = false; btnLive.disabled = false; btnDry.innerHTML = originalDry; btnLive.innerHTML = originalLive; } catch(e){}
+    }
+}
 </script>
+
+<!-- Permissions Modal -->
+<div class="modal fade" id="permissionsModal" tabindex="-1" aria-labelledby="permissionsModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="permissionsModalLabel">Permissions Report</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p><strong>Total files:</strong> <span id="permTotalFiles">0</span> &nbsp; <strong>Total directories:</strong> <span id="permTotalDirs">0</span></p>
+        <p><strong>Mismatched files:</strong> <span id="permMismatchedFilesCount">0</span> &nbsp; <strong>Mismatched dirs:</strong> <span id="permMismatchedDirsCount">0</span></p>
+        <div class="mb-3">
+          <h6>Stacks with mismatches</h6>
+          <div style="max-height:220px; overflow:auto;">
+            <table class="table table-sm table-striped" id="permStacksTable">
+              <thead><tr><th>Stack</th><th>Files</th><th>Dirs</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="permissionsFixButton" class="btn btn-danger">Fix mismatches (apply permissions)</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm Fix Modal -->
+<div class="modal fade" id="confirmFixModal" tabindex="-1" aria-labelledby="confirmFixModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="confirmFixModalLabel">Confirm Apply Permissions</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p>Apply configured permissions to all mismatched files and directories? This will start a background job and may take some time on large archives.</p>
+        <p class="text-muted mb-0">The operation is safe and best-effort. You will be notified in the UI when it starts.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="confirmFixNo" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" id="confirmFixYes" class="btn btn-danger">Apply</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+async function fixPermissions(){
+    // Prefer the modal button if present, fallback to older id
+    const btn = document.getElementById('fixPermButton') || document.getElementById('permissionsFixButton');
+    if(btn){ btn.disabled = true; var original = btn.innerHTML; btn.innerHTML = 'Starting...'; }
+    const token = document.querySelector('input[name="csrf_token"]').value;
+    try{
+        const r = await fetch('{{ url_for("settings.fix_permissions") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token }
+        });
+        const j = await r.json();
+        if (j && (j.status === 'started' || j.status === 'ok')){
+            if(typeof showAlert === 'function') showAlert(j.message || 'Started: Fixing permissions in background', 'success');
+            return j;
+        } else {
+            if(typeof showAlert === 'function') showAlert(j.message || 'Failed to start permission fix', 'danger');
+            throw new Error(j.message || 'Failed to start');
+        }
+    }catch(e){
+        if(typeof showAlert === 'function') showAlert('Failed to start permission fix: ' + e, 'danger');
+        throw e;
+    }finally{
+        if(btn){ btn.disabled = false; btn.innerHTML = original; }
+    }
+}
+
+async function checkPermissions(){
+    // No initial confirmation to keep flow non-intrusive
+    const btn = document.getElementById('checkPermButton');
+    btn.disabled = true;
+    const original = btn.innerHTML;
+    btn.innerHTML = 'Checking...';
+    const token = document.querySelector('input[name="csrf_token"]').value;
+    try{
+        const r = await fetch('{{ url_for("settings.check_permissions") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token }
+        });
+        const j = await r.json();
+        if(j.status === 'ok'){
+            document.getElementById('permTotalFiles').textContent = j.total_files;
+            document.getElementById('permTotalDirs').textContent = j.total_dirs;
+            document.getElementById('permMismatchedFilesCount').textContent = j.mismatched_file_count;
+            document.getElementById('permMismatchedDirsCount').textContent = j.mismatched_dir_count;
+
+            const table = document.querySelector('#permStacksTable tbody'); table.innerHTML = '';
+            j.stacks.forEach(s => {
+                const tr = document.createElement('tr');
+                const fullPath = (s.stack_name && s.stack_name !== '<root>') ? `${s.archive_path}/${s.stack_name}` : s.archive_path;
+                const stackCell = `<td><code>${fullPath}</code></td>`;
+                const countsCell = `<td>${s.mismatched_file_count}</td><td>${s.mismatched_dir_count}</td>`;
+                tr.innerHTML = stackCell + countsCell;
+                table.appendChild(tr);
+            });
+
+            var modalEl = document.getElementById('permissionsModal');
+            var bsModal = new bootstrap.Modal(modalEl);
+            bsModal.show();
+
+            // Wire up fix button inside modal to show a confirmation dialog
+            const modalFix = document.getElementById('permissionsFixButton');
+            modalFix.onclick = function(){
+                const confirmModalEl = document.getElementById('confirmFixModal');
+                const confirmModal = new bootstrap.Modal(confirmModalEl);
+                confirmModal.show();
+
+                const confirmBtn = document.getElementById('confirmFixYes');
+                const cancelBtn = document.getElementById('confirmFixNo');
+
+                function onConfirm(){
+                    confirmBtn.disabled = true;
+                    confirmBtn.innerHTML = 'Starting...';
+                    fixPermissions().then(()=>{
+                        confirmModal.hide();
+                        bsModal.hide();
+                    }).catch(()=>{
+                        // fixPermissions already displays an alert via showAlert
+                    }).finally(()=>{
+                        confirmBtn.disabled = false;
+                        confirmBtn.innerHTML = 'Apply';
+                    });
+                }
+
+                confirmBtn.addEventListener('click', onConfirm, { once: true });
+
+                // Cleanup on modal hidden
+                confirmModalEl.addEventListener('hidden.bs.modal', function(){
+                    try { confirmBtn.removeEventListener('click', onConfirm); } catch(e){}
+                }, { once: true });
+            }
+        } else {
+            // Use showAlert if available, avoid noisy browser alerts
+            if(typeof showAlert === 'function') showAlert('Error: ' + (j.message || 'Failed to scan'), 'danger');
+            else console.error('Error: ' + (j.message || 'Failed to scan'));
+        }
+    }catch(e){
+        if(typeof showAlert === 'function') showAlert('Error: ' + e, 'danger');
+        else console.error('Error: ' + e);
+    }finally{
+        btn.disabled = false;
+        btn.innerHTML = original;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function(){
+    const checkBtn = document.getElementById('checkPermButton');
+    if(checkBtn) checkBtn.addEventListener('click', checkPermissions);
+});
+</script>
+
 {% endblock %}

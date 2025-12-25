@@ -18,11 +18,12 @@
 - 🔄 **GFS Retention** - Grandfather-Father-Son retention policy (keep X days/weeks/months/years)
 - 🧹 **Automatic Cleanup** - Scheduled cleanup of orphaned archives, old logs, and temp files
 - 🎯 **Dry Run Mode** - Test archive operations without making changes
-- 📊 **Job History & Live Logs** - Detailed logs and metrics for all archive/retention runs; **Job Details** includes live log tailing (polls `/api/jobs/<id>/log/tail`) and supports EventSource streaming for near real-time updates. The modal offers terminal-like controls (search, **Pause/Resume**, **Copy**, **Download**, **Line numbers**, **Follow**) for easier log inspection and troubleshooting.
-- 🔔 **Smart Notifications** - Apprise integration with customizable subject tags and HTML/text format
+- 📊 **Job History & Live Logs** - Detailed logs and metrics for all archive/retention runs. The **Job Details** modal includes live log tailing (polls `/api/jobs/<id>/log/tail`) and supports per‑job EventSource streaming for near‑real‑time log updates. **Note:** global Jobs SSE support for the dashboard has been removed; the dashboard uses polling for job status updates. The modal offers terminal-like controls (search, **Pause/Resume**, **Copy**, **Download**, **Line numbers**) for easier log inspection.
+- 🔔 **Smart Notifications** - Email via SMTP (configured in **Settings → Notifications**; settings are stored in the database)
 - 🌓 **Dark/Light Mode** - Modern Bootstrap UI with theme toggle
 - 🔐 **User Authentication** - Secure login system (role-based access coming soon)
 - 💾 **Multiple Formats** - Support for tar, tar.gz, tar.zst, or folder output
+- 🛡️ **Output Permissions (configurable)** — Optionally have the application set sensible, secure defaults on files and directories it creates. When enabled, files will be writable only by the server process (other users can still read them) and directories will be readable and searchable so their contents are accessible. Toggle this in **Settings → Apply permissive permissions to generated archives** (default: disabled).
 - 🌍 **Timezone Support** - Configurable timezone via environment variable
 
 ## Architecture
@@ -58,7 +59,6 @@ cp docker-compose.override.yml.example docker-compose.override.yml
 Edit `.env` and set:
 - `DB_PASSWORD` - PostgreSQL password (required)
 - `SECRET_KEY` - Flask session secret (required)
-- `SMTP_*` - Email/SMTP configuration (optional)
 
 ### 2. Start Services
 
@@ -86,7 +86,7 @@ On first visit, you'll be prompted to create an admin account.
 
 ### 4. Configure Archives
 
-1. Go to **Archives** → **Create Archive**
+1. Go to the **Dashboard** and use the Archive management card (Create / Edit / Delete) to configure archives.
 2. Select stacks to backup
 3. Configure schedule (cron expression)
 4. Set retention policy (GFS: days/weeks/months/years)
@@ -107,7 +107,7 @@ Key behavior:
 - Hidden directories (starting with `.`) and special names like `archives` or `tmp` are excluded.
 - Results are **deduplicated** by resolved path.
 - Each discovered stack is annotated as **direct** (compose found at mount root) or **nested** (compose found in a subdirectory).
-- If no mounts are detected the legacy `/local` path is scanned as a final fallback.
+- See **⚠️ Important: Bind Mounts Required** below for mandatory bind-mount requirements.
 
 ### Volume Mounts (how to configure)
 
@@ -146,7 +146,7 @@ For local or development-specific mounts, put your bind mounts in `docker-compos
 
 If you run Docker Archiver with multiple workers and want real-time SSE events to work across workers, run a Redis service and configure `REDIS_URL` (example using `docker-compose.override.yml` below).
 
-**Required:** Host and container paths for your stack directory bind mounts **must be identical** (e.g., `- /opt/stacks:/opt/stacks`). Example `docker-compose.override.yml`:
+Ensure host and container paths in your `docker-compose.override.yml` are identical — see **⚠️ Important: Bind Mounts Required** below for details.
 
 ```yaml
 services:
@@ -168,6 +168,20 @@ After changing compose files restart the app: `docker compose up -d --build app`
 
 **Recommendation:** It's sensible to include and run a lightweight Redis service by default (the override example adds `redis:7-alpine`). Running Redis even on single-node development setups makes the deployment future-proof (enables cross-worker SSE when you scale to multiple Gunicorn workers) and adds minimal resource overhead. If you prefer to omit Redis, remove the `redis` service from your compose file and either unset `REDIS_URL` or remove it from the `app` environment to disable cross-worker streaming.
 
+**Optional Gunicorn environment overrides:** You can optionally control Gunicorn sizing via env vars in `docker-compose.yml` (they are commented examples in the provided compose). Example settings you can enable in `docker-compose.override.yml`:
+
+```yaml
+services:
+  app:
+    environment:
+      # Override automatic sizing and force workers/threads
+      # GUNICORN_WORKERS: "6"     # explicit workers (overrides auto calc)
+      # GUNICORN_MAX_WORKERS: "8" # cap for auto sizing
+      # GUNICORN_THREADS: "2"     # threads per worker
+      # GUNICORN_TIMEOUT: "300"  # worker timeout in seconds
+```
+
+
 ### How Stack Discovery Works
 
 Discovery follows these rules:
@@ -180,9 +194,7 @@ Discovery follows these rules:
 
 **Behavior for non-mounted stacks:** If a stack directory is not available via a bind mount, the archiver will use the path as it appears inside the container (the container-side path) when running compose commands; it will not attempt to use host-only paths that are not mounted into the container.
 
-**Fallback & compatibility**: If no bind mounts are detected the legacy `/local` path will be scanned to maintain compatibility with older deployments.
-
-**Important:** Host and container paths must match for bind mounts (e.g. `- /opt/stacks:/opt/stacks`). The archiver uses the container-side path it detects as the working directory for `docker compose` commands.
+See **⚠️ Important: Bind Mounts Required** below for the mandatory bind-mount rules — mismatched mounts will be ignored and may cause job failures.
 
 <a name="troubleshooting-bind-mount-warnings"></a>
 ### Troubleshooting bind-mount warnings
@@ -217,7 +229,7 @@ services:
 
 **How it works:** Docker Archiver uses the configured `STACKS_DIR` paths directly. When it finds a stack at `/opt/stacks/immich`, it uses `/opt/stacks/immich` as the working directory for `docker compose` commands (since host and container paths are identical).
 
-**How it works:** Docker Archiver automatically detects the host path by reading `/proc/self/mountinfo`. When it sees `/local/stacks/immich` inside the container, it looks up the corresponding host path (e.g., `/opt/stacks/immich`) and uses that for `docker compose --project-directory`.
+**Important (MANDATORY):** Bind mounts are **required** and **host and container paths must be identical** (for example: `- /opt/stacks:/opt/stacks`). Docker Archiver scans each mount root and one level of subdirectories for compose files. Any mounts where the host and container paths differ will be ignored for discovery, and jobs relying on those mounts may fail; configure proper bind mounts to ensure reliable discovery and correct `docker compose` execution.
 
 **Note:** Named volumes *within* your stack's compose.yml (like `postgres_data:`) work perfectly fine - this requirement only applies to mounting the stack directories into the archiver container.
 
@@ -253,16 +265,137 @@ For more details and troubleshooting tips, see the dashboard warning messages or
 | `TZ` | Europe/Berlin | No | Timezone for the application (e.g., America/New_York, Asia/Tokyo) |
 | `DB_PASSWORD` | changeme123 | Yes | PostgreSQL password |
 | `SECRET_KEY` | (dev key) | Yes | Flask session secret (change in production!) |
-| `SMTP_SERVER` | - | No | SMTP server for email notifications (e.g., smtp.gmail.com) |
-| `SMTP_PORT` | 587 | No | SMTP port |
-| `SMTP_USER` | - | No | SMTP username |
-| `SMTP_PASSWORD` | - | No | SMTP password/app-password |
-| `SMTP_FROM` | - | No | Email sender address |
 | `REDIS_URL` | - | No | Optional Redis URL (e.g., `redis://localhost:6379/0`) to enable cross-worker SSE event streaming |
+| `DOWNLOADS_AUTO_GENERATE_ON_ACCESS` | false | No | When `true`, visiting a missing download link can trigger automatic archive generation on demand. Default: `false` (recommended). |
+| `DOWNLOADS_AUTO_GENERATE_ON_STARTUP` | false | No | When `true`, the app attempts to generate missing downloads for valid tokens during startup (use with caution). Default: `false` (recommended). |
+| `LOG_LEVEL` | INFO | No | Global log level for application logging (DEBUG, INFO, WARNING, ERROR). Set `LOG_LEVEL=DEBUG` to enable debug-level output for troubleshooting. |
 
 > **Note:** Port (8080) and mount paths are configured in `docker-compose.yml`, not via environment variables.
 
-> **Note:** If you deploy with multiple workers (Gunicorn, etc.) and want real-time SSE events to work across workers, configure `REDIS_URL` and install the `redis` Python package (already optional in `requirements.txt`).
+> **Note:** The application uses fixed internal paths for archive output and logs. To ensure log files are persisted on the host, mount a directory to `/var/log/archiver` (e.g. `./logs:/var/log/archiver` in `docker-compose.yml`). The relevant internal paths are:
+> - Archives directory: `/archives` (used for storing generated archives)
+> - Logs directory: `/var/log/archiver/` (contains the central app log at `/var/log/archiver/app.log` and job logs under `/var/log/archiver/jobs/`, e.g. `/var/log/archiver/jobs/job_123_My_Archive_20251225_182530.log`)
+
+### Logging & Debugging 🔧
+
+Control application-wide logging using the `LOG_LEVEL` environment variable (recommended values: `DEBUG`, `INFO`, `WARNING`, `ERROR`). Setting `LOG_LEVEL=DEBUG` enables detailed diagnostic messages across components (scheduler, SSE, executor, etc.).
+
+File logging is always enabled and organized as follows:
+- Central app log: `/var/log/archiver/app.log` (rotated daily at midnight).
+- Job logs:
+  - Archive runs: `/var/log/archiver/jobs/archive_{archive_id}_{job_type}_{archive_name}_{TIMESTAMP}.log` (e.g. `archive_123_archive_My_Archive_20251225_182530.log`)
+  - Cleanup runs: `/var/log/archiver/jobs/cleanup_{job_id}_{TIMESTAMP}.log` (e.g. `cleanup_42_20251225_020500.log`)
+  - Notification attachments: job logs attached to notifications use `job_{job_id}_{archive_name}_{TIMESTAMP}.log`.
+
+  Note: timestamps use local display timezone and format `YYYYMMDD_HHMMSS` (e.g., `20251225_182530`).
+
+  Migration note: older versions wrote `cleanup_{job_id}.log` or `{archive_id}_{archive_name}.log` — these files are left in place; new runs will create timestamped filenames. Notification code prefers the most recent matching file for `cleanup_{job_id}_*.log` when present.
+
+Rotation (daily) applies to the app and job logs; long-term retention/deletion of rotated files is handled by the application's cleanup job (configured via **Settings → Cleanup log retention days**).
+
+Important: a logger set to a given level will **also include messages at higher-severity levels**. For example:
+
+- `LOG_LEVEL=INFO` emits **INFO**, **WARNING**, **ERROR**, **CRITICAL**
+- `LOG_LEVEL=DEBUG` emits **DEBUG**, **INFO**, **WARNING**, **ERROR**, **CRITICAL**
+
+Quick examples:
+
+```bash
+# Temporarily enable debug for a single run
+LOG_LEVEL=DEBUG docker compose up -d
+
+# Persist in .env (recommended for long-running environments)
+echo "LOG_LEVEL=DEBUG" >> .env
+docker compose up -d
+```
+
+Tips:
+- Use `DEBUG` for troubleshooting; use `INFO` for normal production verbosity.
+- Expensive debug-only work is guarded by `logger.isEnabledFor(logging.DEBUG)` to avoid runtime overhead unless debug is explicitly enabled.
+
+Deployment note: ensure the container can persist and write logs by mounting a host directory into `/var/log/archiver`. Example in `docker-compose.yml`:
+
+```yaml
+services:
+  app:
+    volumes:
+      - ./logs:/var/log/archiver   # persist app and job logs on the host
+```
+
+This ensures job logs and cleanup summaries are available on the host for inspection and backups.
+
+> **Note:** Redis is required for reliable cross‑worker SSE propagation. Set `REDIS_URL` (e.g., `redis://redis:6379/0`) and ensure the `redis` Python package is available. The app assumes Redis is present for real‑time streaming and global event propagation.
+
+> **Note:** On startup the app will mark any jobs still in `running` state that **do not have an `end_time`** as `failed` to avoid stuck jobs and UI confusion; this behavior is automatic and not configurable via environment variables.
+
+
+### Troubleshooting — Logs & Notifications 🔧
+
+If you cannot find notification output (e.g., Discord, Email) in the normal container logs, check the job log files under `/var/log/archiver` — scheduled and detached jobs write their stdout/stderr to job log files there.
+
+Why? Scheduled archive jobs are executed as detached subprocesses (see `app.run_job`) and their stdout/stderr are redirected into separate log files so the job can run independently of the web worker process. For this reason you will often find notification traces in those logs rather than in the central `docker compose logs` output.
+
+Quick commands (run on host):
+
+- List recent job logs:
+
+```bash
+docker compose exec -T app ls -ltr /var/log/archiver | tail -n 10
+```
+
+- Tail a specific job log and filter for notification entries:
+
+```bash
+docker compose exec -T app tail -n 300 /var/log/archiver/<JOB_LOG_FILE>.log | grep -E "Notifications:|Sent Email"
+```
+
+- Follow central app logs (shows what the web worker emits):
+
+```bash
+docker compose logs -f --tail=200 app
+# or
+docker compose exec -T app journalctl -u docker -n 200  # if you use systemd/journald integration
+```
+
+- Run a manual in-container test (writes to container logs and/or job log files depending on context):
+
+```bash
+docker compose exec -T app python -c "from app.main import app; ctx=app.app_context(); ctx.push(); from app.notifications.handlers import send_archive_notification; send_archive_notification({'name':'Test-Archive'}, 9999, [], 1, 0); ctx.pop()"
+```
+
+What to look for in logs:
+
+- `Notifications: send_archive_notification called ...` — entry point from the archiver into the notifications code
+- `Notifications: added target ...` — notification targets that were configured and accepted
+- `Notifications: Sent Email ...` — email delivery success messages
+- `Notifications: notification failed` / exception traces — indicates a problem sending an email (check SMTP credentials, network access, recipient validity)
+
+Tips:
+
+- Set `LOG_LEVEL=DEBUG` in `.env` if you need more detailed debugging output. Restart the `app` service after changing env vars.
+- `docker compose run --rm` spawns a short-lived container and its logs may not appear in `docker compose logs`; prefer `docker compose exec` or inspect the logs under `/var/log/archiver` for scheduled runs.
+- If you want important job summaries to also appear in the container's central logs, consider running a short command at the end of a job to emit a compact summary to stderr (this is a safe, small change we can help implement).
+
+---
+
+### Image pull policy
+
+**Image pull policy:** The app lets you choose whether images should be pulled when stacks are restarted. You can find the option on **Settings → Security** as a single checkbox **Always pull images on start** (default: **disabled**, i.e. *Never*). In short:
+
+- **Never (default)** — Do not pull images automatically. If required images are missing locally, the stack restart will be skipped and the job notification explains which stacks were skipped and why. The executor will append `--pull=never` to `docker compose up` to explicitly prevent pulls when restarting stacks.
+- **Always** — Try to pull images before starting each stack. The executor runs `docker compose pull` and will record the pull output in the job log.
+
+Pull inactivity timeout: To avoid a hung image pull blocking a whole job, the executor now uses an *inactivity timeout* (seconds) which aborts a pull if no output is produced for the configured period. You can set **Pull inactivity timeout (seconds)** in **Settings → Security** (default: **300**). Set it to **0** to disable the inactivity timeout (use with caution).
+
+Notification note: When images are pulled, notifications include the full filtered pull output inline (HTML‑escaped), so operators can see the final result directly in the message. The excerpt filters out transient progress/spinner lines and keeps final, meaningful lines (for example: “[+] Pulling …”, “✔ … Pulled”, “Already exists”, “Download complete”, digest/sha256 lines). The full raw pull output is also stored in the job log and included as an attachment when log attachments are enabled; partial output is preserved if a pull times out or fails.
+
+Notes:
+
+- Pulls can fail for network or authentication reasons; the job log will contain details to help debugging.
+- For deterministic production behavior we recommend pre-pulling images on hosts or using the **Always** option only when appropriate for your environment.
+- The archiver records skipped stacks and reasons in the job summary so operators can act on them.
+
+---
 
 ### Retention Policy
 
@@ -286,50 +419,44 @@ Examples:
 
 ## Notifications
 
-Docker Archiver uses [Apprise](https://github.com/caronc/apprise) for notifications.
+Docker Archiver sends notifications via **email (SMTP)** only. **SMTP settings are configured in the web UI under _Settings → Notifications_ and are stored in the application database (not via environment variables).** This avoids leaking credentials in environment files and makes runtime changes available via the web UI.
 
-### Supported Services
+### SMTP Settings (in the UI)
 
-- Discord
-- Telegram
-- Email (SMTP)
-- Slack
-- Pushover
-- Gotify
-- And [100+ more](https://github.com/caronc/apprise#supported-notifications)
+- **SMTP Server** — Hostname or IP of your SMTP server (`smtp_server`)
+- **SMTP Port** — TCP port for SMTP (`smtp_port`, commonly `587`)
+- **SMTP Username** — Username for SMTP authentication (optional)
 
-### Setup
+### Download Tokens & Notifications
 
-**Option 1: Apprise URLs (Recommended)**
-1. Go to **Settings** → **Notifications**
-2. Add Apprise URLs (one per line):
-   ```
-   discord://webhook_id/webhook_token
-   telegram://bot_token/chat_id
-   ```
-   **Note:** `mailto://` URLs are not allowed. Use SMTP environment variables for email notifications.
-3. Select which events to notify:
-   - Archive Success
-   - Archive Error
-   - Retention Cleanup
-   - Cleanup Task
-4. Optional: Add subject tag prefix (e.g., `[Production]`, `[TEST]`)
-5. Optional: Toggle between HTML and Plain Text format
-6. Test your configuration with the "Send Test Notification" button
-7. Save settings
+The download feature uses short-lived tokens (24 hours) that map to either an existing archive file or an archive directory (for which the server may prepare a `.tar.zst`). Important behavior:
 
-**Notification options**
+- **Token lifecycle**: Tokens are created via the API or UI and expire after 24 hours. A token may reference an existing file (`file_path`) or an archive directory (`archive_path`) that needs packing.
+- **notify_emails**: Each token stores a `notify_emails` array (one or more recipients). When an archive becomes ready, the server sends a link notification to the addresses in `notify_emails`.
+- **Public regenerate**: If an archive file is missing, the public `/download/<token>` page shows a small form where a user can submit a **single** email address to be added to `notify_emails` and request regeneration. The UI intentionally does **not** prefill any addresses.
+- **Automatic generation flags**: Two environment flags control optional automatic generation:
+  - `DOWNLOADS_AUTO_GENERATE_ON_ACCESS=false` (default) — when `true`, accessing a missing download link will attempt to start generation immediately.
+  - `DOWNLOADS_AUTO_GENERATE_ON_STARTUP=false` (default) — when `true`, the app will look for tokens missing prepared archives on startup and start generation for them. Both defaults are `false` and we recommend leaving them **disabled** unless you understand and want automatic generation behavior.
 
-- **Report verbosity** — Choose between **Full** (default) and **Short** reports. Full includes the detailed HTML report with tables and (optionally) the full job log; Short sends a concise summary suitable for chat notifications.
-- **Attach full job log** — When enabled, the full job log will be attached as a downloadable `.log` file instead of inlining it in the email. Useful for very large logs or when you prefer attachments.
-- **Attach log on failures only** — If enabled, the log will only be attached when the job had failures (overrides attaching-on-success behavior). These settings are configurable on the Notifications settings page and default to `Full` verbosity with no attachment.
+Security / operational notes:
+- The app uses **atomic DB updates** to avoid duplicate concurrent packing jobs for the same token and **database-backed notify_emails** for reliable notification targets.
+- For multi-instance/HA deployments, consider using a task queue/worker instead of the built-in thread-based packer; this makes pack jobs deterministic and scalable.
 
-**Option 2: SMTP/Email (Automatic)**
-1. Configure SMTP in `.env` file (see Environment Variables above)
-2. Add email address in **Profile** page
-3. All users with configured email addresses automatically receive notifications
+- **SMTP Password** — Password for SMTP authentication (optional)
+- **From address** — The sender `From:` address used for outgoing messages (`smtp_from`)
+- **Use TLS** — Toggle to use STARTTLS for the SMTP connection (`smtp_use_tls`)
 
-**Important:** Do not use both SMTP environment variables AND Apprise `mailto://` URLs for the same email address, as this will result in duplicate notifications. Use SMTP environment variables for email, and Apprise for other services (Discord, Telegram, etc.).
+Recipients are taken from user profile email addresses or from configured default recipient settings in the Notifications page.
+
+### Notification Options
+
+- **Report verbosity** — Choose **Full** (default) or **Short** reports. Full includes a detailed HTML report with tables; Short sends a concise summary suitable for chat-like channels.
+- **Attach full job log** — When enabled, the full job log will be attached as a downloadable `.log` file instead of being inlined in the message.
+- **Attach log on failures only** — When enabled, the log is attached only when the job had failures.
+- **Subject tag** — Optional prefix (e.g., `[Production]`, `[TEST]`) to add to the message subject.
+- **Send Test Notification** — Use this button on the Notifications page to validate your SMTP settings and recipient delivery.
+
+**Note:** Non-email transports (Apprise, Discord, etc.) are no longer supported — the app sends notifications via SMTP only. If you previously used Apprise URLs, migrate those recipient addresses into user profiles or the Notifications page accordingly.
 
 ## API Documentation
 
@@ -355,7 +482,7 @@ Authorization: Bearer <your-api-token>
 | `/api/archives/<id>/run` | POST | Token/Session | Trigger archive execution |
 | `/api/archives/<id>/dry-run` | POST | Token/Session | Run simulation (dry run) |
 | **Jobs** |
-| `/api/jobs` | GET | Token/Session | List jobs (supports filters: `?archive_id=1&type=archive&limit=50`) |
+| `/api/jobs` | GET | Token/Session | List jobs (supports filters: `?archive_id=1&type=archive&limit=20`) |
 | `/api/jobs/<id>` | GET | Token/Session | Get job details with stack metrics |
 | `/api/jobs/<id>/download` | POST | Token/Session | Request archive download (generates token) |
 | `/api/jobs/<id>/log` | GET | Token/Session | Download job log file |
@@ -402,12 +529,11 @@ curl -O http://your-server:8080/download/abc123token
 | `/login` | GET/POST | Login page |
 | `/logout` | GET | Logout |
 | `/setup` | GET/POST | Initial user setup |
-| `/archives/` | GET | Archive management UI |
-| `/archives/create` | POST | Create archive config |
-| `/archives/<id>/edit` | POST | Edit archive config |
-| `/archives/<id>/delete` | POST | Delete archive config |
-| `/archives/<id>/run` | POST | Run archive job |
-| `/archives/<id>/dry-run` | POST | Run dry run |
+| `/api/archives/create` | POST | Create archive config (via Dashboard/API) |
+| `/api/archives/<id>/edit` | POST | Edit archive config (via Dashboard/API) |
+| `/api/archives/<id>/delete` | POST | Delete archive config (via Dashboard/API) |
+| `/api/archives/<id>/run` | POST | Run archive job (API) |
+| `/api/archives/<id>/dry-run` | POST | Run dry run (API) |
 | `/history/` | GET | Job history UI |
 | `/profile/` | GET/POST | User profile (password, email) |
 | `/settings/` | GET/POST | Settings page |
@@ -423,11 +549,11 @@ exclude_paths:
   - /download/*         # Archive downloads (token-based, 24h expiry)
   - /api/*              # External API endpoints (use Bearer token auth)
   - /health             # Health check endpoint
-  - /login              # Login page must be accessible
-  - /setup              # Initial setup page
 ```
 
 **Note:** The `/api/*` endpoints have their own authentication via Bearer tokens. The download endpoint (`/download/<token>`) uses time-limited tokens and doesn't require session authentication.
+
+Downloads are always prepared/stored under `/tmp/downloads` on the host container (this path is fixed). If a requested token points to an archive outside this directory, the application will attempt to regenerate a download file into `/tmp/downloads` before serving it. The application treats `/tmp/downloads` as a fixed, intentionally-ignored destination for bind-mount mismatch checks (similar to `/archives` and `/var/run/docker.sock`), so it will not appear in bind-mount mismatch warnings in the Dashboard. To persist generated downloads across container restarts, mount a host directory (for example `./downloads:/tmp/downloads`).
 
 ### Reverse proxy examples
 
@@ -462,7 +588,13 @@ python app/main.py
 Docker-Archiver/
 ├── app/
 │   ├── routes/              # Flask Blueprints
-│   │   ├── archives.py      # Archive CRUD routes
+│   │   ├── api/               # API endpoints (JSON/SSE/file responses)
+│   │   │   ├── __init__.py    # Shared `bp` and auth helpers
+│   │   │   ├── archives.py    # Archive CRUD routes (API)
+│   │   │   ├── jobs.py        # Job listing, logs, tail
+│   │   │   ├── downloads.py   # Download token generation & folder prep
+│   │   │   ├── cleanup.py     # Cleanup runner endpoint
+│   │   │   └── sse.py         # SSE endpoints
 │   │   ├── history.py       # Job history routes
 │   │   ├── settings.py      # Settings routes
 │   │   └── profile.py       # User profile routes
@@ -474,12 +606,11 @@ Docker-Archiver/
 │   ├── stacks.py            # Stack discovery
 │   ├── scheduler.py         # APScheduler integration
 │   ├── downloads.py         # Download token system
-│   ├── notifications.py     # Apprise/SMTP notifications
+│   ├── notifications.py     # Notifications (SMTP-only)
 │   ├── utils.py             # Utility functions
 │   ├── templates/           # Jinja2 templates
 │   │   ├── base.html        # Base layout with navigation
 │   │   ├── index.html       # Dashboard
-│   │   ├── archives.html    # Archive management
 │   │   ├── history.html     # Job history
 │   │   ├── settings.html    # Settings page
 │   │   ├── profile.html     # User profile
