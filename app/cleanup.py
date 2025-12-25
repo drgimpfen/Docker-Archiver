@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 ARCHIVE_BASE = utils.get_archives_path()
 
 
-def run_cleanup(dry_run_override=None, job_id=None):
+def run_cleanup(dry_run_override=None, job_id=None, tasks=None):
     """Run all cleanup tasks.
 
     If `dry_run_override` is provided (True/False), it overrides the configured
@@ -107,27 +107,50 @@ def run_cleanup(dry_run_override=None, job_id=None):
     
     # Run cleanup tasks and collect stats
     try:
-        orphaned_stats = cleanup_orphaned_archives(is_dry_run, log_message)
-        log_stats = cleanup_old_logs(log_retention_days, is_dry_run, log_message)
-        unreferenced_dirs_stats = cleanup_unreferenced_dirs(is_dry_run, log_message)
-        
+        # Determine which tasks to run
+        run_all = tasks is None
+        task_set = set(tasks) if isinstance(tasks, list) else set()
+
+        if run_all or 'orphaned_archives' in task_set:
+            orphaned_stats = cleanup_orphaned_archives(is_dry_run, log_message)
+        else:
+            orphaned_stats = {'count': 0, 'reclaimed': 0}
+
+        if run_all or 'old_logs' in task_set:
+            log_stats = cleanup_old_logs(log_retention_days, is_dry_run, log_message)
+        else:
+            log_stats = {'count': 0, 'log_files_deleted': 0, 'deleted_files': []}
+
+        if run_all or 'unreferenced_dirs' in task_set:
+            unreferenced_dirs_stats = cleanup_unreferenced_dirs(is_dry_run, log_message)
+        else:
+            unreferenced_dirs_stats = {'count': 0, 'reclaimed': 0}
+
         total_reclaimed = orphaned_stats.get('reclaimed', 0) + unreferenced_dirs_stats.get('reclaimed', 0)
-        
+
         # Handle unreferenced files: list in dry-run or delete in live run
         try:
-            uf_stats = cleanup_unreferenced_files(is_dry_run, log_message)
-            # uf_stats: {'count': total_candidates, 'deleted': deleted_count, 'reclaimed': bytes}
-            total_reclaimed += uf_stats.get('reclaimed', 0)
+            if run_all or 'unreferenced_files' in task_set:
+                uf_stats = cleanup_unreferenced_files(is_dry_run, log_message)
+                # uf_stats: {'count': total_candidates, 'deleted': deleted_count, 'reclaimed': bytes}
+                total_reclaimed += uf_stats.get('reclaimed', 0)
+            else:
+                uf_stats = {'count': 0, 'deleted': 0, 'reclaimed': 0}
         except Exception as e:
             log_message('ERROR', f'Failed to process unreferenced files: {e}')
 
         # Download tokens cleanup (remove expired tokens and files)
+        # Download tokens cleanup (remove expired tokens and files) if requested
         try:
-            from app.routes.api.downloads import cleanup_expired_tokens
-            log_message('INFO', 'Running download token cleanup')
-            cleanup_expired_tokens()
+            if run_all or 'download_tokens' in task_set:
+                log_message('INFO', 'Running download token cleanup')
+                stats = cleanup_download_tokens(is_dry_run=is_dry_run, log_callback=log_message)
+                log_message('INFO', f"Download cleanup: deleted_tokens={stats.get('deleted_tokens', 0)}, deleted_files={stats.get('deleted_files', 0)}, reclaimed={format_bytes(stats.get('reclaimed_bytes', 0))}")
+            else:
+                stats = {'deleted_tokens': 0, 'deleted_files': 0, 'reclaimed_bytes': 0}
         except Exception as e:
             log_message('WARNING', f'Failed to cleanup download tokens: {e}')
+            stats = {'deleted_tokens': 0, 'deleted_files': 0, 'reclaimed_bytes': 0}
 
         log_message('INFO', f"Cleanup task completed ({mode})")
         log_message('INFO', f"Total reclaimed: {format_bytes(total_reclaimed)}")
@@ -168,7 +191,7 @@ def run_cleanup(dry_run_override=None, job_id=None):
         
         # Send notification if enabled
         if notify_cleanup:
-            send_cleanup_notification(orphaned_stats, log_stats, unreferenced_dirs_stats, uf_stats, total_reclaimed, is_dry_run, job_id=job_id)
+            send_cleanup_notification(orphaned_stats, log_stats, unreferenced_dirs_stats, uf_stats, total_reclaimed, is_dry_run, download_stats=stats, job_id=job_id)
 
 
             
@@ -260,6 +283,98 @@ def cleanup_orphaned_archives(is_dry_run=False, log_callback=None):
         log("No orphaned archives found")
     
     return {'count': orphaned_count, 'reclaimed': reclaimed_bytes}
+
+
+def cleanup_download_tokens(is_dry_run=False, log_callback=None):
+    """Cleanup expired download tokens and their temporary files.
+
+    This only deletes files that are located inside the application's
+    temporary downloads directory (get_downloads_path()).
+
+    Returns a stats dict: {'deleted_tokens': int, 'deleted_files': int}
+    """
+    def log(level, message):
+        if log_callback:
+            log_callback(level, message)
+        else:
+            if level == 'ERROR':
+                logger.error("[Cleanup] %s", message)
+            elif level == 'WARNING':
+                logger.warning("[Cleanup] %s", message)
+            else:
+                logger.info("[Cleanup] %s", message)
+
+    deleted_tokens = 0
+    deleted_files = 0
+    reclaimed_bytes = 0
+    downloads_base = get_downloads_path()
+
+    try:
+        with get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT token, file_path FROM download_tokens WHERE expires_at < NOW();")
+            rows = cur.fetchall()
+
+            for row in rows:
+                token = row.get('token')
+                fp = row.get('file_path')
+
+                if not fp:
+                    # No file path set, delete token directly (or count for dry-run)
+                    if not is_dry_run:
+                        cur.execute("DELETE FROM download_tokens WHERE token = %s;", (token,))
+                    deleted_tokens += 1
+                    log('INFO', f"Removing expired token (no file): {token}")
+                    continue
+
+                p = Path(fp)
+                try:
+                    # Safely resolve and ensure the file sits under the downloads directory
+                    downloads_base_resolved = downloads_base.resolve()
+                    p_resolved = p.resolve()
+                    if downloads_base_resolved in p_resolved.parents or p_resolved == downloads_base_resolved:
+                        if p_resolved.exists() and p_resolved.is_file():
+                            try:
+                                file_size = p_resolved.stat().st_size
+                            except Exception:
+                                file_size = 0
+
+                            if is_dry_run:
+                                deleted_files += 1
+                                deleted_tokens += 1
+                                reclaimed_bytes += file_size
+                                log('INFO', f"Would delete download file: {p_resolved} ({format_bytes(file_size)})")
+                            else:
+                                try:
+                                    p_resolved.unlink()
+                                    cur.execute("DELETE FROM download_tokens WHERE token = %s;", (token,))
+                                    deleted_files += 1
+                                    deleted_tokens += 1
+                                    reclaimed_bytes += file_size
+                                    log('INFO', f"Deleted download file and token: {p_resolved} (token={token}) reclaimed={format_bytes(file_size)}")
+                                except Exception as e:
+                                    log('WARNING', f"Failed to delete file {p_resolved}: {e}")
+                        else:
+                            # File missing - delete token only
+                            if is_dry_run:
+                                deleted_tokens += 1
+                                log('INFO', f"Would remove token for missing file: {token}")
+                            else:
+                                cur.execute("DELETE FROM download_tokens WHERE token = %s;", (token,))
+                                deleted_tokens += 1
+                                log('INFO', f"Removed token for missing file: {token}")
+                    else:
+                        log('DEBUG', f"Skipping token {token} - file outside downloads dir: {p}")
+                except Exception as e:
+                    log('WARNING', f"Failed to evaluate path {fp} for token {token}: {e}")
+
+            if not is_dry_run:
+                conn.commit()
+
+    except Exception as e:
+        log('ERROR', f"Error cleaning up download tokens: {e}")
+
+    return {'deleted_tokens': deleted_tokens, 'deleted_files': deleted_files, 'reclaimed_bytes': reclaimed_bytes}
 
 
 def cleanup_old_logs(retention_days, is_dry_run=False, log_callback=None):
@@ -801,7 +916,7 @@ def cleanup_unreferenced_files(is_dry_run=False, log_callback=None):
 
 
 
-def send_cleanup_notification(orphaned_stats, log_stats, unreferenced_dirs_stats, uf_stats, total_reclaimed, is_dry_run, job_id=None):
+def send_cleanup_notification(orphaned_stats, log_stats, unreferenced_dirs_stats, uf_stats, total_reclaimed, is_dry_run, download_stats=None, job_id=None):
     """Send notification about cleanup results. Includes job log when available."""
     try:
         # Debug log to assist with dry-run notification troubleshooting
@@ -823,6 +938,7 @@ def send_cleanup_notification(orphaned_stats, log_stats, unreferenced_dirs_stats
     <li><strong>Unreferenced files total:</strong> {uf_stats.get('count', 0)} ({format_bytes(uf_stats.get('reclaimed', 0))})</li>
     <li><strong>Unreferenced Directories:</strong> {unreferenced_dirs_stats.get('count', 0)} removed ({format_bytes(unreferenced_dirs_stats.get('reclaimed', 0))})</li>
     <li><strong>Old Logs:</strong> {log_stats.get('count', 0)} deleted</li>
+    <li><strong>Download tokens removed:</strong> {download_stats.get('deleted_tokens', 0) if download_stats else 0} tokens, {download_stats.get('deleted_files', 0) if download_stats else 0} files ({format_bytes(download_stats.get('reclaimed_bytes', 0)) if download_stats else '0 B'})</li>
     <li><strong>Total Reclaimed:</strong> {format_bytes(total_reclaimed)}</li>
 </ul>
 """
