@@ -78,6 +78,41 @@ The application will be available at **http://localhost:8080**
 
 > **Note:** Stack directories must be configured as **bind mounts** — typically in `docker-compose.yml` for production, or in `docker-compose.override.yml` for local development (see examples below).
 
+### Minimal compose example (quick start)
+
+Here is a minimal `docker-compose.yml` example that starts the core services. It uses the published image `drgimpfen/docker-archiver:latest` and only the minimum required environment variables and mounts.
+
+```yaml
+version: "3.8"
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: docker_archiver
+      POSTGRES_USER: archiver
+      POSTGRES_PASSWORD: examplepassword
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+
+  app:
+    image: drgimpfen/docker-archiver:latest
+    ports:
+      - "8080:8080"
+    environment:
+      TZ: Europe/Berlin
+      DB_PASSWORD: examplepassword
+      SECRET_KEY: change-me
+      DATABASE_URL: postgresql://archiver:examplepassword@db:5432/docker_archiver
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./archives:/archives
+      - ./logs:/var/log/archiver
+      - ./downloads:/tmp/downloads
+      - /opt/stacks:/opt/stacks
+```
+
+Note: Replace `examplepassword` and `change-me` with secure values (especially `SECRET_KEY`) in production environments.
+
 ### 3. Initial Setup
 
 On first visit, you'll be prompted to create an admin account.

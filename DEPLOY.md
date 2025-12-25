@@ -29,7 +29,6 @@ Set these variables:
 DB_PASSWORD=your-secure-db-password
 SECRET_KEY=your-random-secret-key-here
 APP_PORT=8080
-ARCHIVE_DIR=/mnt/archives
 # Optional download-generation flags (defaults: false)
 # Leave these disabled unless you explicitly want auto generation behavior.
 DOWNLOADS_AUTO_GENERATE_ON_ACCESS=false
@@ -48,11 +47,14 @@ Add your stack directory **bind mounts** to `docker-compose.yml`. **This is mand
 ```yaml
 volumes:
   - /var/run/docker.sock:/var/run/docker.sock
-  - /mnt/backups:/archives
+  - ./logs:/var/log/archiver        # Persist application and job logs on the host
+  - ./downloads:/tmp/downloads      # Optional: persist generated downloads (recommended)  - - /mnt/backups:/archives           # Persist generated archives on the host
   - /opt/stacks:/opt/stacks        # ← Auto-detected (host:container paths must match)
   - /home/user/docker:/home/user/docker  # ← Auto-detected
-  - ./downloads:/tmp/downloads      # Optional: persist generated downloads (recommended)
+
 ```
+
+**Tip:** Mount `./logs:/var/log/archiver` to retain application and job logs across container restarts and for easier inspection/debugging. Also mount `/mnt/backups:/archives` to persist generated archives across container restarts.
 
 If stacks are not mounted as identical bind mounts, the app may ignore them and jobs can fail. See the Dashboard bind-mount warnings and README troubleshooting section for guidance.
 
@@ -80,7 +82,7 @@ Redis is included in `docker-compose.yml` by default and stores data in `./redis
 
 ```bash
 # Recommended update & start workflow (pull, update images, rebuild app service, tail logs)
-git pull --ff-only && docker compose pull && docker compose up -d --build --no-deps --remove-orphans app && docker compose logs -f --tail=200 app
+git pull --ff-only && docker compose pull && docker compose up -d --no-deps --remove-orphans app && docker compose logs -f --tail=200 app
 
 **Image pull policy:** Docker Archiver can optionally pull missing images automatically before starting stacks. This behaviour is controlled by **Settings → Security → Allow image pulls on start** (default: **disabled**).
 
@@ -90,11 +92,13 @@ git pull --ff-only && docker compose pull && docker compose up -d --build --no-d
 Ensure required images are pre-pulled in your deployment process if this option is disabled.
 ```
 
-If you prefer a simple start for a fresh deployment:
+If you prefer a simple start for a fresh deployment (uses the published image by default):
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
+
+If you want to build the image locally instead of pulling the published image, either run `docker compose up -d --build` or replace the `app` service's `image:` line with `build: .` in `docker-compose.yml`.
 
 **Optional: Add a Redis healthcheck** (example for `docker-compose.yml`):
 

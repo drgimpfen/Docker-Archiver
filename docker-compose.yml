@@ -28,13 +28,13 @@ services:
       - archiver-net
 
   app:
-    build: .
+    image: drgimpfen/docker-archiver:latest
     container_name: docker-archiver-app
     environment:
       TZ: ${TZ:-Europe/Berlin}
       DATABASE_URL: postgresql://archiver:${DB_PASSWORD:-changeme123}@db:5432/docker_archiver
       SECRET_KEY: ${SECRET_KEY:-change-this-secret-key-in-production}
-      FLASK_ENV: production
+      # FLASK_ENV: production
       # Redis for cross-worker SSE 
       REDIS_URL: "redis://redis:6379/0"
       # Gunicorn (optional) - commented example overrides
@@ -50,11 +50,8 @@ services:
       # SCHEDULE_MISFIRE_GRACE: ${SCHEDULE_MISFIRE_GRACE:-300} # seconds to consider a misfire grace window
       # DB_WAIT_RETRIES: ${DB_WAIT_RETRIES:-30}             # Used by tools/wait_for_db.py
       # DB_WAIT_DELAY: ${DB_WAIT_DELAY:-1.0}                # Delay between retries (seconds)
-
-      # Downloads: allow optional auto-generation when a public link is accessed
-      DOWNLOADS_AUTO_GENERATE_ON_ACCESS: ${DOWNLOADS_AUTO_GENERATE_ON_ACCESS:-false}
-      # Downloads: optionally generate missing downloads on container start (true/false)
-      DOWNLOADS_AUTO_GENERATE_ON_STARTUP: ${DOWNLOADS_AUTO_GENERATE_ON_STARTUP:-false}
+      # DOWNLOADS_AUTO_GENERATE_ON_ACCESS: ${DOWNLOADS_AUTO_GENERATE_ON_ACCESS:-false} # Downloads: allow optional auto-generation when a public link is accessed      
+      # DOWNLOADS_AUTO_GENERATE_ON_STARTUP: ${DOWNLOADS_AUTO_GENERATE_ON_STARTUP:-false} # Downloads: optionally generate missing downloads on container start (true/false)
     volumes:
       # Docker socket for container management
       - /var/run/docker.sock:/var/run/docker.sock
@@ -75,7 +72,6 @@ services:
       #
       # Add your stack directory mounts here:
       - /opt/stacks:/opt/stacks
-      - /home/user/docker:/home/user/docker
     ports:
       - "8080:8080"
     depends_on:
