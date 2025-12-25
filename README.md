@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://github.com/drgimpfen/docker-archiver/blob/main/app/static/images/Logo.png" alt="Docker Archiver Logo" width="400">
+  <img src="https://github.com/drgimpfen/docker-archiver/blob/main/app/static/images/Logo.png?raw=true" alt="Docker Archiver Logo" width="400">
   
   # Docker Archiver
   
