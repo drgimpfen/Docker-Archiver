@@ -13,7 +13,7 @@
 
         <div class="card mb-4">
             <div class="card-header">
-                <h5 class="mb-0">Permissions</h5>
+                <h5 class="mb-0"><i class="bi bi-shield-check me-2"></i> Permissions</h5>
             </div>
             <div class="card-body">
                 <div class="form-check mb-3">
@@ -30,11 +30,19 @@
                     </button>
                     <div class="form-text mt-2 text-muted">Scan archive directories for permission mismatches and optionally apply the configured defaults (runs in background).</div>
                 </div>
+            </div>
+        </div>
 
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-cloud-arrow-down me-2"></i> Image Pull Policy</h5>
+            </div>
+            <div class="card-body">
                 <div class="form-check form-switch mb-3">
                     <input class="form-check-input" type="checkbox" role="switch" id="allowImagePull" name="allow_image_pull" {% if settings.get('allow_image_pull') == 'true' %}checked{% endif %}>
                     <label class="form-check-label" for="allowImagePull"><strong>Allow image pulls on start</strong><br><small class="text-muted">If enabled, missing images will be pulled automatically before starting stacks. If disabled, stacks missing images will be skipped. See <a href="https://github.com/drgimpfen/Docker-Archiver#image-pull-policy" target="_blank" rel="noopener">README — Image pull policy</a> for details.</small></label>
                 </div>
+                <div class="form-text text-muted">Recommendation: keep disabled in production unless you trust registry/network access. Enabling may extend start times and can fail on auth/network errors.</div>
             </div>
         </div>
 
