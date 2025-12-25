@@ -122,6 +122,37 @@ def init_db():
             );
         """)
         
+        # Migrate download_tokens table: if older schema exists without new columns, add them
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='file_path'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN file_path TEXT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='created_at'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='expires_at'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN expires_at TIMESTAMP;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='download_tokens' AND column_name='is_packing'
+                ) THEN
+                    ALTER TABLE download_tokens ADD COLUMN is_packing BOOLEAN DEFAULT FALSE;
+                END IF;
+            END $$;
+        """)
+        
         # API tokens for external access
         cur.execute("""
             CREATE TABLE IF NOT EXISTS api_tokens (
