@@ -355,7 +355,7 @@ def download_file(token):
             return render_template('download_error.html', reason='This download link has expired.', hint='Request a new download link.'), 410
 
         if token_data['is_packing']:
-            # Show preparing page and allow user to register for notification
+            # Show preparing page and allow user to register for notification. Prevent simultaneous regenerate triggers.
             return render_template('download_preparing.html', token=token, stack_name=token_data.get('stack_name'), notify_email=token_data.get('notify_email'), expires_at=token_data.get('expires_at')), 202
 
         file_path = token_data.get('file_path')
@@ -430,13 +430,23 @@ def download_regenerate(token):
             ap = row.get('archive_path') or row.get('file_path')
             if ap and Path(ap).exists() and Path(ap).is_dir() and not row.get('is_packing'):
                 try:
-                    cur.execute("UPDATE download_tokens SET is_packing = TRUE WHERE token = %s;", (token,))
-                    conn.commit()
-                    from app.routes.api.downloads import process_directory_pack
-                    t = threading.Thread(target=process_directory_pack, args=(row.get('stack_name'), ap, token), daemon=True)
-                    t.start()
+                    # atomic update to avoid race: only set is_packing=TRUE if it was FALSE/NULL
+                    cur.execute("UPDATE download_tokens SET is_packing = TRUE WHERE token = %s AND (is_packing = FALSE OR is_packing IS NULL) RETURNING token;", (token,))
+                    r = cur.fetchone()
+                    if r:
+                        conn.commit()
+                        from app.routes.api.downloads import process_directory_pack
+                        t = threading.Thread(target=process_directory_pack, args=(row.get('stack_name'), ap, token), daemon=True)
+                        t.start()
+                    else:
+                        # someone else started packing concurrently
+                        return render_template('download_preparing.html', token=token, stack_name=row.get('stack_name'), notify_email=row.get('notify_email'), expires_at=row.get('expires_at')), 202
                 except Exception as e:
                     logger.exception('Failed to start regeneration for token %s: %s', token, e)
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
                     return render_template('download_error.html', reason='Failed to start regeneration. Please contact the administrator.'), 500
 
         return render_template('download_preparing.html', token=token, stack_name=row.get('stack_name'), notify_email=email, expires_at=row.get('expires_at'))

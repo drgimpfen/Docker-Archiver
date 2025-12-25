@@ -94,21 +94,17 @@ def resume_pending_downloads():
             logger.exception("Failed while resuming token %s: %s", r.get('token'), e)
 
 
-def send_download_email(stack_name, download_url, recipients=None):
-    """Send download link via email.
-
-    If `recipients` is provided (list of emails), the adapter will send to those
-    addresses; otherwise it will fall back to configured user emails.
-    """
+def send_download_email(stack_name, download_url=None, recipients=None):
+    """Send notification email with a download link to `recipients` (or default recipients if None)."""
     try:
         adapter = SMTPAdapter()
-        base_url = get_setting('base_url', 'http://localhost:8080')
+        title = f"Stack Archive Ready: {stack_name}"
 
-        title = f"Stack Archive Download Ready: {stack_name}"
+        url_html = f"<p><a href=\"{download_url}\" class=\"btn btn-primary\">Download Archive</a></p>" if download_url else "<p>Your requested archive is ready.</p>"
         body = f"""
-        <p>Your requested stack archive for <strong>{stack_name}</strong> is ready for download.</p>
+        <p>Your requested stack archive for <strong>{stack_name}</strong> is ready.</p>
 
-        <p><a href="{download_url}" class="btn btn-primary">Download Archive</a></p>
+        {url_html}
 
         <p><small>This link will expire in 24 hours.</small></p>
 
@@ -117,7 +113,7 @@ def send_download_email(stack_name, download_url, recipients=None):
 
         result = adapter.send(title, body, recipients=recipients)
         if result.success:
-            logger.info(f"Download email sent for stack {stack_name} to {recipients if recipients else 'default recipients'}")
+            logger.info(f"Download notification email sent for stack {stack_name} to {recipients if recipients else 'default recipients'}")
         else:
             logger.error(f"Failed to send download email for stack {stack_name}: {result.detail}")
 
@@ -226,13 +222,13 @@ def process_directory_pack(stack_name, source_path, token):
                     conn.commit()
                 base_url = get_setting('base_url', 'http://localhost:8080')
                 download_url = f"{base_url}/download/{token}"
-                # send to per-token notify_email if present
+                # send to per-token notify_emails if present
                 with get_db() as conn:
                     c = conn.cursor()
-                    c.execute("SELECT notify_email FROM download_tokens WHERE token = %s;", (token,))
+                    c.execute("SELECT notify_emails FROM download_tokens WHERE token = %s;", (token,))
                     n = c.fetchone()
-                    notify = n.get('notify_email') if n else None
-                send_download_email(stack_name, download_url, recipients=[notify] if notify else None)
+                    notify_list = n.get('notify_emails') if n else None
+                send_download_email(stack_name, download_url, recipients=notify_list if notify_list else None)
                 logger.info("Reused existing archive for token %s at %s", token, output_path)
                 return
             except Exception as e:
@@ -252,16 +248,16 @@ def process_directory_pack(stack_name, source_path, token):
                 """, (str(output_path), token))
                 conn.commit()
 
-            # Send email with download link to notify_email if present
+            # Send email with download link to notify_emails if present
             with get_db() as conn:
                 c = conn.cursor()
-                c.execute("SELECT notify_email FROM download_tokens WHERE token = %s;", (token,))
+                c.execute("SELECT notify_emails FROM download_tokens WHERE token = %s;", (token,))
                 n = c.fetchone()
-                notify = n.get('notify_email') if n else None
+                notify_list = n.get('notify_emails') if n else None
 
             base_url = get_setting('base_url', 'http://localhost:8080')
             download_url = f"{base_url}/download/{token}"
-            send_download_email(stack_name, download_url, recipients=[notify] if notify else None)
+            send_download_email(stack_name, download_url, recipients=notify_list if notify_list else None)
 
             try:
                 if output_path.exists():
@@ -322,22 +318,27 @@ def request_download():
             if path.is_file():
                 # File exists, create token immediately and send email
                 notify_email = data.get('notify_email') if isinstance(data, dict) else None
+                emails = None
+                if notify_email and isinstance(notify_email, str):
+                    emails = [e.strip() for e in notify_email.split(',') if e.strip()]
                 cur.execute("""
-                    INSERT INTO download_tokens (token, stack_name, file_path, archive_path, expires_at, is_packing, notify_email)
+                    INSERT INTO download_tokens (token, stack_name, file_path, archive_path, expires_at, is_packing, notify_emails)
                     VALUES (%s, %s, %s, %s, %s, FALSE, %s);
-                """, (token, stack_name, archive_path, archive_path, expires_at, notify_email))
+                """, (token, stack_name, archive_path, archive_path, expires_at, emails))
                 conn.commit()
                 
-                # Send email immediately
+                # Send email immediately with download link
                 base_url = get_setting('base_url', 'http://localhost:8080')
                 download_url = f"{base_url}/download/{token}"
-                send_download_email(stack_name, download_url)
-                
+                try:
+                    send_download_email(stack_name, download_url=download_url, recipients=emails)
+                except Exception:
+                    logger.exception('Failed to send download email')
+
                 return jsonify({
                     'success': True,
-                    'message': 'Download link sent via email',
+                    'message': 'Download email sent',
                     'is_folder': False,
-                    'download_url': download_url,
                     'token': token
                 })
                 
@@ -354,9 +355,19 @@ def request_download():
                 if existing:
                     # If an existing archive is already prepared and file exists, reuse it
                     if existing.get('file_path') and Path(existing.get('file_path')).exists() and not existing.get('is_packing'):
-                        download_url = f"{base_url}/download/{existing['token']}"
-                        send_download_email(stack_name, download_url)
-                        return jsonify({'success': True, 'message': 'Existing archive found and link sent', 'is_folder': False, 'download_url': download_url, 'token': existing['token']})
+                        # Send the existing archive as an email attachment to default recipients
+                        try:
+                            # fetch any notify_emails associated with the existing token
+                            with get_db() as nconn:
+                                nc = nconn.cursor()
+                                nc.execute("SELECT notify_emails FROM download_tokens WHERE token = %s;", (existing['token'],))
+                                nrow = nc.fetchone()
+                                notify_list = nrow.get('notify_emails') if nrow else None
+                            download_url = f"{get_setting('base_url', 'http://localhost:8080')}/download/{existing['token']}"
+                            send_download_email(stack_name, download_url=download_url, recipients=notify_list)
+                        except Exception:
+                            logger.exception('Failed to send existing archive as notification')
+                        return jsonify({'success': True, 'message': 'Existing archive found; notification sent', 'is_folder': False, 'token': existing['token']})
                     # If it's currently packing, just return token so UI will poll
                     if existing.get('is_packing'):
                         return jsonify({'success': True, 'message': 'Archive preparation already started', 'is_folder': True, 'token': existing['token']})
@@ -364,10 +375,14 @@ def request_download():
                 # No existing ready archive — insert token and mark as packing
                 # Insert notify_email if provided
                 notify_email = data.get('notify_email') if isinstance(data, dict) else None
+                # Insert token and save notify_emails if provided (comma-separated)
+                emails = None
+                if notify_email and isinstance(notify_email, str):
+                    emails = [e.strip() for e in notify_email.split(',') if e.strip()]
                 cur.execute("""
-                    INSERT INTO download_tokens (token, stack_name, file_path, archive_path, expires_at, is_packing, notify_email)
+                    INSERT INTO download_tokens (token, stack_name, file_path, archive_path, expires_at, is_packing, notify_emails)
                     VALUES (%s, %s, %s, %s, %s, TRUE, %s);
-                """, (token, stack_name, archive_path, archive_path, expires_at, notify_email))
+                """, (token, stack_name, archive_path, archive_path, expires_at, emails))
                 conn.commit()
 
                 # Start background packing process
@@ -521,15 +536,24 @@ def send_link():
                     # Only start if archive_path looks like a directory or exists
                     ap = row.get('archive_path')
                     if ap and Path(ap).exists():
-                        # mark packing and start background process
+                        # atomically set is_packing to TRUE only if it was FALSE/NULL
                         try:
-                            cur.execute("UPDATE download_tokens SET is_packing = TRUE WHERE token = %s;", (token,))
-                            conn.commit()
-                            thread = threading.Thread(target=process_directory_pack, args=(row.get('stack_name'), ap, token))
-                            thread.daemon = True
-                            thread.start()
-                        except Exception:
-                            pass
+                            cur.execute("UPDATE download_tokens SET is_packing = TRUE WHERE token = %s AND (is_packing = FALSE OR is_packing IS NULL) RETURNING token;", (token,))
+                            r = cur.fetchone()
+                            if r:
+                                conn.commit()
+                                thread = threading.Thread(target=process_directory_pack, args=(row.get('stack_name'), ap, token))
+                                thread.daemon = True
+                                thread.start()
+                            else:
+                                # someone else started packing concurrently; return 202
+                                return jsonify({'success': True, 'message': 'Archive preparation already started', 'is_folder': True, 'token': token}), 202
+                        except Exception as e:
+                            logger.exception('Failed to atomically set packing flag for token %s: %s', token, e)
+                            try:
+                                conn.rollback()
+                            except Exception:
+                                pass
 
                 return jsonify({'success': True, 'message': 'Recipient saved; will be notified when ready.'}), 202
 
@@ -540,13 +564,33 @@ def send_link():
                 tkn = None
                 if row:
                     tkn = row.get('token')
+                    # If an existing archive file is already present and not packing, create a NEW token and send it
                     if row.get('file_path') and Path(row.get('file_path')).exists() and not row.get('is_packing'):
-                        download_url = f"{get_setting('base_url', 'http://localhost:8080')}/download/{tkn}"
-                        send_download_email(row.get('stack_name'), download_url, recipients=[email])
-                        return jsonify({'success': True, 'message': 'Email sent'}), 200
-                    # If packing, update notify_email
-                    cur.execute("UPDATE download_tokens SET notify_email = %s WHERE token = %s;", (email, tkn))
-                    conn.commit()
+                        new_tkn = generate_token()
+                        expires_at = utils.now() + timedelta(hours=24)
+                        emails = [e.strip() for e in (email or '').split(',') if e.strip()]
+                        # Insert a fresh token that points to the existing file
+                        cur.execute("INSERT INTO download_tokens (token, stack_name, file_path, archive_path, expires_at, is_packing, notify_emails) VALUES (%s, %s, %s, %s, %s, FALSE, %s);", (new_tkn, row.get('stack_name') or data.get('stack_name') or 'unknown', row.get('file_path'), archive_path, expires_at, emails))
+                        conn.commit()
+                        download_url = f"{get_setting('base_url', 'http://localhost:8080')}/download/{new_tkn}"
+                        try:
+                            send_download_email(row.get('stack_name'), download_url, recipients=emails)
+                        except Exception:
+                            logger.exception('Failed to send download email for new token')
+                        return jsonify({'success': True, 'message': 'New token created and email sent', 'is_folder': False, 'download_url': download_url, 'token': new_tkn}), 200
+                    # If packing, update notify_emails
+                    emails = [e.strip() for e in (email or '').split(',') if e.strip()]
+                    if emails:
+                        cur.execute("""
+                            UPDATE download_tokens
+                            SET notify_emails = (
+                                SELECT ARRAY(SELECT DISTINCT e FROM (
+                                    SELECT unnest(COALESCE(notify_emails, ARRAY[]::text[])) UNION ALL SELECT unnest(%s::text[])
+                                ) AS e)
+                            )
+                            WHERE token = %s;
+                        """, (emails, tkn))
+                        conn.commit()
                     # If not currently packing, try starting packing
                     if not row.get('is_packing'):
                         try:
@@ -562,7 +606,8 @@ def send_link():
                 # No existing token: create one and start packing
                 tkn = generate_token()
                 expires_at = utils.now() + timedelta(hours=24)
-                cur.execute("INSERT INTO download_tokens (token, stack_name, file_path, archive_path, expires_at, is_packing, notify_email) VALUES (%s, %s, %s, %s, %s, TRUE, %s);", (tkn, data.get('stack_name') or 'unknown', archive_path, archive_path, expires_at, email))
+                emails = [e.strip() for e in (email or '').split(',') if e.strip()]
+                cur.execute("INSERT INTO download_tokens (token, stack_name, file_path, archive_path, expires_at, is_packing, notify_emails) VALUES (%s, %s, %s, %s, %s, TRUE, %s);", (tkn, data.get('stack_name') or 'unknown', archive_path, archive_path, expires_at, emails))
                 conn.commit()
                 thread = threading.Thread(target=process_directory_pack, args=(data.get('stack_name') or 'unknown', archive_path, tkn))
                 thread.daemon = True
