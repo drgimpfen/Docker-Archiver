@@ -39,10 +39,13 @@
             </div>
             <div class="card-body">
                 <div class="mb-3">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" role="switch" id="imagePullAlways" name="image_pull_always" {% if settings.get('image_pull_policy', 'never') == 'always' %}checked{% endif %}>
-                        <label class="form-check-label" for="imagePullAlways"><strong>Always pull images on start</strong><br><small class="text-muted">If enabled, the archiver will attempt to pull images before starting stacks (may increase job duration). If disabled, no pull will be attempted at start and `--pull=never` will be added to `docker compose up` to explicitly prevent pulls. See <a href="https://github.com/drgimpfen/Docker-Archiver#image-pull-policy" target="_blank" rel="noopener">README</a> for details.</small></label>
-                    </div>
+                    <label for="imagePullPolicy" class="form-label"><strong>Image pull policy</strong></label>
+                    <select id="imagePullPolicy" name="image_pull_policy" class="form-select">
+                        <option value="pull-on-miss" {% if settings.get('image_pull_policy', 'pull-on-miss') == 'pull-on-miss' %}selected{% endif %}>Pull on miss (default) — pull images when they are missing</option>
+                        <option value="always" {% if settings.get('image_pull_policy', 'pull-on-miss') == 'always' %}selected{% endif %}>Always — pull images before starting stacks</option>
+                        <option value="never" {% if settings.get('image_pull_policy', 'pull-on-miss') == 'never' %}selected{% endif %}>Never — never pull images automatically</option>
+                    </select>
+                    <div class="form-text text-muted mt-2">Choose how the archiver handles missing images when restarting stacks. <a href="https://github.com/drgimpfen/Docker-Archiver#image-pull-policy" target="_blank" rel="noopener">More info</a>.</div>
                 </div>
 
                 <div class="mb-3">

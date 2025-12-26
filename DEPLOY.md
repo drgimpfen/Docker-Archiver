@@ -85,12 +85,13 @@ Redis is included in `docker-compose.yml` by default and stores data in `./redis
 # Recommended update & start workflow (pull, update images, rebuild app service, tail logs)
 git pull --ff-only && docker compose pull && docker compose up -d --no-deps --remove-orphans app && docker compose logs -f --tail=200 app
 
-**Image pull policy:** Docker Archiver can optionally pull missing images automatically before starting stacks. This behaviour is controlled by **Settings → Security → Allow image pulls on start** (default: **disabled**).
+**Image pull policy:** Docker Archiver can control when images are pulled for stack restarts. This behaviour is configured in **Settings → Security → Image pull policy** (default: **Pull on miss**).
 
-- If enabled, the archiver will attempt `docker compose pull` before starting stacks; any pull failure will be logged and will prevent the stack from starting.
-- If disabled, the archiver checks whether the images referenced by the stack are available locally; if they are missing the stack will be **skipped** during restart and a warning will be recorded in the job log and included in the job notification. This prevents unexpected network activity or automatic updates on your hosts.
+- **Pull on miss (default)** — If images referenced by a stack are missing, the archiver will attempt a `docker compose pull` for that stack and retry starting it; pull output is recorded in the job log.
+- **Always** — Try to pull images before starting each stack (runs `docker compose pull` and records output).
+- **Never** — Do not pull images automatically; missing images will cause the stack to be skipped and a warning recorded.
 
-Ensure required images are pre-pulled in your deployment process if this option is disabled.
+Ensure required images are pre-pulled in your deployment process or rely on the 'Pull on miss' policy for on-demand pulls.
 ```
 
 If you prefer a simple start for a fresh deployment (uses the published image by default), create a minimal `docker-compose.yml` like below and run `docker compose up -d`.

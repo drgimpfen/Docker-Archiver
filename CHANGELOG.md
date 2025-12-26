@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.8.1] - 2025-12-26
+### Fixed
+- Startup race where scheduler tried to load schedules before DB schema was visible (added schema readiness check and scheduler resilience).
+
 ## [0.8.0] - 2025-12-25
 ### Added
 - Release workflows for Docker Hub and GHCR including short tag generation (vMAJOR, vMAJOR.MINOR) and edge scheduled builds.

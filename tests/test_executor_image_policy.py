@@ -456,8 +456,8 @@ def test_missing_policy_pulls_and_records_output(monkeypatch, tmp_path):
 
     monkeypatch.setattr('docker.from_env', fake_from_env)
 
-    # Set policy to 'missing'
-    monkeypatch.setattr('app.executor.get_setting', lambda k, d='': 'missing')
+    # Set policy to 'pull-on-miss'
+    monkeypatch.setattr('app.executor.get_setting', lambda k, d='': 'pull-on-miss')
 
     ex = DummyExecutor()
     res = ex._start_stack('teststack', compose_file)

@@ -957,7 +957,121 @@ def _start_stack(self, stack_name, compose_path):
                 self.log('INFO', f"Successfully finished: Starting {stack_name}")
                 return True
             else:
+                # If start failed, check for missing image errors and optionally attempt pull-on-miss
                 self.log('ERROR', f"Failed to start {stack_name}: {result.stderr}")
+
+                stderr_out = (result.stderr or '') + '\n' + (result.stdout or '')
+                if policy in ('pull-on-miss', 'missing') and ('No such image' in stderr_out or 'pull access denied' in stderr_out or 'not found' in stderr_out):
+                    # Try a single pull attempt and retry up once
+                    self.log('INFO', f"Detected missing image(s) when starting {stack_name}; attempting 'docker compose pull' and retrying start")
+                    try:
+                        import threading
+
+                        popen_proc = subprocess.Popen(
+                            ['docker', 'compose', '-f', str(compose_path), 'pull'],
+                            cwd=str(host_stack_dir),
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True
+                        )
+
+                        stdout_lines = []
+                        stderr_lines = []
+                        last_activity = {'t': time.time()}
+
+                        def _drain_pipe_track(pipe, out_list):
+                            try:
+                                for line in iter(pipe.readline, ''):
+                                    out_list.append(line)
+                                    try:
+                                        last_activity['t'] = time.time()
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+                            finally:
+                                try:
+                                    pipe.close()
+                                except Exception:
+                                    pass
+
+                        t_out = threading.Thread(target=_drain_pipe_track, args=(popen_proc.stdout, stdout_lines), daemon=True)
+                        t_err = threading.Thread(target=_drain_pipe_track, args=(popen_proc.stderr, stderr_lines), daemon=True)
+                        t_out.start()
+                        t_err.start()
+
+                        try:
+                            inactivity_timeout = int(get_setting('image_pull_inactivity_timeout', '300'))
+                        except Exception:
+                            inactivity_timeout = 300
+
+                        while True:
+                            if popen_proc.poll() is not None:
+                                break
+                            if inactivity_timeout and inactivity_timeout > 0 and (time.time() - last_activity['t']) > inactivity_timeout:
+                                try:
+                                    popen_proc.kill()
+                                except Exception:
+                                    pass
+                                try:
+                                    popen_proc.wait(timeout=5)
+                                except Exception:
+                                    pass
+                                t_out.join(timeout=1)
+                                t_err.join(timeout=1)
+                                pull_output = (''.join(stdout_lines) or '').strip() + '\n' + (''.join(stderr_lines) or '').strip()
+                                try:
+                                    if not hasattr(self, 'stack_image_updates'):
+                                        self.stack_image_updates = {}
+                                    self.stack_image_updates[stack_name] = {'pull_output': pull_output}
+                                except Exception:
+                                    pass
+                                self.log('WARNING', f"Image pull timed out after {inactivity_timeout}s of inactivity; aborting pull for {stack_name}")
+                                return 'skipped'
+                            time.sleep(0.2)
+
+                        t_out.join(timeout=1)
+                        t_err.join(timeout=1)
+
+                        pull_output = (''.join(stdout_lines) or '').strip() + '\n' + (''.join(stderr_lines) or '').strip()
+                        try:
+                            if not hasattr(self, 'stack_image_updates'):
+                                self.stack_image_updates = {}
+                            self.stack_image_updates[stack_name] = {'pull_output': pull_output}
+                        except Exception:
+                            pass
+
+                        if popen_proc.returncode != 0:
+                            self.log('WARNING', f"Image pull failed for {stack_name}: {pull_output}")
+                            return 'skipped'
+
+                        # After successful pull, record and re-run 'docker compose up' once
+                        try:
+                            if not hasattr(self, 'stack_image_updates'):
+                                self.stack_image_updates = {}
+                            self.stack_image_updates[stack_name] = {'pull_output': pull_output}
+                        except Exception:
+                            pass
+                        self.log('INFO', f"Container images pulled for {stack_name}; check the pull output in the job log for details.")
+                        self.log('INFO', f"Retrying start for {stack_name} after pulling images")
+                        retry_result = subprocess.run(
+                            cmd_parts,
+                            cwd=str(host_stack_dir),
+                            capture_output=True,
+                            text=True,
+                            timeout=120
+                        )
+                        if retry_result.returncode == 0:
+                            self.log('INFO', f"Successfully finished: Starting {stack_name} (after image pull)")
+                            return True
+                        else:
+                            self.log('ERROR', f"Failed to start {stack_name} after pulling images: {retry_result.stderr}")
+                            return 'skipped'
+
+                    except Exception as e:
+                        self.log('WARNING', f"An error occurred while attempting to pull missing images for {stack_name}: {e}")
+                        return 'skipped'
+
                 return False
         except Exception as e:
             self.log('ERROR', f"Exception starting {stack_name}: {e}")

@@ -323,7 +323,7 @@ def init_db():
                 ('smtp_from', ''),
                 ('smtp_use_tls', 'true'),
                 ('apply_permissions', 'false'),
-                ('image_pull_policy', 'never'),
+                ('image_pull_policy', 'pull-on-miss'),
                 ('image_pull_inactivity_timeout', '300'),
                 ('image_pull_excerpt_lines', '8'),
                 ('app_version', '0.8.1')

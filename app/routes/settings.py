@@ -127,8 +127,8 @@ def manage_security():
     if request.method == 'POST':
         try:
             apply_permissions = request.form.get('apply_permissions') == 'on'
-            # New checkbox: if checked -> 'always' else 'never'
-            image_pull_policy = 'always' if request.form.get('image_pull_always') == 'on' else 'never'
+            # Image pull policy select: 'pull-on-miss', 'always', 'never'
+            image_pull_policy = request.form.get('image_pull_policy', 'pull-on-miss')
             image_pull_inactivity_timeout = request.form.get('image_pull_inactivity_timeout', '600').strip()
             # Validate inactivity timeout (integer within reasonable bounds; 0 disables inactivity timeout)
             try:
