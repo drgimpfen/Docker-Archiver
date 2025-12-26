@@ -1671,6 +1671,71 @@
         } catch (e) { return null; }
     }
 
+    // Refresh Job Details modal content in-place without re-opening it
+    function refreshCurrentJobModal(){
+        try{
+            const jobId = window._currentJobId;
+            if (!jobId) return;
+            // Fetch latest job payload
+            fetch(`/api/jobs/${jobId}`, { credentials: 'same-origin' }).then(resp => {
+                if (!resp.ok) return null;
+                return resp.json();
+            }).then(data => {
+                if (!data || !data.job) return;
+                const job = data.job;
+
+                // Update status badge in modal
+                const statusBadge = document.getElementById('job-status-badge');
+                if (statusBadge) {
+                    const cls = job.status === 'success' ? 'bg-success' : (job.status === 'running' ? 'bg-info' : 'bg-danger');
+                    statusBadge.className = `badge ${cls}`;
+                    statusBadge.textContent = job.status;
+                }
+
+                // Update start / end / duration displayed in modal
+                const startEl = document.getElementById('job-start-time');
+                const endEl = document.getElementById('job-end-time');
+                const durEl = document.getElementById('job-duration');
+                if (startEl) { startEl.textContent = formatJobTime(job.start_time); startEl.dataset.start = job.start_time || ''; }
+                if (endEl) { endEl.textContent = formatJobTime(job.end_time); endEl.dataset.end = job.end_time || ''; }
+                if (durEl) {
+                    if (job.status === 'running') {
+                        const secs = computeDurationSecondsFromStart(job.start_time);
+                        durEl.textContent = secs !== null ? formatDuration(secs) : formatDuration(0);
+                    } else {
+                        durEl.textContent = formatDuration(job.duration_seconds);
+                    }
+                }
+
+                // Update metrics table in modal if present
+                if (Array.isArray(data.metrics)) {
+                    const tbody = document.getElementById('job-metrics-body');
+                    if (tbody) {
+                        tbody.innerHTML = '';
+                        data.metrics.forEach(m => {
+                            const hasArchive = m.archive_path && !m.archive_path.includes('_download_');
+                            const row = document.createElement('tr');
+                            row.innerHTML = `
+                                <td>${m.stack_name}</td>
+                                <td><span class="badge bg-${m.status === 'success' ? 'success' : 'danger'}">${m.status}</span></td>
+                                <td>${m.was_running ? '<i class="bi bi-check-circle text-success"></i>' : '<i class="bi bi-x-circle text-muted"></i>'}</td>
+                                <td>${m.duration_seconds !== null && m.duration_seconds !== undefined ? m.duration_seconds + 's' : 'N/A'}</td>
+                                <td>${m.archive_size_bytes ? formatBytes(m.archive_size_bytes) : 'N/A'}</td>
+                                <td><small>${m.archive_path || 'N/A'}</small></td>
+                                <td class="text-nowrap">${hasArchive ? `<button class="btn btn-sm btn-outline-primary me-1" onclick="requestDownload(${job.id}, '${m.stack_name}', '${m.archive_path}')" title="Download Archive"><i class="bi bi-download"></i></button>` : ''}<button class="btn btn-sm btn-outline-secondary" onclick="downloadStackLog(${job.id}, '${m.stack_name}')" title="Download Stack Log"><i class="bi bi-file-text"></i></button></td>
+                            `;
+                            tbody.appendChild(row);
+                        });
+                    }
+                }
+
+                // Update dashboard row if present
+                try { if (typeof updateJobRowFromJob === 'function') updateJobRowFromJob(job); } catch(e){}
+
+            }).catch(err => { /* ignore network errors during background refresh */ });
+        }catch(e){ console.error('refreshCurrentJobModal error', e); }
+    }
+
     // Update duration cells for running jobs every second
     function updateRunningDurations() {
         try {

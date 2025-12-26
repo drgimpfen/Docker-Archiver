@@ -686,8 +686,23 @@ async function pollJobs() {
             const jobId = window._currentJobId;
             const jobRow = document.getElementById(`job-row-${jobId}`);
             if (jobRow && jobRow.getAttribute('data-job-status') !== 'running') {
-                // Re-fetch modal details
-                showJobDetails(jobId);
+                // Refresh modal contents in-place without re-opening or moving focus
+                if (typeof refreshCurrentJobModal === 'function') {
+                    try { refreshCurrentJobModal(); } catch (e) { console.error('Failed to refresh job modal:', e); }
+                } else {
+                    // Fallback: re-fetch job data and update status badge only
+                    fetch(`/api/jobs/${jobId}`, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null).then(data => {
+                        if (!data || !data.job) return;
+                        try {
+                            const statusBadge = document.getElementById('job-status-badge');
+                            if (statusBadge) {
+                                const cls = data.job.status === 'success' ? 'bg-success' : (data.job.status === 'running' ? 'bg-info' : 'bg-danger');
+                                statusBadge.className = `badge ${cls}`;
+                                statusBadge.textContent = data.job.status;
+                            }
+                        } catch (e) {}
+                    }).catch(()=>{});
+                }
             }
         }
 
