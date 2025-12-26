@@ -14,44 +14,70 @@
 </div>
 {% endif %}
 
-<!-- System Info Cards -->
-<div class="row g-3 mb-4">
-    <!-- Storage Card -->
-    <div class="col-md-4">
-        <div class="card h-100">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h6 class="card-subtitle text-muted mb-0">Archive Storage</h6>
-                    <i class="bi bi-hdd-fill fs-4 text-{{ disk_status }}"></i>
-                </div>
-                <h3 class="mb-2">{{ format_bytes(total_archives_size) }}</h3>
-                <div class="progress mb-2" style="height: 10px;">
-                    <div class="progress-bar bg-{{ disk_status }}" 
-                         role="progressbar" 
-                         style="width: {{ disk.percent }}%"
-                         aria-valuenow="{{ disk.percent }}" 
-                         aria-valuemin="0" 
-                         aria-valuemax="100">
-                    </div>
-                </div>
-                <small class="text-muted">
-                    {{ format_bytes(disk.used) }} / {{ format_bytes(disk.total) }} 
-                    ({{ "%.1f"|format(disk.percent) }}%)
-                </small>
+{% if bind_warnings %}
+<div class="alert alert-warning border-warning mb-4" role="alert">
+    <div class="d-flex gap-3">
+        <div class="flex-shrink-0"><i class="bi bi-exclamation-triangle-fill fs-4"></i></div>
+        <div>
+            <strong>Bind mount mismatches detected</strong>
+            <div class="mt-2">
+                {# Show primary message directly (message is concise and has no redundant prefix) #}
+                <div>{{ bind_warnings[0] | replace('\n', '<br>') | safe }}</div>
+                {% if bind_warnings|length > 1 %}
+                <details class="mt-2" style="color: #ddd;">
+                    <summary style="cursor: pointer;">Show all details</summary>
+                    <ul class="mt-2 mb-0">
+                        {% for w in bind_warnings %}
+                        <li>{{ w | replace('\n', '<br>') | safe }}</li>
+                        {% endfor %}
+                    </ul>
+                </details>
+                {% endif %}
             </div>
+            <div class="mt-2">
+                <div><small class="text-muted"><strong>Required:</strong> Host and container paths **must be identical** (e.g., <code>/opt/stacks:/opt/stacks</code>).</small></div>
+                <small class="text-danger d-block mb-1">Bind mounts are mandatory — mismatched mounts are not supported and will be ignored, causing jobs to fail.</small>
+                <small class="text-muted d-block mb-1">Correct format:</small>
+                <pre class="bg-dark text-light p-2 rounded" style="white-space: pre-wrap;"><code>volumes:
+  - /opt/stacks:/opt/stacks  # Bind mount (host:container - same path)</code></pre>
+                <small class="text-muted">Examples not supported: <code>/home/stacks:/opt/stacks</code>, <code>/opt/stacks:/local/stacks</code>. <a href="https://github.com/drgimpfen/Docker-Archiver#bind-mounts" target="_blank" rel="noopener">Learn more</a> · <a href="https://github.com/drgimpfen/Docker-Archiver#troubleshooting-bind-mount-warnings" target="_blank" rel="noopener">Troubleshooting</a></small>
+            </div>
+            {% if ignored_bind_destinations %}
+            <div class="mt-2"><small class="text-muted">Ignored mount paths: {% for d in ignored_bind_destinations %}<code>{{ d }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</small></div>
+            {% endif %}
         </div>
     </div>
+</div>
+{% endif %}
 
-    <!-- Stacks Card -->
+<!-- System Info Cards -->
+<div class="row g-3 mb-4">
+    <!-- Total Archives Card -->
     <div class="col-md-2">
         <div class="card h-100">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h6 class="card-subtitle text-muted mb-0">Total Stacks</h6>
+                    <h6 class="card-subtitle text-muted mb-0">Total Archives</h6>
                     <i class="bi bi-stack fs-4 text-primary"></i>
                 </div>
-                <h3 class="mb-2">{{ total_stacks_configured }}</h3>
+                <h3 class="mb-2" id="total-archives-count">{{ total_archives_configured }}</h3>
                 <small class="text-muted">{{ active_schedules }} scheduled</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Archive Storage Card -->
+    <div class="col-md-2">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="card-subtitle text-muted mb-0">Archive Storage used</h6>
+                    <i class="bi bi-archive fs-4 text-primary"></i>
+                </div>
+                <h3 class="mb-2" id="total-archives-size">{{ format_bytes(total_archives_size) }}</h3>
+                {% if on_disk_archives_size is not none %}
+                <div><small class="text-muted">On-disk: {{ format_bytes(on_disk_archives_size) }}</small></div>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -64,7 +90,7 @@
                     <h6 class="card-subtitle text-muted mb-0">Last 24h</h6>
                     <i class="bi bi-clock-history fs-4 text-info"></i>
                 </div>
-                <h3 class="mb-2">{{ jobs_last_24h }}</h3>
+                <h3 class="mb-2" id="jobs-last-24h">{{ jobs_last_24h }}</h3>
                 <small class="text-muted">successful backups</small>
             </div>
         </div>
@@ -79,13 +105,30 @@
                     <i class="bi bi-calendar-check fs-4 text-success"></i>
                 </div>
                 {% if next_scheduled %}
-                    <h6 class="mb-2">{{ next_scheduled.strftime('%H:%M') }}</h6>
-                    <small class="text-muted">{{ next_scheduled.strftime('%Y-%m-%d') }}</small>
-                    <br><small class="text-info" data-next-run="{{ next_scheduled.isoformat() }}"><span class="time-until"></span></small>
+                    <h6 class="mb-2">{{ next_scheduled.time|datetime('%H:%M') }}</h6>
+                    <small class="text-muted">{{ next_scheduled.time|datetime('%Y-%m-%d') }}</small>
+                    <br><small class="text-info" data-next-run="{{ next_scheduled.time|iso_z }}"><span class="time-until">{% if next_scheduled.overdue %}overdue{% endif %}</span></small>
                 {% else %}
                     <h6 class="mb-2 text-muted">None</h6>
                     <small class="text-muted">No schedules active</small>
                 {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Disk Info Card -->
+    <div class="col-md-2">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="card-subtitle text-muted mb-0">Disk Info</h6>
+                    <i class="bi bi-hdd-fill fs-4 text-{{ disk_status }}"></i>
+                </div>
+                <h6 class="mb-1">{{ format_bytes(disk.used) }} / {{ format_bytes(disk.total) }}</h6>
+                <div class="progress mb-2" style="height: 10px;">
+                    <div class="progress-bar bg-{{ disk_status }}" role="progressbar" style="width: {{ disk.percent }}%" aria-valuenow="{{ disk.percent }}" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+                <small class="text-muted">{{ "%.1f"|format(disk.percent) }}% used</small>
             </div>
         </div>
     </div>
@@ -99,85 +142,16 @@
                 <h5 class="mb-0">
                     <i class="bi bi-archive me-2"></i>Archives
                 </h5>
-                <a href="{{ url_for('archives.list_archives') }}" class="btn btn-primary btn-sm">
-                    <i class="bi bi-plus-lg me-1"></i>Manage Archives
-                </a>
+                <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createArchiveModal">
+                    <i class="bi bi-plus-lg me-1"></i>Create Archive
+                </button>
             </div>
             <div class="card-body">
                 {% if archives %}
-                    <div class="row g-3">
+                    <div class="row g-2">
                         {% for archive in archives %}
-                        <div class="col-md-6 col-lg-4">
-                            <div class="card archive-card h-100">
-                                <div class="card-body">
-                                    <div class="d-flex justify-content-between align-items-start mb-2">
-                                        <h6 class="card-title mb-0">{{ archive.name }}</h6>
-                                        <span class="badge bg-{{ 'success' if archive.schedule_enabled else 'secondary' }}">
-                                            {{ 'Scheduled' if archive.schedule_enabled else 'Manual' }}
-                                        </span>
-                                    </div>
-                                    
-                                    <div class="mb-2">
-                                        <small class="text-muted d-block">
-                                            <i class="bi bi-stack me-1"></i>{{ archive.stacks|length }} stack(s)
-                                        </small>
-                                        <small class="text-muted d-block">
-                                            <i class="bi bi-hdd me-1"></i>{{ format_bytes(archive.total_size) }}
-                                        </small>
-                                    </div>
-
-                                    {% if archive.last_run %}
-                                    <div class="mb-2">
-                                        <small class="text-muted">Last run:</small><br>
-                                        <small>
-                                            <span class="badge bg-{{ 'success' if archive.last_status == 'success' else 'danger' }}">
-                                                {{ archive.last_status }}
-                                            </span>
-                                            {{ archive.last_run.strftime('%Y-%m-%d %H:%M') }}
-                                        </small>
-                                    </div>
-                                    {% endif %}
-
-                                    {% if archive.next_run %}
-                                    <div class="mb-2">
-                                        <small class="text-muted">Next run:</small><br>
-                                        <small data-next-run="{{ archive.next_run.isoformat() }}">
-                                            {{ archive.next_run.strftime('%Y-%m-%d %H:%M') }}
-                                            <span class="text-info">(<span class="time-until"></span>)</span>
-                                        </small>
-                                    </div>
-                                    {% endif %}
-
-                                    <div class="mt-3 d-flex flex-column gap-2">
-                                        <div class="d-flex gap-2">
-                                            <form method="POST" action="{{ url_for('archives.run', archive_id=archive.id) }}" class="flex-fill">
-                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                                <button type="submit" class="btn btn-success btn-sm w-100">
-                                                    <i class="bi bi-play-fill me-1"></i>Run Now
-                                                </button>
-                                            </form>
-                                            <button type="button" class="btn btn-outline-secondary btn-sm" 
-                                                    data-bs-toggle="modal" 
-                                                    data-bs-target="#dryRunModal{{ archive.id }}"
-                                                    title="Dry Run">
-                                                <i class="bi bi-eye me-1"></i>Preview
-                                            </button>
-                                        </div>
-                                        <div class="d-flex gap-2">
-                                            <form method="POST" action="{{ url_for('archives.run_retention_only', archive_id=archive.id) }}" class="flex-fill">
-                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                                                <button type="submit" class="btn btn-outline-warning btn-sm w-100" 
-                                                        onclick="return confirm('Run retention cleanup for {{ archive.name }}? This will delete old archives according to retention rules.')">
-                                                    <i class="bi bi-trash me-1"></i>Run Retention
-                                                </button>
-                                            </form>
-                                            <a href="{{ url_for('archives.list_archives') }}#edit-{{ archive.id }}" class="btn btn-outline-primary btn-sm" title="Edit Archive" onclick="localStorage.setItem('openEditModal', '{{ archive.id }}')">
-                                                <i class="bi bi-pencil"></i>
-                                            </a>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                        <div class="col-12 col-md-6 col-lg-4" id="archive-card-{{ archive.id }}">
+                            {% include '_archive_card.html' %}
                         </div>
 
                         <!-- Dry Run Modal -->
@@ -189,6 +163,7 @@
                                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                                     </div>
                                     <form method="POST" action="{{ url_for('archives.dry_run', archive_id=archive.id) }}">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                         <div class="modal-body">
                                             <p class="text-muted">Select which operations to simulate:</p>
                                             <div class="form-check">
@@ -218,12 +193,264 @@
                     <div class="text-center py-5">
                         <i class="bi bi-inbox fs-1 text-muted d-block mb-3"></i>
                         <p class="text-muted mb-3">No archives configured yet</p>
-                        <a href="{{ url_for('archives.list_archives') }}" class="btn btn-primary">
+                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createArchiveModal">
                             <i class="bi bi-plus-lg me-1"></i>Create First Archive
-                        </a>
+                        </button>
                     </div>
                 {% endif %}
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Insert Create/Edit Archive Modals (copied from archives UI) -->
+
+<div id="archives-data" data-archives='{{ archives | tojson | safe }}' style="display:none"></div>
+
+<!-- Create Archive Modal -->
+<div class="modal fade" id="createArchiveModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Create Archive</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('archives.create') }}" id="createArchiveForm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Archive Name</label>
+                        <input type="text" class="form-control" id="name" name="name" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Select Stacks <small class="text-muted">(required)</small></label>
+                        <div class="border rounded p-3" style="max-height: 200px; overflow-y: auto;">
+                            {% for stack in stacks %}
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="stacks" value="{{ stack.name }}" id="stack_{{ loop.index }}">
+                                <label class="form-check-label" for="stack_{{ loop.index }}">
+                                    {{ stack.name }} <small class="text-muted">({{ stack.mount_source }})</small>
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="stop_containers" id="stopContainers" checked>
+                            <label class="form-check-label" for="stopContainers">
+                                Stop containers during archive
+                            </label>
+                        </div>
+                        <small class="text-muted">Recommended for consistent backups</small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="outputFormat" class="form-label">Output Format</label>
+                        <select class="form-select" id="outputFormat" name="output_format">
+                            <option value="tar">tar (uncompressed)</option>
+                            <option value="tar.gz">tar.gz (gzip)</option>
+                            <option value="tar.zst" selected>tar.zst (zstandard - fast)</option>
+                            <option value="folder">folder (for borg backup)</option>
+                        </select>
+                    </div>
+                    
+                    <hr>
+                    
+                    <h6>Schedule (Optional)</h6>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="schedule_enabled" id="scheduleEnabled">
+                            <label class="form-check-label" for="scheduleEnabled">
+                                Enable scheduled execution
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="scheduleCron" class="form-label">Cron Expression</label>
+                        <input type="text" class="form-control" id="scheduleCron" name="schedule_cron" placeholder="0 3 * * *">
+                        <small class="text-muted d-block mb-2">Format: minute hour day month day_of_week</small>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-secondary" onclick="setCron('0 3 * * *')">Daily 3AM</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setCron('0 0 * * 0')">Weekly Sunday</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setCron('0 0 1 * *')">Monthly 1st</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setCron('*/15 * * * *')">Every 15min</button>
+                        </div>
+                    </div>
+                    
+                    <hr>
+                    
+                    <h6>Retention (GFS)</h6>
+                    <div class="row">
+                        <div class="col-md-3">
+                            <label for="keepDays" class="form-label">Keep Days</label>
+                            <input type="number" class="form-control" id="keepDays" name="keep_days" value="7" min="0">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="keepWeeks" class="form-label">Keep Weeks</label>
+                            <input type="number" class="form-control" id="keepWeeks" name="keep_weeks" value="4" min="0">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="keepMonths" class="form-label">Keep Months</label>
+                            <input type="number" class="form-control" id="keepMonths" name="keep_months" value="6" min="0">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="keepYears" class="form-label">Keep Years</label>
+                            <input type="number" class="form-control" id="keepYears" name="keep_years" value="2" min="0">
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="one_per_day" id="onePerDay">
+                            <label class="form-check-label" for="onePerDay">
+                                Keep only one archive per day
+                            </label>
+                        </div>
+                        <small class="text-muted">Useful if you run multiple test backups per day</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Archive</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Confirm Delete Modal -->
+<div class="modal fade" id="confirmDeleteModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirm Delete</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="confirmDeleteMessage">Are you sure?</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" id="confirmDeleteBtn" class="btn btn-danger" onclick="performDelete()">Delete</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Archive Modal -->
+<div class="modal fade" id="editArchiveModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit Archive</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="editArchiveForm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="editName" class="form-label">Archive Name</label>
+                        <input type="text" class="form-control" id="editName" name="name" readonly>
+                        <small class="text-muted">Archive name cannot be changed after creation</small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Select Stacks <small class="text-muted">(required)</small></label>
+                        <div class="border rounded p-3" style="max-height: 200px; overflow-y: auto;" id="editStacksList">
+                            {% for stack in stacks %}
+                            <div class="form-check">
+                                <input class="form-check-input edit-stack-check" type="checkbox" name="stacks" value="{{ stack.name }}" id="edit_stack_{{ loop.index }}">
+                                <label class="form-check-label" for="edit_stack_{{ loop.index }}">
+                                    {{ stack.name }} <small class="text-muted">({{ stack.mount_source }})</small>
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="stop_containers" id="editStopContainers">
+                            <label class="form-check-label" for="editStopContainers">
+                                Stop containers during archive
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="editOutputFormat" class="form-label">Output Format</label>
+                        <select class="form-select" id="editOutputFormat" name="output_format">
+                            <option value="tar">tar (uncompressed)</option>
+                            <option value="tar.gz">tar.gz (gzip)</option>
+                            <option value="tar.zst">tar.zst (zstandard - fast)</option>
+                            <option value="folder">folder (for borg backup)</option>
+                        </select>
+                    </div>
+                    
+                    <hr>
+                    
+                    <h6>Schedule (Optional)</h6>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="schedule_enabled" id="editScheduleEnabled">
+                            <label class="form-check-label" for="editScheduleEnabled">
+                                Enable scheduled execution
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="editScheduleCron" class="form-label">Cron Expression</label>
+                        <input type="text" class="form-control" id="editScheduleCron" name="schedule_cron" placeholder="0 3 * * *">
+                        <small class="text-muted d-block mb-2">Format: minute hour day month day_of_week</small>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-secondary" onclick="setEditCron('0 3 * * *')">Daily 3AM</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setEditCron('0 0 * * 0')">Weekly Sunday</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setEditCron('0 0 1 * *')">Monthly 1st</button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setEditCron('*/15 * * * *')">Every 15min</button>
+                        </div>
+                    </div>
+                    
+                    <hr>
+                    
+                    <h6>Retention (GFS)</h6>
+                    <div class="row">
+                        <div class="col-md-3">
+                            <label for="editKeepDays" class="form-label">Keep Days</label>
+                            <input type="number" class="form-control" id="editKeepDays" name="keep_days" min="0">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="editKeepWeeks" class="form-label">Keep Weeks</label>
+                            <input type="number" class="form-control" id="editKeepWeeks" name="keep_weeks" min="0">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="editKeepMonths" class="form-label">Keep Months</label>
+                            <input type="number" class="form-control" id="editKeepMonths" name="keep_months" min="0">
+                        </div>
+                        <div class="col-md-3">
+                            <label for="editKeepYears" class="form-label">Keep Years</label>
+                            <input type="number" class="form-control" id="editKeepYears" name="keep_years" min="0">
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="one_per_day" id="editOnePerDay">
+                            <label class="form-check-label" for="editOnePerDay">
+                                Keep only one archive per day
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
@@ -235,46 +462,103 @@
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">
                     <i class="bi bi-clock-history me-2"></i>Recent Jobs
+                    <span class="badge bg-secondary ms-2" id="recent-jobs-count">{{ recent_jobs|length }}</span>
                 </h5>
                 <a href="{{ url_for('history.list_history') }}" class="btn btn-outline-secondary btn-sm">
                     View All
                 </a>
             </div>
+            <div id="recent-jobs-debug" data-recent-jobs='{{ recent_jobs | tojson | safe }}' style="display:none"></div>
             <div class="card-body">
                 {% if recent_jobs %}
                     <div class="table-responsive">
                         <table class="table table-hover table-sm">
                             <thead>
                                 <tr>
-                                    <th style="width: 150px;">Archive</th>
-                                    <th style="width: 80px;">Type</th>
-                                    <th style="width: 110px;">Started</th>
-                                    <th style="width: 80px;">Duration</th>
-                                    <th style="width: 80px;">Size</th>
-                                    <th style="width: 80px;">Status</th>
+                                    <th style="width:50px;">ID</th>
+                                    <th style="width:90px;">Status</th>
+                                    <th style="width:110px;">Type</th>
+                                    <th>Archive</th>
+                                    <th>Stacks</th>
+                                    <th style="width:120px;">Start</th>
+                                    <th style="width:120px;">End</th>
+                                    <th style="width:90px;">Duration</th>
+                                    <th style="width:90px; text-align: right;">Size</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for job in recent_jobs %}
-                                <tr>
-                                    <td>{{ job.archive_name or 'N/A' }}</td>
+                                <tr id="job-row-{{ job.id }}" data-job-id="{{ job.id }}" data-job-status="{{ job.status }}" style="cursor: pointer;" class="{% if job.is_dry_run %}table-secondary{% endif %}" onclick="(function(e){ (e||window.event||{}).stopPropagation && (e||window.event).stopPropagation(); try { if (typeof showJobDetails === 'function') showJobDetails({{ job.id }}); } catch(err){ console.error(err); } })(event)">
+                                    <td class="align-middle" style="white-space: nowrap;">
+                                        <div class="d-inline-flex align-items-center">
+                                            <strong class="me-2">#{{ job.id }}</strong>
+                                            
+                                        </div>
+                                    </td>
                                     <td>
-                                        <span class="badge bg-{{ 'info' if job.job_type == 'archive' else 'secondary' }}">
-                                            {{ job.job_type }}
+                                        <span class="badge {% if job.status == 'success' %}bg-success{% elif job.status == 'running' %}bg-info{% elif job.status == 'failed' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                            {{ job.status }}
                                         </span>
                                     </td>
-                                    <td>
-                                        <small>{{ job.start_time.strftime('%Y-%m-%d %H:%M') if job.start_time else 'N/A' }}</small>
+                                    <td style="white-space: nowrap;">
+                                        {% if job.job_type == 'archive' %}
+                                            {% set fmt = job.archive_output_format or 'tar' %}
+                                            {% if fmt == 'folder' %}
+                                                <i class="bi bi-folder me-1 text-primary"></i> <span title="folder (for borg backup)">folder</span>
+                                            {% elif fmt == 'tar' %}
+                                                <i class="bi bi-archive me-1 text-secondary"></i> <span title="tar (no compression)">tar</span>
+                                            {% elif fmt == 'tar.gz' %}
+                                                <i class="bi bi-archive me-1 text-info"></i> <span title="tar.gz (gzip)">tgz</span>
+                                            {% elif fmt == 'tar.zst' %}
+                                                <i class="bi bi-archive me-1 text-success"></i> <span title="tar.zst (zstd)">zst</span>
+                                            {% else %}
+                                                <i class="bi bi-file-earmark me-1 text-muted"></i> <span title="{{ fmt }}">{{ fmt if fmt|length <= 8 else fmt[:8] + '…' }}</span>
+                                            {% endif %}
+                                        {% elif job.job_type == 'retention' %}
+                                        <i class="bi bi-trash text-warning"></i> <span title="Retention">ret</span>
+                                        {% elif job.job_type == 'cleanup' %}
+                                        <i class="bi bi-recycle text-info"></i> <span title="Cleanup">clean</span>
+                                        {% else %}
+                                        <i class="bi bi-question-circle text-muted"></i> {{ job.job_type|title }}
+                                        {% endif %}
+                                        {% if job.is_dry_run %}
+                                        <span class="badge bg-secondary ms-1">DRY</span>
+                                        {% endif %}
                                     </td>
+                                    <td>{{ job.archive_name or 'N/A' }}</td>
                                     <td>
-                                        <small>{{ format_duration(job.duration_seconds) if job.duration_seconds else 'N/A' }}</small>
+                                        {% if job.stack_names %}
+                                            {% set stacks = (job.stack_names.split(',') if job.stack_names else []) | sort %}
+                                            {% for stack in stacks[:3] %}
+                                                <span class="badge" data-color="{{ stack|stack_color }}">{{ stack }}</span>
+                                            {% endfor %}
+                                            {% if stacks|length > 3 %}
+                                                <span class="badge bg-secondary">+{{ stacks|length - 3 }}</span>
+                                            {% endif %}
+                                        {% elif job.archive_stacks %}
+                                            {% set stacks2 = job.archive_stacks | sort %}
+                                            {% for stack in stacks2[:3] %}
+                                                <span class="badge" data-color="{{ stack|stack_color }}">{{ stack }}</span>
+                                            {% endfor %}
+                                            {% if stacks2|length > 3 %}
+                                                <span class="badge bg-secondary">+{{ stacks2|length - 3 }}</span>
+                                            {% endif %}
+                                        {% else %}
+                                            <span class="text-muted small">N/A</span>
+                                        {% endif %}
                                     </td>
-                                    <td>
-                                        <small>{{ format_bytes(job.total_size_bytes) if job.total_size_bytes else 'N/A' }}</small>
-                                    </td>
-                                    <td>
-                                        <span class="badge bg-{{ 'success' if job.status == 'success' else ('danger' if job.status == 'failed' else 'warning') }}">
-                                            {{ job.status }}
+                                    <td><small style="white-space: nowrap;" id="row-job-start-{{ job.id }}" data-start="{{ job.start_time|iso_z or '' }}">{{ job.start_time|datetime('%Y-%m-%d %H:%M') }}</small></td>
+                                    <td><small style="white-space: nowrap;" id="row-job-end-{{ job.id }}" data-end="{{ job.end_time|iso_z or '' }}">{{ job.end_time|datetime('%Y-%m-%d %H:%M') }}</small></td>
+                                    <td><small><span id="row-job-duration-{{ job.id }}">{% if job.status != 'running' %}{{ format_duration(job.duration_seconds) }}{% else %}&mdash;{% endif %}</span></small></td>
+                                    <td style="text-align: right;">
+                                        <span id="row-job-size-{{ job.id }}">
+                                        {% if job.job_type == 'archive' and job.total_size_bytes %}
+                                        <span class="text-success">+{{ format_bytes(job.total_size_bytes) }}</span>
+                                        {% elif (job.job_type == 'retention' or job.job_type == 'cleanup') and (job.reclaimed_bytes or job.reclaimed_size_bytes) %}
+                                        <span class="text-warning">-{{ format_bytes(job.reclaimed_size_bytes or job.reclaimed_bytes) }}</span>
+                                        {% else %}
+                                        <span class="text-muted">N/A</span>
+                                        {% endif %}
                                         </span>
                                     </td>
                                 </tr>
@@ -297,6 +581,8 @@
 
 {% block extra_js %}
 <script>
+// showJobDetails and formatBytes functions are now in base.html
+
 function formatTimeUntil(timestamp) {
     const now = new Date();
     const target = new Date(timestamp);
@@ -327,5 +613,426 @@ function updateTimeUntil() {
 // Update on page load and every minute
 updateTimeUntil();
 setInterval(updateTimeUntil, 60000);
+
+// --- Dashboard polling for running jobs ---
+let _dashboardPoller = null;
+let _jobsPollInFlight = false;
+
+function updateJobRowFromJob(job) {
+    const row = document.getElementById(`job-row-${job.id}`);
+    if (!row) return;
+    row.setAttribute('data-job-status', job.status);
+
+
+    // Update status badge
+    const badge = row.querySelector('td:nth-child(2) .badge');
+    if (badge) {
+        const cls = job.status === 'success' ? 'bg-success' : (job.status === 'running' ? 'bg-info' : 'bg-danger');
+        badge.className = `badge ${cls}`;
+        badge.textContent = job.status;
+    }
+
+    // Update timing and size
+    const startEl = document.getElementById(`row-job-start-${job.id}`);
+    const endEl = document.getElementById(`row-job-end-${job.id}`);
+    const durEl = document.getElementById(`row-job-duration-${job.id}`);
+    const sizeEl = document.getElementById(`row-job-size-${job.id}`);
+
+    if (startEl) { startEl.textContent = formatJobTime(job.start_time); startEl.dataset.start = job.start_time || ''; }
+    if (endEl) { endEl.textContent = formatJobTime(job.end_time); endEl.dataset.end = job.end_time || ''; }
+    if (durEl) {
+        if (job.status === 'running') {
+            const secs = computeDurationSecondsFromStart(job.start_time);
+            durEl.textContent = secs !== null ? formatDuration(secs) : formatDuration(0);
+            // Ensure duration ticker is running to update live
+            try { startDashboardDurationTicker(); } catch (e) {}
+        } else {
+            durEl.textContent = formatDuration(job.duration_seconds);
+            // If no other running rows remain, stop the ticker now
+            try {
+                if (!document.querySelector('tr[data-job-status="running"]')) {
+                    stopDashboardDurationTicker();
+                }
+            } catch (e) {}
+        }
+    }
+
+    if (sizeEl) {
+        if (job.job_type === 'archive' && job.total_size_bytes) {
+            sizeEl.innerHTML = `<span class="text-success">+${formatBytes(job.total_size_bytes)}</span>`;
+        } else if ((job.job_type === 'retention' || job.job_type === 'cleanup') && (job.reclaimed_bytes || job.reclaimed_size_bytes)) {
+            sizeEl.innerHTML = `<span class="text-warning">-${formatBytes(job.reclaimed_size_bytes || job.reclaimed_bytes)}</span>`;
+        } else {
+            sizeEl.innerHTML = `<span class="text-muted">N/A</span>`;
+        }
+    }
+}
+
+async function pollJobs() {
+    if (_jobsPollInFlight) return;
+
+    try {
+        _jobsPollInFlight = true;
+        const resp = await fetch('/api/jobs?type=archive&limit=20');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data.jobs) return;
+
+        data.jobs.forEach(job => updateJobRowFromJob(job));
+        _jobsPollInFlight = false;
+
+        // If modal open for a job and its status changed, refresh it
+        if (window._currentJobId) {
+            const jobId = window._currentJobId;
+            const jobRow = document.getElementById(`job-row-${jobId}`);
+            if (jobRow && jobRow.getAttribute('data-job-status') !== 'running') {
+                // Refresh modal contents in-place without re-opening or moving focus
+                if (typeof refreshCurrentJobModal === 'function') {
+                    try { refreshCurrentJobModal(); } catch (e) { console.error('Failed to refresh job modal:', e); }
+                } else {
+                    // Fallback: re-fetch job data and update status badge only
+                    fetch(`/api/jobs/${jobId}`, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null).then(data => {
+                        if (!data || !data.job) return;
+                        try {
+                            const statusBadge = document.getElementById('job-status-badge');
+                            if (statusBadge) {
+                                const cls = data.job.status === 'success' ? 'bg-success' : (data.job.status === 'running' ? 'bg-info' : 'bg-danger');
+                                statusBadge.className = `badge ${cls}`;
+                                statusBadge.textContent = data.job.status;
+                            }
+                        } catch (e) {}
+                    }).catch(()=>{});
+                }
+            }
+        }
+
+        // Auto-open of Job Details disabled by user preference
+        // (Users can still click a job row to open details manually.)
+    } catch (err) {
+        console.error('Failed to poll jobs:', err);
+    } finally {
+        // Ensure flag reset even on error
+        _jobsPollInFlight = false;
+    }
+}
+
+// Start continuous polling for job status updates
+if (!_dashboardPoller) {
+    _dashboardPoller = setInterval(pollJobs, 5000);
+}
+
+// Start Jobs SSE on dashboard load to receive new job events
+// Global Jobs SSE support removed — dashboard will use polling for updates.
+try { console.debug('Dashboard polling active (global Jobs SSE removed)'); } catch (e) {}
+
+// Attach handlers to any existing job rows rendered on the page (ensures modal opens on click)
+document.querySelectorAll('tr[data-job-id]').forEach(function(tr) {
+    try {
+        const id = tr.getAttribute('data-job-id');
+        if (id) attachJobRowHandlers(tr, id);
+    } catch (e) {
+    }
+});
+
+// Initialize durations immediately for existing running jobs and start ticker
+try {
+    updateRunningDurations();
+    if (document.querySelector('tr[data-job-status="running"]')) {
+        startDashboardDurationTicker();
+    }
+    // Ensure any rows that are running but lacked an initial duration are populated
+    document.querySelectorAll('tr[data-job-status="running"]').forEach(function(r){
+        try {
+            const id = r.getAttribute('data-job-id');
+            const startEl = document.getElementById(`row-job-start-${id}`);
+            const durEl = document.getElementById(`row-job-duration-${id}`);
+            if (startEl && durEl && (!durEl.textContent || durEl.textContent.trim() === '—')) {
+                const secs = computeDurationSecondsFromStart(startEl.dataset.start || startEl.textContent);
+                durEl.textContent = secs !== null ? formatDuration(secs) : formatDuration(0);
+            }
+        } catch (e) {}
+    });
+} catch (e) {}
+
+
+// Periodically check for newly started running jobs and start polling if needed
+setInterval(() => {
+    // If there are running rows on the page, ensure duration ticker is active
+    if (document.querySelector('tr[data-job-status="running"]')) {
+        try { startDashboardDurationTicker(); } catch (e) {}
+    }
+}, 10000);
+
+// --- Archive modal helpers (copied from archives page) ---
+const archivesDataEl = document.getElementById('archives-data');
+const archivesData = (archivesDataEl && archivesDataEl.dataset && archivesDataEl.dataset.archives) ? JSON.parse(archivesDataEl.dataset.archives) : [];
+
+function editArchive(archiveId) {
+    // Find archive data
+    const archive = archivesData.find(a => a.id === archiveId);
+    if (!archive) return;
+    
+    // Set form action
+    const editForm = document.getElementById('editArchiveForm');
+    if (editForm) editForm.action = `/api/archives/${archiveId}/edit`;
+    
+    // Fill form fields (defensive checks)
+    const editName = document.getElementById('editName'); if (editName) editName.value = archive.name;
+    const editStop = document.getElementById('editStopContainers'); if (editStop) editStop.checked = !!archive.stop_containers;
+    const editOutput = document.getElementById('editOutputFormat'); if (editOutput) editOutput.value = archive.output_format;
+    const editScheduleEnabled = document.getElementById('editScheduleEnabled'); if (editScheduleEnabled) editScheduleEnabled.checked = !!archive.schedule_enabled;
+    const editScheduleCron = document.getElementById('editScheduleCron'); if (editScheduleCron) editScheduleCron.value = archive.schedule_cron || '';
+    const editKeepDays = document.getElementById('editKeepDays'); if (editKeepDays) editKeepDays.value = archive.retention_keep_days;
+    const editKeepWeeks = document.getElementById('editKeepWeeks'); if (editKeepWeeks) editKeepWeeks.value = archive.retention_keep_weeks;
+    const editKeepMonths = document.getElementById('editKeepMonths'); if (editKeepMonths) editKeepMonths.value = archive.retention_keep_months;
+    const editKeepYears = document.getElementById('editKeepYears'); if (editKeepYears) editKeepYears.value = archive.retention_keep_years;
+    const editOnePerDay = document.getElementById('editOnePerDay'); if (editOnePerDay) editOnePerDay.checked = !!archive.retention_one_per_day;
+    
+    // Check selected stacks (existing checkboxes only)
+    document.querySelectorAll('.edit-stack-check').forEach(checkbox => {
+        checkbox.checked = archive.stacks && archive.stacks.includes(checkbox.value);
+    });
+    
+    // Show modal
+    const modalEl = document.getElementById('editArchiveModal');
+    if (modalEl && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+        new bootstrap.Modal(modalEl).show();
+    } else if (modalEl) {
+        modalEl.classList.add('show');
+    }
+}
+
+function setCron(cron) {
+    document.getElementById('scheduleCron').value = cron;
+}
+
+function setEditCron(cron) {
+    document.getElementById('editScheduleCron').value = cron;
+}
+
+// Open confirm modal for deletion (removed browser confirm)
+function openDeleteModal(archiveId, archiveName){
+    window._pendingDelete = {id: archiveId, name: archiveName};
+    const msg = document.getElementById('confirmDeleteMessage');
+    if (msg) msg.textContent = `Delete archive "${archiveName}"? This will also delete all associated job history.`;
+    const modalEl = document.getElementById('confirmDeleteModal');
+    if (modalEl && typeof bootstrap !== 'undefined' && bootstrap.Modal){
+        new bootstrap.Modal(modalEl).show();
+    }
+}
+
+async function performDelete(){
+    if (!window._pendingDelete) return;
+    const {id} = window._pendingDelete;
+    const url = `/api/archives/${id}/delete`;
+    try {
+        const resp = await fetch(url, {method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}});
+        if (!resp.ok) {
+            let err = 'Failed to delete archive';
+            try { const data = await resp.json(); if (data && data.message) err = data.message; } catch(e){}
+            showAlert(err, 'danger');
+            return;
+        }
+        const data = await resp.json();
+        if (data && data.status === 'success'){
+            const wrapper = document.getElementById(`archive-card-${data.archive_id}`);
+            if (wrapper){
+                wrapper.classList.add('fade-out');
+                setTimeout(()=>{ wrapper.remove(); }, 300);
+            }
+            // Update archives-data
+            try{
+                const adEl = document.getElementById('archives-data');
+                if (adEl){
+                    const arr = JSON.parse(adEl.dataset.archives || '[]');
+                    const idx = arr.findIndex(a => a.id === data.archive_id);
+                    if (idx >= 0) arr.splice(idx,1);
+                    adEl.dataset.archives = JSON.stringify(arr);
+                    if (typeof archivesData !== 'undefined'){
+                        const idx2 = archivesData.findIndex(a => a.id === data.archive_id);
+                        if (idx2 >= 0) archivesData.splice(idx2,1);
+                    }
+                }
+            }catch(e){}
+
+            try { const modalEl = document.getElementById('confirmDeleteModal'); const m = bootstrap.Modal.getInstance(modalEl); if (m) m.hide(); } catch(e){}
+            showAlert('Archive deleted', 'success');
+            window._pendingDelete = null;
+        } else {
+            let err = (data && data.message) ? data.message : 'Failed to delete archive';
+            showAlert(err, 'danger');
+        }
+    } catch (err){
+        console.error('Delete failed', err);
+        showAlert('Delete failed', 'danger');
+    }
+}
+
+// Compute a deterministic color for a stack name (fallback)
+function computeStackColor(name){
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+    return `hsl(${h}, 65%, 45%)`;
+}
+
+// Apply stack badge colors from data-color attribute, or compute a fallback
+function applyStackBadgeColors(root=document){
+    // badges with explicit data-color
+    root.querySelectorAll('.badge[data-color]').forEach(el => {
+        const c = el.dataset.color || computeStackColor(el.textContent.trim());
+        try { el.style.backgroundColor = c; el.style.color = '#fff'; } catch(e) {}
+    });
+    // badges without data-color (fallback for server-rendering misses)
+    root.querySelectorAll('.stack-badges .badge:not([data-color])').forEach(el => {
+        const c = computeStackColor(el.textContent.trim());
+        try { el.dataset.color = c; el.style.backgroundColor = c; el.style.color = '#fff'; } catch(e) {}
+    });
+}
+
+// Run initially
+try { applyStackBadgeColors(); } catch (e) {}
+
+// Small helper to show inline alerts for AJAX operations
+function showAlert(message, category='success'){
+    const main = document.querySelector('.app-main');
+    if(!main) return;
+    const wrapper = document.createElement('div');
+    wrapper.className = `alert alert-${category} alert-dismissible fade show`;
+    wrapper.setAttribute('role','alert');
+    wrapper.innerHTML = `${message} <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>`;
+    main.prepend(wrapper);
+    setTimeout(()=>{ try { const b = new bootstrap.Alert(wrapper); b.close(); } catch(e){ wrapper.remove(); } }, 5000);
+}
+
+async function submitFormAjax(form){
+    const fd = new FormData(form);
+    const resp = await fetch(form.action, {method: 'POST', body: fd, headers: {'X-Requested-With': 'XMLHttpRequest'}});
+    let data = null;
+    try { data = await resp.json(); } catch(e) { showAlert('Server did not return JSON', 'danger'); return {ok:false, data:null}; }
+    return {ok: resp.ok, data};
+}
+
+// Handle Create Archive via AJAX
+const createForm = document.getElementById('createArchiveForm');
+if (createForm) {
+    createForm.addEventListener('submit', async function(e){
+        e.preventDefault();
+        const res = await submitFormAjax(this);
+        if (!res) return;
+        if (res.ok && res.data && res.data.status === 'success'){
+            // Insert rendered card
+            const row = document.querySelector('.card .row.g-3');
+            if (row){
+                row.insertAdjacentHTML('afterbegin', res.data.html);
+            } else {
+                // fallback full reload
+                location.reload();
+                return;
+            }
+            // Update client-side archivesData
+            try {
+                const adEl = document.getElementById('archives-data');
+                if (adEl){
+                    const arr = JSON.parse(adEl.dataset.archives || '[]');
+                    arr.unshift(res.data.archive);
+                    adEl.dataset.archives = JSON.stringify(arr);
+                    // update local variable if present
+                    if (typeof archivesData !== 'undefined') archivesData.unshift(res.data.archive);
+                }
+            } catch(e){}
+
+            applyStackBadgeColors();
+            try { updateTimeUntil(); } catch(e){}
+            const modalEl = document.getElementById('createArchiveModal');
+            try { const m = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl); m.hide(); } catch(e){}
+            showAlert('Archive created', 'success');
+        } else {
+            const msg = (res.data && res.data.message) ? res.data.message : 'Failed to create archive';
+            showAlert(msg, 'danger');
+        }
+    });
+}
+
+// Handle Edit Archive via AJAX
+const editForm = document.getElementById('editArchiveForm');
+if (editForm) {
+    editForm.addEventListener('submit', async function(e){
+        e.preventDefault();
+        const res = await submitFormAjax(this);
+        if (!res) return;
+        if (res.ok && res.data && res.data.status === 'success'){
+            const id = res.data.archive_id;
+            const card = document.getElementById(`archive-card-${id}`);
+            // Hide modal first to avoid focus/scroll issues
+            const modalEl = document.getElementById('editArchiveModal');
+            try { const m = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl); m.hide(); } catch(e){}
+
+            if (card){
+                card.outerHTML = res.data.html;
+                // Re-apply colors and timers only to the replaced wrapper
+                try {
+                    const newWrapper = document.getElementById(`archive-card-${id}`);
+                    if (newWrapper) {
+                        applyStackBadgeColors(newWrapper);
+                        try { updateTimeUntil(); } catch(e){}
+                    } else {
+                        // fallback global reapply
+                        applyStackBadgeColors();
+                        try { updateTimeUntil(); } catch(e){}
+                    }
+                } catch(e) { applyStackBadgeColors(); try { updateTimeUntil(); } catch(e){} }
+            } else {
+                location.reload();
+                return;
+            }
+
+            // Update archivesData
+            try {
+                const adEl = document.getElementById('archives-data');
+                if (adEl){
+                    const arr = JSON.parse(adEl.dataset.archives || '[]');
+                    const idx = arr.findIndex(a => a.id === res.data.archive.id);
+                    if (idx >= 0) arr[idx] = res.data.archive; else arr.unshift(res.data.archive);
+                    adEl.dataset.archives = JSON.stringify(arr);
+                    if (typeof archivesData !== 'undefined') {
+                        const idx2 = archivesData.findIndex(a => a.id === res.data.archive.id);
+                        if (idx2 >= 0) archivesData[idx2] = res.data.archive; else archivesData.unshift(res.data.archive);
+                    }
+                }
+            } catch(e){}
+
+            showAlert('Archive updated', 'success');
+        } else {
+            const msg = (res.data && res.data.message) ? res.data.message : 'Failed to update archive';
+            showAlert(msg, 'danger');
+        }
+    });
+}
+
+// Ensure create/edit modals are reset when hidden (so subsequent opens start fresh)
+(function(){
+    const createModalEl = document.getElementById('createArchiveModal');
+    if (createModalEl) {
+        createModalEl.addEventListener('hidden.bs.modal', function(){
+            try {
+                const form = document.getElementById('createArchiveForm');
+                if (form) form.reset();
+                // Ensure stacks checkboxes are cleared (reset may not affect dynamic adds)
+                createModalEl.querySelectorAll('input[type="checkbox"][name="stacks"]').forEach(cb => cb.checked = false);
+            } catch(e){}
+        });
+        createModalEl.addEventListener('show.bs.modal', function(){
+            try { const form = document.getElementById('createArchiveForm'); if (form) form.reset(); } catch(e){}
+        });
+    }
+
+    const editModalEl = document.getElementById('editArchiveModal');
+    if (editModalEl) {
+        editModalEl.addEventListener('hidden.bs.modal', function(){
+            try { const form = document.getElementById('editArchiveForm'); if (form) form.reset(); } catch(e){}
+        });
+    }
+})();
+
 </script>
 {% endblock %}

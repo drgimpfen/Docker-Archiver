@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="app/static/images/Logo.png" alt="Docker Archiver Logo" width="400">
+  <img src="https://github.com/drgimpfen/docker-archiver/blob/main/app/static/images/Logo.png?raw=true" alt="Docker Archiver Logo" width="400">
   
   # Docker Archiver
   
@@ -18,11 +18,12 @@
 - 🔄 **GFS Retention** - Grandfather-Father-Son retention policy (keep X days/weeks/months/years)
 - 🧹 **Automatic Cleanup** - Scheduled cleanup of orphaned archives, old logs, and temp files
 - 🎯 **Dry Run Mode** - Test archive operations without making changes
-- 📊 **Job History** - Detailed logs and metrics for all archive/retention runs
-- 🔔 **Smart Notifications** - Apprise integration with customizable subject tags and HTML/text format
+- 📊 **Job History & Live Logs** - Detailed logs and metrics for all archive/retention runs. The **Job Details** modal includes live log tailing and supports per‑job EventSource streaming for near‑real‑time log updates. The modal offers terminal-like controls (search, **Pause/Resume**, **Copy**, **Download**, **Line numbers**) for easier log inspection.
+- 🔔 **Smart Notifications** - Email via SMTP (configured in **Settings → Notifications**; settings are stored in the database)
 - 🌓 **Dark/Light Mode** - Modern Bootstrap UI with theme toggle
 - 🔐 **User Authentication** - Secure login system (role-based access coming soon)
 - 💾 **Multiple Formats** - Support for tar, tar.gz, tar.zst, or folder output
+- 🛡️ **Output Permissions (configurable)** — The application can apply secure permissions to generated archives. 
 - 🌍 **Timezone Support** - Configurable timezone via environment variable
 
 ## Screenshots
@@ -119,38 +120,56 @@ Each archive run follows a 4-phase process:
 3. **Phase 2: Retention** - Apply GFS retention rules and cleanup old archives
 4. **Phase 3: Finalization** - Calculate totals, send notifications, log disk usage
 
-### Stack Discovery
-
-The application scans `/local/*` directories (max 1 level deep) for Docker Compose files:
-- `compose.yml` / `compose.yaml`
-- `docker-compose.yml` / `docker-compose.yaml`
-
-Stacks without compose files are skipped and logged.
+See **How Stack Discovery Works** below for full details on how stack directories are detected and scanned.
 
 ## Quick Start
 
-### 1. Clone and Configure
+### Minimal compose example (quick start)
 
-```bash
-git clone https://github.com/drgimpfen/Docker-Archiver.git
-cd Docker-Archiver
-cp .env.example .env
+Here is a minimal `docker-compose.yml` example that starts the core services. It uses the published image `drgimpfen/docker-archiver:latest` and only the minimum required environment variables and mounts.
+
+```yaml
+version: "3.8"
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: docker-archiver-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: docker_archiver
+      POSTGRES_USER: archiver
+      POSTGRES_PASSWORD: examplepassword
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: docker-archiver-redis
+    restart: unless-stopped
+    volumes:
+      - ./redis-data:/data
+
+  app:
+    image: drgimpfen/docker-archiver:latest
+    container_name: docker-archiver-app
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      TZ: Europe/Berlin
+      DB_PASSWORD: examplepassword
+      SECRET_KEY: change-me
+      DATABASE_URL: postgresql://archiver:examplepassword@db:5432/docker_archiver
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./archives:/archives
+      - ./logs:/var/log/archiver
+      - ./downloads:/tmp/downloads
+      - /opt/stacks:/opt/stacks
 ```
 
-Edit `.env` and set:
-- `DB_PASSWORD` - PostgreSQL password (required)
-- `SECRET_KEY` - Flask session secret (required)
-- `SMTP_*` - Email/SMTP configuration (optional)
-
-### 2. Start Services
-
-```bash
-docker compose up -d
-```
-
-The application will be available at **http://localhost:8080**
-
-> **Note:** Stack directories must be configured in `docker-compose.yml` as volume mounts (see below).
+Note: Replace `examplepassword` and `change-me` with secure values (especially `SECRET_KEY`) in production environments.
 
 ### 3. Initial Setup
 
@@ -158,44 +177,60 @@ On first visit, you'll be prompted to create an admin account.
 
 ### 4. Configure Archives
 
-1. Go to **Archives** → **Create Archive**
+1. Go to the **Dashboard** and use the Archive management card (Create / Edit / Delete) to configure archives.
 2. Select stacks to backup
 3. Configure schedule (cron expression)
 4. Set retention policy (GFS: days/weeks/months/years)
 5. Choose output format
 6. Save and run manually or wait for schedule
 
-## Volume Mounts
+## Stack directory mounts
 
-**Important:** Stack directories are configured in `docker-compose.yml`, not via environment variables.
+Keep it simple: mount the folders that contain your Docker stacks into the Archiver container using bind mounts, and use the **same path** on the host and inside the container (for example: `- /opt/stacks:/opt/stacks`). The Archiver scans these mounted folders and backs up any stacks it finds.
 
-### Required Configuration
+Quick checklist:
+- What to mount: the Docker socket (`/var/run/docker.sock`), a folder for your stacks (e.g., `/opt/stacks`), a host directory to store archives (e.g., `./archives`), and mount `./logs` and `./downloads` so logs and prepared downloads persist across container restarts.
+- Use absolute host paths and make sure the host path equals the container path (this is required).
+- For local development, add mounts to `docker-compose.override.yml`.
+- If discovery fails, the Dashboard shows a warning and `TROUBLESHOOTING.md` explains how to diagnose and fix it.
 
-Edit `docker-compose.yml` and add your stack directories:
+Minimal example (volumes only):
 
 ```yaml
 services:
   app:
     volumes:
-      # Docker socket (required for container management)
       - /var/run/docker.sock:/var/run/docker.sock
-      
-      # Archive output directory (adjust path as needed)
+      - /opt/stacks:/opt/stacks
       - ./archives:/archives
-      
-      # Stack directories - ADD YOUR PATHS HERE:
-      # Each mount point under /local/ will be scanned for stacks
-      - /opt/stacks:/local/stacks           # Example: Subdirectories scanned
-      - /opt/dockge/stacks:/local/dockge    # Example: Dockge stacks
-      # - /srv/more-stacks:/local/more      # Add more as needed
+      - ./logs:/var/log/archiver
+      - ./downloads:/tmp/downloads
 ```
 
-### How Stack Discovery Works
+Notes:
+- Named Docker volumes **are not** suitable for stack directories — use bind mounts where host and container paths match.
+- If you need more diagnostic details, see `TROUBLESHOOTING.md` which includes commands and examples to inspect mounts and logs.
 
-The application scans `/local/*` directories (max 1 level deep):
-- Direct compose file: `/local/mystack/compose.yml` → Stack: `mystack`
-- Subdirectories: `/local/stacks/app1/compose.yml` → Stack: `app1`
-- Multiple mounts: Each `/local/*` mount point is scanned independently
+---
+
+<a name="bind-mounts"></a>
+### Bind mounts — required configuration
+
+For reliable discovery and correct `docker compose` execution, the host path and container path of your stack directory bind mounts **must be identical** (for example: `- /opt/stacks:/opt/stacks`).
+
+Why this matters:
+
+- Docker Archiver runs `docker compose` commands inside the container and expects to find the stack's compose files at the same path it discovered. If the host and container paths differ, the app tries to infer the host path from mounts, but this can lead to ambiguities or failures when running `docker compose` (e.g., when the host path is not accessible inside the container).
+- Using identical paths avoids edge cases and ensures that archive and docker-compose commands run from the correct working directory.
+
+**Bind-mount mismatch detection:** The archiver will now detect bind-mount mismatches (host path != container path). When mismatches are detected, the dashboard shows a prominent warning and those mounts will be ignored for discovery; if an archive job resolves to no valid stacks because of ignored mounts, the job will abort early and be marked as failed with a clear log message ("No valid stacks found"). To avoid this, **host:container bind mounts must be identical**.
+
+Examples:
+
+- Required: `- /opt/stacks:/opt/stacks` (host and container paths match)
+- Not supported: `- /home/stacks:/opt/stacks` or `- /opt/stacks:/local/stacks` (host and container paths differ)
+
+For more details and troubleshooting tips, see the dashboard warning messages or open an issue in the project repository.
 
 ## Configuration
 
@@ -205,14 +240,37 @@ The application scans `/local/*` directories (max 1 level deep):
 |----------|---------|----------|-------------|
 | `TZ` | Europe/Berlin | No | Timezone for the application (e.g., America/New_York, Asia/Tokyo) |
 | `DB_PASSWORD` | changeme123 | Yes | PostgreSQL password |
-| `SECRET_KEY` | (dev key) | Yes | Flask session secret (change in production!) |
-| `SMTP_SERVER` | - | No | SMTP server for email notifications (e.g., smtp.gmail.com) |
-| `SMTP_PORT` | 587 | No | SMTP port |
-| `SMTP_USER` | - | No | SMTP username |
-| `SMTP_PASSWORD` | - | No | SMTP password/app-password |
-| `SMTP_FROM` | - | No | Email sender address |
+| `SECRET_KEY` | (dev key) | Yes | Flask session secret (change in production — see `SECURITY.md`) |
+| `REDIS_URL` | - | No | Optional Redis URL (e.g., `redis://localhost:6379/0`) to enable cross-worker SSE event streaming |
+| `DOWNLOADS_AUTO_GENERATE_ON_ACCESS` | false | No | When `true`, visiting a missing download link can trigger automatic archive generation on demand. Default: `false` (recommended). |
+| `DOWNLOADS_AUTO_GENERATE_ON_STARTUP` | false | No | When `true`, the app attempts to generate missing downloads for valid tokens during startup (use with caution). Default: `false` (recommended). |
+| `LOG_LEVEL` | INFO | No | Global log level for application logging (DEBUG, INFO, WARNING, ERROR). Set `LOG_LEVEL=DEBUG` to enable debug-level output for troubleshooting. |
 
-> **Note:** Port (8080) and mount paths are configured in `docker-compose.yml`, not via environment variables.
+### Logging & Debugging 🔧
+
+> **Logs & Notifications troubleshooting:** Details and commands moved to `TROUBLESHOOTING.md` — consult that file for examples and tips.
+
+---
+
+### Image pull policy
+
+**Image pull policy:** The app lets you choose when images are pulled for stack restarts. You can find the option on **Settings → Security → Image pull policy** (default: **Pull on miss**). In short:
+
+- **Pull on miss (default)** — If images referenced by a stack are missing locally, the archiver will attempt `docker compose pull` for that stack and retry starting it once; pull output is recorded in the job log.
+- **Always** — Try to pull images before starting each stack. The executor runs `docker compose pull` and will record the pull output in the job log.
+- **Never** — Do not pull images automatically; missing images will cause the stack restart to be skipped and a warning recorded. The executor will append `--pull=never` to `docker compose up` to explicitly prevent pulls when restarting stacks.
+
+Pull inactivity timeout: To avoid a hung image pull blocking a whole job, the executor now uses an *inactivity timeout* (seconds) which aborts a pull if no output is produced for the configured period. You can set **Pull inactivity timeout (seconds)** in **Settings → Security** (default: **300**). Set it to **0** to disable the inactivity timeout (use with caution).
+
+Notification note: When images are pulled, notifications include the full filtered pull output inline (HTML‑escaped), so operators can see the final result directly in the message. The excerpt filters out transient progress/spinner lines and keeps final, meaningful lines (for example: “[+] Pulling …”, “✔ … Pulled”, “Already exists”, “Download complete”, digest/sha256 lines). The full raw pull output is also stored in the job log and included as an attachment when log attachments are enabled; partial output is preserved if a pull times out or fails.
+
+Notes:
+
+- Pulls can fail for network or authentication reasons; the job log will contain details to help debugging.
+- For deterministic production behavior we recommend pre-pulling images on hosts or using the **Always** option only when appropriate for your environment.
+- The archiver records skipped stacks and reasons in the job summary so operators can act on them.
+
+---
 
 ### Retention Policy
 
@@ -236,125 +294,7 @@ Examples:
 
 ## Notifications
 
-Docker Archiver uses [Apprise](https://github.com/caronc/apprise) for notifications.
-
-### Supported Services
-
-- Discord
-- Telegram
-- Email (SMTP)
-- Slack
-- Pushover
-- Gotify
-- And [100+ more](https://github.com/caronc/apprise#supported-notifications)
-
-### Setup
-
-**Option 1: Apprise URLs (Recommended)**
-1. Go to **Settings** → **Notifications**
-2. Add Apprise URLs (one per line):
-   ```
-   discord://webhook_id/webhook_token
-   telegram://bot_token/chat_id
-   ```
-   **Note:** `mailto://` URLs are not allowed. Use SMTP environment variables for email notifications.
-3. Select which events to notify:
-   - Archive Success
-   - Archive Error
-   - Retention Cleanup
-   - Cleanup Task
-4. Optional: Add subject tag prefix (e.g., `[Production]`, `[TEST]`)
-5. Optional: Toggle between HTML and Plain Text format
-6. Test your configuration with the "Send Test Notification" button
-7. Save settings
-
-**Option 2: SMTP/Email (Automatic)**
-1. Configure SMTP in `.env` file (see Environment Variables above)
-2. Add email address in **Profile** page
-3. All users with configured email addresses automatically receive notifications
-
-**Important:** Do not use both SMTP environment variables AND Apprise `mailto://` URLs for the same email address, as this will result in duplicate notifications. Use SMTP environment variables for email, and Apprise for other services (Discord, Telegram, etc.).
-
-## API Documentation
-
-### External API (for automation/integrations)
-
-All external API endpoints are located under `/api/*` and support **Bearer token authentication**.
-
-#### Authentication
-
-Generate an API token in your user profile (coming soon) or use session-based authentication from the web UI.
-
-**Header Format:**
-```
-Authorization: Bearer <your-api-token>
-```
-
-#### Endpoints
-
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| **Archives** |
-| `/api/archives` | GET | Token/Session | List all archive configurations |
-| `/api/archives/<id>/run` | POST | Token/Session | Trigger archive execution |
-| `/api/archives/<id>/dry-run` | POST | Token/Session | Run simulation (dry run) |
-| **Jobs** |
-| `/api/jobs` | GET | Token/Session | List jobs (supports filters: `?archive_id=1&type=archive&limit=50`) |
-| `/api/jobs/<id>` | GET | Token/Session | Get job details with stack metrics |
-| `/api/jobs/<id>/download` | POST | Token/Session | Request archive download (generates token) |
-| `/api/jobs/<id>/log` | GET | Token/Session | Download job log file |
-| **Stacks** |
-| `/api/stacks` | GET | Token/Session | List discovered Docker Compose stacks |
-| **Downloads** |
-| `/download/<token>` | GET | **None** | Download archive file (24h expiry) |
-
-#### Example Usage
-
-```bash
-# List all archives
-curl -H "Authorization: Bearer YOUR_TOKEN" \
-  http://your-server:8080/api/archives
-
-# Trigger archive execution
-curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
-  http://your-server:8080/api/archives/1/run
-
-# Get job details
-curl -H "Authorization: Bearer YOUR_TOKEN" \
-  http://your-server:8080/api/jobs/123
-
-# List recent jobs
-curl -H "Authorization: Bearer YOUR_TOKEN" \
-  "http://your-server:8080/api/jobs?type=archive&limit=10"
-
-# Request download
-curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"stack_name":"mystack","archive_path":"/archives/path"}' \
-  http://your-server:8080/api/jobs/123/download
-
-# Download archive (no auth needed)
-curl -O http://your-server:8080/download/abc123token
-```
-
-### Web UI Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Dashboard |
-| `/login` | GET/POST | Login page |
-| `/logout` | GET | Logout |
-| `/setup` | GET/POST | Initial user setup |
-| `/archives/` | GET | Archive management UI |
-| `/archives/create` | POST | Create archive config |
-| `/archives/<id>/edit` | POST | Edit archive config |
-| `/archives/<id>/delete` | POST | Delete archive config |
-| `/archives/<id>/run` | POST | Run archive job |
-| `/archives/<id>/dry-run` | POST | Run dry run |
-| `/history/` | GET | Job history UI |
-| `/profile/` | GET/POST | User profile (password, email) |
-| `/settings/` | GET/POST | Settings page |
-| `/health` | GET | Health check |
+Docker Archiver sends notifications via **email (SMTP)** only; configure SMTP in the web UI (**Settings → Notifications**). For secure SMTP and TLS guidance see `SECURITY.md`. The runtime API and download/token behavior are documented in `API.md` and `TROUBLESHOOTING.md`.
 
 ### Reverse Proxy Configuration (Pangolin, Authelia, etc.)
 
@@ -366,70 +306,24 @@ exclude_paths:
   - /download/*         # Archive downloads (token-based, 24h expiry)
   - /api/*              # External API endpoints (use Bearer token auth)
   - /health             # Health check endpoint
-  - /login              # Login page must be accessible
-  - /setup              # Initial setup page
 ```
 
 **Note:** The `/api/*` endpoints have their own authentication via Bearer tokens. The download endpoint (`/download/<token>`) uses time-limited tokens and doesn't require session authentication.
 
+Downloads are always prepared/stored under `/tmp/downloads` on the host container (this path is fixed). If a requested token points to an archive outside this directory, the application will attempt to regenerate a download file into `/tmp/downloads` before serving it. The application treats `/tmp/downloads` as a fixed, intentionally-ignored destination for bind-mount mismatch checks (similar to `/archives` and `/var/run/docker.sock`), so it will not appear in bind-mount mismatch warnings in the Dashboard. To persist generated downloads across container restarts, mount a host directory (for example `./downloads:/tmp/downloads`).
+
+### Reverse proxy examples
+
+For readable, centralized reverse proxy guidance and ready-to-copy examples for Traefik, Nginx / Nginx Proxy Manager, and Caddy, see `REVERSE_PROXY.md`.
+
+> See: [REVERSE_PROXY.md](./REVERSE_PROXY.md) — includes SSE/WebSocket tips and recommended auth exclusions.
+
+
+
 ## Development
 
-### Local Development
+**Development instructions moved to** `DEVELOPMENT.md` — see `DEVELOPMENT.md` for local setup, Docker development workflow, running tests, project structure, and tips for contributors.
 
-```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Set environment
-export DATABASE_URL="postgresql://user:pass@localhost:5432/docker_archiver"
-export SECRET_KEY="dev-secret"
-
-# Initialize database
-python -c "from app.db import init_db; init_db()"
-
-# Run development server
-python app/main.py
-```
-
-### Project Structure
-
-```
-Docker-Archiver/
-├── app/
-│   ├── routes/              # Flask Blueprints
-│   │   ├── archives.py      # Archive CRUD routes
-│   │   ├── history.py       # Job history routes
-│   │   ├── settings.py      # Settings routes
-│   │   └── profile.py       # User profile routes
-│   ├── main.py              # Flask app & core routes
-│   ├── db.py                # Database schema & connection
-│   ├── auth.py              # User authentication
-│   ├── executor.py          # Archive execution engine
-│   ├── retention.py         # GFS retention logic
-│   ├── stacks.py            # Stack discovery
-│   ├── scheduler.py         # APScheduler integration
-│   ├── downloads.py         # Download token system
-│   ├── notifications.py     # Apprise/SMTP notifications
-│   ├── utils.py             # Utility functions
-│   ├── templates/           # Jinja2 templates
-│   │   ├── base.html        # Base layout with navigation
-│   │   ├── index.html       # Dashboard
-│   │   ├── archives.html    # Archive management
-│   │   ├── history.html     # Job history
-│   │   ├── settings.html    # Settings page
-│   │   ├── profile.html     # User profile
-│   │   ├── login.html       # Login page
-│   │   └── setup.html       # Initial setup
-│   └── static/              # Static assets
-│       ├── icons/           # GitHub, Discord, Favicon
-│       └── images/          # Logo
-├── docker-compose.yml       # Docker setup
-├── Dockerfile               # App container
-├── requirements.txt         # Python dependencies
-├── entrypoint.sh            # Startup script
-├── wait_for_db.py           # Database wait script
-└── .env.example             # Environment template
-```
 
 ## Database Schema
 
@@ -440,30 +334,24 @@ Docker-Archiver/
 - **download_tokens** - Temporary download tokens (24h expiry)
 - **settings** - Application settings (key-value)
 
-## Roadmap
-
-- [ ] Role-based access control (Admin/User/View-only)
-- [ ] Email reports (scheduled summaries)
-- [ ] Archive encryption
-- [ ] Remote storage (S3, SFTP, etc.)
-- [ ] Archive verification/testing
-- [ ] Multi-language support
-- [ ] REST API with token authentication
-- [ ] Webhook triggers
 
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details
 
+## Security
+
+For deployment hardening, secrets handling, CI token guidance, and vulnerability reporting, see `SECURITY.md`.
+
+---
+
 ## Contributing
 
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
+For contribution guidelines, the PR checklist, and local test instructions, see `CONTRIBUTING.md`.
 
 ## Support
+
+- **Documentation (local):** [DEVELOPMENT.md](./DEVELOPMENT.md) · [API.md](./API.md) · [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) · [SECURITY.md](./SECURITY.md) · [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 - 🐛 **Issues**: https://github.com/drgimpfen/Docker-Archiver/issues
 - 📚 **Documentation**: https://github.com/drgimpfen/Docker-Archiver/wiki

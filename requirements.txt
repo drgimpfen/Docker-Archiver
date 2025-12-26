@@ -15,7 +15,7 @@ bcrypt==4.1.2
 APScheduler==3.10.4
 
 # Notifications
-apprise==1.7.1
+# Apprise removed; email delivery uses built-in SMTP configured in the app Settings (stored in the DB)
 
 # Docker client (for status checks)
 docker==7.0.0
@@ -27,3 +27,6 @@ gunicorn==21.2.0
 # Utilities
 python-dateutil==2.8.2
 croniter==2.0.1
+
+# Optional: Redis for cross-worker event streaming (install if using multi-worker deployments)
+redis==5.3.1

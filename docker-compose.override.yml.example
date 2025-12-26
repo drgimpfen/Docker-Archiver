@@ -1,8 +1,14 @@
+version: "3.8"
 services:
   app:
+    container_name: docker-archiver-app
+    restart: unless-stopped
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD:-changeme123}
+      SECRET_KEY: ${SECRET_KEY:-change-me}
     volumes:
-      # Development stack directories (adjust to your setup)
-      - /opt/stacks:/local/stacks
-      # Add more as needed:
-      # - /opt/dockge/stacks:/local/dockge
-      # - /srv/other-stacks:/local/other
+      - /opt/stacks:/opt/stacks
+      - ./archives:/archives
+      - ./logs:/var/log/archiver
+      - ./downloads:/tmp/downloads
+
